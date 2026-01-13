@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"text/template"
 
 	"github.com/ragabast/internal/models"
@@ -44,7 +45,11 @@ Do not mention the knowledge base, context, or search results in your answer.
 func buildQueryContextItems(results []models.SearchResult) []string {
 	items := make([]string, 0, len(results))
 	for _, result := range results {
-		items = append(items, fmt.Sprintf("%s: %s", result.DocumentTitle, result.Content))
+		item := fmt.Sprintf("%s: %s", result.DocumentTitle, result.Content)
+		if len(result.DocumentURLs) > 0 {
+			item += fmt.Sprintf("\nSource URLs: %s", strings.Join(result.DocumentURLs, ", "))
+		}
+		items = append(items, item)
 	}
 	return items
 }

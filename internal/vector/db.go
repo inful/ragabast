@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/philippgille/chromem-go"
@@ -87,6 +88,9 @@ func (db *VectorDB) AddChunk(ctx context.Context, chunk *models.Chunk, embedding
 		"end_line":       strconv.Itoa(chunk.EndLine),
 		"document_title": chunk.DocumentTitle,
 	}
+	if len(chunk.DocumentURLs) > 0 {
+		metadata["document_urls"] = strings.Join(chunk.DocumentURLs, "\n")
+	}
 
 	// Add optional metadata if present
 	if chunk.Fingerprint != "" {
@@ -142,6 +146,9 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 			"start_line":     strconv.Itoa(chunk.StartLine),
 			"end_line":       strconv.Itoa(chunk.EndLine),
 			"document_title": chunk.DocumentTitle,
+		}
+		if len(chunk.DocumentURLs) > 0 {
+			metadata["document_urls"] = strings.Join(chunk.DocumentURLs, "\n")
 		}
 
 		if chunk.Fingerprint != "" {
@@ -236,9 +243,21 @@ func (db *VectorDB) Search(ctx context.Context, queryEmbedding []float32, limit 
 			StartLine:     startLine,
 			EndLine:       endLine,
 			DocumentTitle: result.Metadata["document_title"],
+			DocumentURLs:  nil,
 			Similarity:    result.Similarity,
 			Fingerprint:   result.Metadata["fingerprint"],
 			UID:           result.Metadata["uid"],
+		}
+		if urls, ok := result.Metadata["document_urls"]; ok && urls != "" {
+			parts := strings.Split(urls, "\n")
+			filtered := make([]string, 0, len(parts))
+			for _, p := range parts {
+				if p == "" {
+					continue
+				}
+				filtered = append(filtered, p)
+			}
+			searchResults[i].DocumentURLs = filtered
 		}
 	}
 

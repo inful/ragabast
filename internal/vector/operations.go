@@ -74,6 +74,9 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 		if chunks[i].UID == "" {
 			chunks[i].UID = doc.UID
 		}
+		if len(chunks[i].DocumentURLs) == 0 {
+			chunks[i].DocumentURLs = doc.URLs
+		}
 	}
 
 	embeddings, err := vo.embeddings.GenerateChunkEmbeddings(ctx, chunks)

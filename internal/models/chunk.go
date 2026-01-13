@@ -49,6 +49,9 @@ type Chunk struct {
 
 	// UID is a user-defined unique identifier.
 	UID string `bson:"uid" json:"uid"`
+
+	// DocumentURLs are the source URLs associated with the parent document.
+	DocumentURLs []string `bson:"document_urls" json:"document_urls"`
 }
 
 // NewChunk creates a new chunk with default values.
@@ -108,15 +111,16 @@ type DocumentTree struct {
 
 // SearchResult represents a result from vector similarity search.
 type SearchResult struct {
-	ChunkID       string  `json:"chunk_id"`
-	DocumentID    string  `json:"document_id"`
-	Content       string  `json:"content"`
-	HeaderPath    string  `json:"header_path"`
-	Level         int     `json:"level"`
-	StartLine     int     `json:"start_line"`
-	EndLine       int     `json:"end_line"`
-	DocumentTitle string  `json:"document_title"`
-	Similarity    float32 `json:"similarity"`
-	Fingerprint   string  `json:"fingerprint,omitempty"`
-	UID           string  `json:"uid,omitempty"`
+	ChunkID       string   `json:"chunk_id"`
+	DocumentID    string   `json:"document_id"`
+	Content       string   `json:"content"`
+	HeaderPath    string   `json:"header_path"`
+	Level         int      `json:"level"`
+	StartLine     int      `json:"start_line"`
+	EndLine       int      `json:"end_line"`
+	DocumentTitle string   `json:"document_title"`
+	DocumentURLs  []string `json:"document_urls,omitempty"`
+	Similarity    float32  `json:"similarity"`
+	Fingerprint   string   `json:"fingerprint,omitempty"`
+	UID           string   `json:"uid,omitempty"`
 }

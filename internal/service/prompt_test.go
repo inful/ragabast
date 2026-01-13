@@ -9,7 +9,7 @@ import (
 
 func TestBuildQueryContext_FormatsResults(t *testing.T) {
 	results := []models.SearchResult{
-		{DocumentTitle: "Doc A", Content: "Chunk A"},
+		{DocumentTitle: "Doc A", Content: "Chunk A", DocumentURLs: []string{"https://example.com/a"}},
 		{DocumentTitle: "Doc B", Content: "Chunk B"},
 	}
 
@@ -17,6 +17,7 @@ func TestBuildQueryContext_FormatsResults(t *testing.T) {
 	require.Len(t, items, 2)
 	require.Contains(t, items[0], "Doc A")
 	require.Contains(t, items[0], "Chunk A")
+	require.Contains(t, items[0], "https://example.com/a")
 	require.Contains(t, items[1], "Doc B")
 	require.Contains(t, items[1], "Chunk B")
 }
