@@ -1,2 +1,3 @@
 # ragabast
-docbuilder markdown chunker
+
+docbuilder markdown chunker and rag/llm information retriever

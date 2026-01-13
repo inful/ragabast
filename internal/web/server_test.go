@@ -1,0 +1,127 @@
+package web
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/ragabast/internal/config"
+	"github.com/ragabast/internal/models"
+	"github.com/stretchr/testify/require"
+)
+
+type fakeService struct {
+	searchResults []models.SearchResult
+
+	queryResponse string
+	querySources  []struct {
+		ID      string
+		Content string
+		Score   float64
+	}
+
+	gotModel   string
+	gotHistory []struct {
+		Role    string
+		Content string
+	}
+}
+
+func (f *fakeService) CheckHealth(ctx context.Context) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeService) IngestDocument(ctx context.Context, content string) (*models.Document, error) {
+	return &models.Document{ID: "doc-1"}, nil
+}
+
+func (f *fakeService) Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error) {
+	return f.searchResults, nil
+}
+
+func (f *fakeService) ListDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
+	return []models.DocumentInfo{}, nil
+}
+
+func (f *fakeService) QueryWithLLM(ctx context.Context, query string, model string, history []struct {
+	Role    string
+	Content string
+}) (string, []struct {
+	ID      string
+	Content string
+	Score   float64
+}, error,
+) {
+	f.gotModel = model
+	f.gotHistory = history
+	return f.queryResponse, f.querySources, nil
+}
+
+func TestHandleSearchAPI_FiltersByMinScore(t *testing.T) {
+	cfg := config.DefaultConfig()
+	svc := &fakeService{
+		searchResults: []models.SearchResult{
+			{ChunkID: "c1", DocumentID: "d1", Content: "hi", DocumentTitle: "Doc", Similarity: 0.6},
+			{ChunkID: "c2", DocumentID: "d2", Content: "bye", DocumentTitle: "Doc2", Similarity: 0.4},
+		},
+	}
+
+	s := NewServer(cfg, svc)
+
+	body := []byte(`{"query":"q","limit":5,"min_score":0.5}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/search", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Results []map[string]any `json:"results"`
+		Count   int              `json:"count"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp.Count)
+	require.Len(t, resp.Results, 1)
+	require.Equal(t, "c1", resp.Results[0]["chunk_id"])
+}
+
+func TestHandleQueryAPI_PassesModelAndHistory(t *testing.T) {
+	cfg := config.DefaultConfig()
+	svc := &fakeService{
+		queryResponse: "answer",
+		querySources: []struct {
+			ID      string
+			Content string
+			Score   float64
+		}{
+			{ID: "c1", Content: "ctx", Score: 0.9},
+		},
+	}
+
+	s := NewServer(cfg, svc)
+
+	body := []byte(`{"query":"q","model":"m","history":[{"role":"user","content":"hi"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	require.Equal(t, "m", svc.gotModel)
+	require.Len(t, svc.gotHistory, 1)
+	require.Equal(t, "user", svc.gotHistory[0].Role)
+	require.Equal(t, "hi", svc.gotHistory[0].Content)
+
+	var resp struct {
+		Response string `json:"response"`
+		Sources  []any  `json:"sources"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, "answer", resp.Response)
+	require.Len(t, resp.Sources, 1)
+}

@@ -1,0 +1,115 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - contextcheck
+    - copyloopvar
+    # - cyclop  # Disabled - complexity rules too strict for production code
+    - dogsled
+    # - dupl  # Disabled - too many false positives in REST API handlers
+    - dupword
+    - durationcheck
+    - errcheck
+    # - errchkjson  # Disabled - false positives with intentional ignored encode errors in web handlers
+    - errname
+    - errorlint
+    - exhaustive
+    # - forbidigo  # Disabled - fmt.Printf is legitimate for CLI and server logging
+    - gochecknoinits
+    # - goconst  # Disabled - too strict about string constants
+    # - gocritic  # Disabled - too many style issues with range copies
+    # - gocyclo  # Disabled - replaced by cyclop
+    # - gosec  # Disabled - too many false positives for file operations and server config
+    - godoclint
+    - godot
+    - godox
+    - goheader
+    - goprintffuncname
+    - govet
+    - ineffassign
+    - intrange
+    - makezero
+    - mirror
+    - misspell
+    # - mnd  # Disabled - magic numbers are acceptable in many contexts
+    - modernize
+    - nestif
+    - nilerr
+    - nilnil
+    - noctx
+    - nolintlint
+    - perfsprint
+    - prealloc
+    - predeclared
+    - reassign
+    - revive
+    # - sloglint  # Disabled - too strict about logging
+    # - staticcheck  # Disabled - too many style issues
+    - tagalign
+    - thelper
+    - usetesting
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - whitespace
+    - testifylint
+  settings:
+    dupl:
+      threshold: 40
+    tagalign:
+      sort: true
+      strict: false
+      align: false
+      order:
+        - "cmd"
+        - "short"
+        - "name"
+        - "default"
+        - "env"
+        - "help"
+    gocritic:
+      disabled-checks:
+        - hugeParam
+      enabled-tags:
+        - performance
+    govet:
+      enable:
+        - shadow
+    goconst:
+      ignore-string-values:
+        - "false"
+    misspell:
+      locale: US
+      ignore-rules:
+        - madhatter
+        - CANCELLED
+    perfsprint:
+      strconcat: false
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+    unused:
+      field-writes-are-uses: false
+      post-statements-are-reads: true
+      exported-fields-are-used: false
+      local-variables-are-used: false
+      generated-is-used: false
+
+formatters:
+  enable:
+    # - gci
+    - gofumpt
+    - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
