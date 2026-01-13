@@ -130,22 +130,34 @@ func (c *QueryCmd) Run(ctx *kong.Context) error {
 	ctxApp := context.Background()
 
 	log.Printf("Querying: %s\n", c.Query)
-	response, err := svc.Query(ctxApp, c.Query, c.TopK)
+	var response string
+	var debug *service.QueryDebugInfo
+	if c.Verbose {
+		response, debug, err = svc.QueryDebug(ctxApp, c.Query, c.TopK)
+	} else {
+		response, err = svc.Query(ctxApp, c.Query, c.TopK)
+	}
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
 	}
 
 	log.Printf("\nResponse:\n%s\n", response)
 
-	if c.Verbose {
-		log.Println("\n--- Source Documents ---")
-		results, err := svc.Search(ctxApp, c.Query, c.TopK, nil)
-		if err == nil {
-			for i, result := range results {
-				log.Printf("\n[%d] %s (Similarity: %.3f)\n", i+1, result.DocumentTitle, result.Similarity)
-				log.Printf("Content: %s\n", result.Content)
-			}
+	if c.Verbose && debug != nil {
+		log.Printf("\n--- Retrieved Vector Results (top %d) ---\n", len(debug.Results))
+		log.Printf("Model: %s\n", debug.Model)
+		for i, result := range debug.Results {
+			log.Printf("\n[%d] %s\n", i+1, result.DocumentTitle)
+			log.Printf("Chunk: %s\n", result.ChunkID)
+			log.Printf("Document: %s\n", result.DocumentID)
+			log.Printf("Header: %s\n", result.HeaderPath)
+			log.Printf("Lines: %d-%d\n", result.StartLine, result.EndLine)
+			log.Printf("Similarity: %.3f\n", result.Similarity)
+			log.Printf("Content:\n%s\n", result.Content)
 		}
+
+		log.Println("\n--- Context Fed Into LLM ---")
+		log.Print(debug.Context)
 	}
 
 	return nil

@@ -121,35 +121,50 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters m
 	return s.vectorOps.Search(ctx, query, limit, filters)
 }
 
+// QueryDebugInfo describes what was retrieved and sent to the LLM.
+type QueryDebugInfo struct {
+	Model   string
+	Results []models.SearchResult
+	Context string
+	Prompt  string
+}
+
 // Query performs a search and generates a natural language response using LLM.
 func (s *Service) Query(ctx context.Context, query string, limit int) (string, error) {
+	response, _, err := s.QueryDebug(ctx, query, limit)
+	return response, err
+}
+
+// QueryDebug performs a search and generates a response, returning debug information
+// about the retrieved chunks and constructed prompt.
+func (s *Service) QueryDebug(ctx context.Context, query string, limit int) (string, *QueryDebugInfo, error) {
 	// Search for relevant chunks
 	results, err := s.vectorOps.Search(ctx, query, limit, nil)
 	if err != nil {
-		return "", fmt.Errorf("search failed: %w", err)
+		return "", nil, fmt.Errorf("search failed: %w", err)
 	}
 
 	if len(results) == 0 {
-		return "No relevant information found.", nil
+		return "No relevant information found.", nil, nil
 	}
 
-	// Build context from results
-	var contextBuilder strings.Builder
-	for i, result := range results {
-		contextBuilder.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
-	}
-	context := contextBuilder.String()
+	context := buildQueryContext(results)
+	prompt := buildQueryPrompt(query, context)
 
-	// Generate LLM response
-	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, s.config.Ollama.GenerationModel, s.config.Ollama.Timeout)
-	prompt := fmt.Sprintf("Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
+	model := s.config.Ollama.GenerationModel
+	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)
 
 	response, err := llmClient.Generate(ctx, prompt)
 	if err != nil {
-		return "", fmt.Errorf("LLM generation failed: %w", err)
+		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}
 
-	return response, nil
+	return response, &QueryDebugInfo{
+		Model:   model,
+		Results: results,
+		Context: context,
+		Prompt:  prompt,
+	}, nil
 }
 
 // ListDocuments returns all ingested documents.
