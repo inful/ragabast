@@ -274,8 +274,8 @@ func (s *Service) IngestText(ctx context.Context, text string, uid string, tags 
 
 	// Generate fingerprint
 	doc.Fingerprint = s.parser.GenerateFingerprint(text)
-	// Keep document IDs deterministic to avoid duplicate ingests.
-	doc.ID = doc.Fingerprint
+	// Use UID as the stable document ID; fingerprint remains content-based.
+	doc.ID = doc.UID
 
 	// Validate
 	if err := doc.Validate(); err != nil {

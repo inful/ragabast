@@ -31,6 +31,7 @@ func TestParseDocument_GeneratesFingerprintAndStableID(t *testing.T) {
 	expected := mdfp.CalculateFingerprint(doc.Content)
 
 	require.Equal(t, expected, doc.Fingerprint)
-	require.Equal(t, expected, doc.ID)
+	require.Equal(t, "sample", doc.ID)
+	require.Equal(t, "sample", doc.UID)
 	require.NotEqual(t, "auto-generated-if-empty", doc.Fingerprint)
 }

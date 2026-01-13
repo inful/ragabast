@@ -46,8 +46,8 @@ func (p *DocubilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	}
 
 	// Make document IDs stable (dedupe-friendly).
-	// Fingerprints are a stable content hash (via mdfp), so they are a good deterministic ID.
-	doc.ID = doc.Fingerprint
+	// Use the docubilder UID as the stable identifier; fingerprint is strictly content-based.
+	doc.ID = doc.UID
 
 	// Extract title from first H1 header
 	doc.Title = p.extractTitle(doc.Content)
