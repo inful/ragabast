@@ -84,6 +84,8 @@ type ServerConfig struct {
 // - If Address already includes a port (e.g. ":8080" or "0.0.0.0:8080"), it is returned as-is.
 // - Otherwise Address is treated as a host and combined with Port.
 // - If Port is 0, 8080 is used.
+//
+// Note: Port range validation (1-65535) is enforced by Config.Validate().
 func (s ServerConfig) ListenAddr() string {
 	addr := strings.TrimSpace(s.Address)
 	port := s.Port

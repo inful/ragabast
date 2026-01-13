@@ -15,20 +15,35 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ragabast/internal/config"
-	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/models"
 )
+
+type serviceAPI interface {
+	CheckHealth(ctx context.Context) (bool, error)
+	IngestDocument(ctx context.Context, content string) (*models.Document, error)
+	Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error)
+	ListDocuments(ctx context.Context) ([]models.DocumentInfo, error)
+	QueryWithLLM(ctx context.Context, query string, model string, history []struct {
+		Role    string
+		Content string
+	}) (string, []struct {
+		ID      string
+		Content string
+		Score   float64
+	}, error)
+}
 
 // Server represents the web server.
 type Server struct {
 	config    *config.Config
-	service   *service.Service
+	service   serviceAPI
 	router    *chi.Mux
 	server    *http.Server
 	templates *template.Template
 }
 
 // NewServer creates a new web server.
-func NewServer(cfg *config.Config, svc *service.Service) *Server {
+func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// Create chi router
 	router := chi.NewRouter()
 

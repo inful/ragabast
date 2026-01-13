@@ -134,12 +134,11 @@ func (s *Service) Query(ctx context.Context, query string, limit int) (string, e
 	}
 
 	// Build context from results
-	context := ""
-	var contextSb135 strings.Builder
+	var contextBuilder strings.Builder
 	for i, result := range results {
-		contextSb135.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
+		contextBuilder.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
 	}
-	context += contextSb135.String()
+	context := contextBuilder.String()
 
 	// Generate LLM response
 	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, s.config.Ollama.GenerationModel, s.config.Ollama.Timeout)
@@ -242,11 +241,11 @@ func (s *Service) QueryWithContext(ctx context.Context, query string, context st
 		}
 
 		// Build context from results
-		var contextSb242 strings.Builder
+		var contextBuilder strings.Builder
 		for i, result := range results {
-			contextSb242.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
+			contextBuilder.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
 		}
-		context += contextSb242.String()
+		context = contextBuilder.String()
 	}
 
 	// Generate LLM response
@@ -349,16 +348,15 @@ func (s *Service) QueryWithLLM(ctx context.Context, query string, model string, 
 	}
 
 	// Build context from results
-	context := ""
+	var contextBuilder strings.Builder
 	sources := make([]struct {
 		ID      string
 		Content string
 		Score   float64
 	}, len(results))
 
-	var contextSb351 strings.Builder
 	for i, result := range results {
-		contextSb351.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
+		contextBuilder.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
 		sources[i] = struct {
 			ID      string
 			Content string
@@ -369,16 +367,14 @@ func (s *Service) QueryWithLLM(ctx context.Context, query string, model string, 
 			Score:   float64(result.Similarity),
 		}
 	}
-	context += contextSb351.String()
+	context := contextBuilder.String()
 
 	// Build prompt with history
-	prompt := ""
-	var promptSb366 strings.Builder
+	var promptBuilder strings.Builder
 	for _, h := range history {
-		promptSb366.WriteString(fmt.Sprintf("%s: %s\n", h.Role, h.Content))
+		promptBuilder.WriteString(fmt.Sprintf("%s: %s\n", h.Role, h.Content))
 	}
-	prompt += promptSb366.String()
-	prompt += fmt.Sprintf("assistant: Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
+	prompt := promptBuilder.String() + fmt.Sprintf("assistant: Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
 
 	// Generate LLM response
 	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)

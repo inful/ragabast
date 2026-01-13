@@ -180,6 +180,20 @@ func (db *VectorDB) Search(ctx context.Context, queryEmbedding []float32, limit 
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 
+	count := db.collection.Count()
+	if count == 0 {
+		return []models.SearchResult{}, nil
+	}
+
+	// chromem-go requires NResults <= collection.Count(), so clamp.
+	maxResults := min(count, 1000)
+	if limit > maxResults {
+		limit = maxResults
+	}
+	if limit < 1 {
+		limit = 1
+	}
+
 	// Build query options
 	options := chromem.QueryOptions{
 		QueryEmbedding: queryEmbedding,

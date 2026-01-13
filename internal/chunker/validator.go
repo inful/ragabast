@@ -180,7 +180,7 @@ func NormalizeChunkContent(content string) string {
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "#") && strings.HasPrefix(trimmed, "##") {
+		if strings.HasPrefix(trimmed, "#") {
 			// Skip lines that are pure headers
 			continue
 		}
