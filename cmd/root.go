@@ -144,20 +144,8 @@ func (c *QueryCmd) Run(ctx *kong.Context) error {
 	log.Printf("\nResponse:\n%s\n", response)
 
 	if c.Verbose && debug != nil {
-		log.Printf("\n--- Retrieved Vector Results (top %d) ---\n", len(debug.Results))
-		log.Printf("Model: %s\n", debug.Model)
-		for i, result := range debug.Results {
-			log.Printf("\n[%d] %s\n", i+1, result.DocumentTitle)
-			log.Printf("Chunk: %s\n", result.ChunkID)
-			log.Printf("Document: %s\n", result.DocumentID)
-			log.Printf("Header: %s\n", result.HeaderPath)
-			log.Printf("Lines: %d-%d\n", result.StartLine, result.EndLine)
-			log.Printf("Similarity: %.3f\n", result.Similarity)
-			log.Printf("Content:\n%s\n", result.Content)
-		}
-
-		log.Println("\n--- Context Fed Into LLM ---")
-		log.Print(debug.Context)
+		log.Println("\n--- Prompt Sent To LLM ---")
+		log.Print(debug.Prompt)
 	}
 
 	return nil
