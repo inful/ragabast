@@ -54,10 +54,19 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 		return fmt.Errorf("document validation failed: %w", err)
 	}
 
-	// If this document was ingested before, remove old chunks first.
-	// With deterministic IDs, this prevents duplicate-ID insert failures and makes re-ingest idempotent.
-	if err := vo.db.DeleteDocument(ctx, doc.ID); err != nil {
-		return fmt.Errorf("failed to clear existing document %s: %w", doc.ID, err)
+	needsUpdate, exists, err := vo.db.DocumentNeedsUpdate(ctx, doc.ID, doc.Fingerprint)
+	if err != nil {
+		return fmt.Errorf("failed to check existing document %s: %w", doc.ID, err)
+	}
+	if exists && !needsUpdate {
+		return nil
+	}
+	if exists && needsUpdate {
+		// Clear old chunks before re-ingest.
+		// With deterministic IDs, this prevents duplicate-ID insert failures and makes re-ingest idempotent.
+		if deleteErr := vo.db.DeleteDocument(ctx, doc.ID); deleteErr != nil {
+			return fmt.Errorf("failed to clear existing document %s: %w", doc.ID, deleteErr)
+		}
 	}
 
 	// Generate embeddings for all chunks

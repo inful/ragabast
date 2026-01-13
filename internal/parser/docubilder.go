@@ -40,11 +40,6 @@ func (p *DocubilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	// Set content
 	doc.Content = strings.TrimSpace(string(content))
 
-	// Generate fingerprint if not provided
-	if doc.Fingerprint == "" {
-		doc.Fingerprint = p.generateFingerprint(doc.Content)
-	}
-
 	// Make document IDs stable (dedupe-friendly).
 	// Use the docubilder UID as the stable identifier; fingerprint is strictly content-based.
 	doc.ID = doc.UID

@@ -450,6 +450,62 @@ func (db *VectorDB) Count() (int, error) {
 	return db.collection.Count(), nil
 }
 
+// DocumentFingerprint returns the stored fingerprint for a document if it exists.
+func (db *VectorDB) DocumentFingerprint(ctx context.Context, documentID string) (string, bool, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	if strings.TrimSpace(documentID) == "" {
+		return "", false, models.ErrInvalidInput
+	}
+
+	count := db.collection.Count()
+	if count == 0 {
+		return "", false, nil
+	}
+
+	dummyEmbedding := make([]float32, db.embeddingDimension)
+	options := chromem.QueryOptions{
+		QueryEmbedding: dummyEmbedding,
+		NResults:       min(count, 1),
+		Where:          map[string]string{"document_id": documentID},
+	}
+
+	results, err := db.collection.QueryWithOptions(ctx, options)
+	if err != nil {
+		return "", false, fmt.Errorf("failed to query document fingerprint: %w", err)
+	}
+	if len(results) == 0 {
+		return "", false, nil
+	}
+
+	fp := strings.TrimSpace(results[0].Metadata["fingerprint"])
+	if fp == "" {
+		return "", true, nil
+	}
+	return fp, true, nil
+}
+
+// DocumentNeedsUpdate returns whether an ingest should replace existing data.
+//
+// Rules:
+// - If the document does not exist, it needs an insert (true, exists=false).
+// - If it exists and fingerprint matches, no-op (false, exists=true).
+// - If it exists and fingerprint differs, replace (true, exists=true).
+func (db *VectorDB) DocumentNeedsUpdate(ctx context.Context, documentID string, fingerprint string) (bool, bool, error) {
+	stored, exists, err := db.DocumentFingerprint(ctx, documentID)
+	if err != nil {
+		return false, false, err
+	}
+	if !exists {
+		return true, false, nil
+	}
+	if strings.TrimSpace(stored) == strings.TrimSpace(fingerprint) {
+		return false, true, nil
+	}
+	return true, true, nil
+}
+
 // GetUniqueDocuments returns a list of unique documents with their metadata.
 func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
 	db.mu.RLock()
