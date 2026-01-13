@@ -2,13 +2,12 @@ package parser
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/inful/mdfp"
 	"github.com/ragabast/internal/models"
 	"gopkg.in/yaml.v3"
 )
@@ -47,7 +46,7 @@ func (p *DocubilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	}
 
 	// Make document IDs stable (dedupe-friendly).
-	// Fingerprints are already SHA256 hex, so they are a good deterministic ID.
+	// Fingerprints are a stable content hash (via mdfp), so they are a good deterministic ID.
 	doc.ID = doc.Fingerprint
 
 	// Extract title from first H1 header
@@ -152,10 +151,9 @@ func (p *DocubilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 	return nil
 }
 
-// generateFingerprint creates a SHA256 hash of the content.
+// generateFingerprint creates a stable content fingerprint.
 func (p *DocubilderParser) generateFingerprint(content string) string {
-	hash := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(hash[:])
+	return mdfp.CalculateFingerprint(content)
 }
 
 // extractTitle finds the first H1 header in the markdown content.
