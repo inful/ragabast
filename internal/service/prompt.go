@@ -24,7 +24,7 @@ Style:
 - Prefer short paragraphs or bullets when listing steps or items.
 
 Links:
-- If the context includes a line starting with "SOURCE_URLS:", you MUST include a "Links" section at the end of your answer.
+- If the context entry includes a line starting with "SOURCE_URLS:", you MUST include a "Links" section at the end of your answer.
 - In that case, include every URL from all "SOURCE_URLS:" lines verbatim (deduplicate if repeated).
 - Only include URLs that appear in the provided material. Do not invent or guess URLs.
 - If there are no URLs anywhere in the provided material, omit the "Links" section.

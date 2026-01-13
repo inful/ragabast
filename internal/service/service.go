@@ -182,6 +182,8 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}
 
+	response = appendLinksSection(response, extractURLs(results))
+
 	return response, &QueryDebugInfo{
 		Model:   model,
 		Results: results,
