@@ -24,9 +24,10 @@ Style:
 - Prefer short paragraphs or bullets when listing steps or items.
 
 Links:
-- If the provided material contains relevant URLs, include them verbatim at the end under a "Links" section.
+- If the context includes a line starting with "Source URLs:", you MUST include a "Links" section at the end of your answer.
+- In that case, include every URL from all "Source URLs:" lines verbatim (deduplicate if repeated).
 - Only include URLs that appear in the provided material. Do not invent or guess URLs.
-- If there are no relevant URLs, omit the "Links" section.
+- If there are no URLs anywhere in the provided material, omit the "Links" section.
 
 {{- if . -}}
 Use only the information inside the following <context> block to answer. If the context does not contain enough relevant information, say "I don't know".
