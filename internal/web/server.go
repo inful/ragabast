@@ -1,0 +1,679 @@
+package web
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"html/template"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/ragabast/internal/config"
+	"github.com/ragabast/internal/service"
+)
+
+// Server represents the web server.
+type Server struct {
+	config    *config.Config
+	service   *service.Service
+	router    *chi.Mux
+	server    *http.Server
+	templates *template.Template
+}
+
+// NewServer creates a new web server.
+func NewServer(cfg *config.Config, svc *service.Service) *Server {
+	// Create chi router
+	router := chi.NewRouter()
+
+	// Add middleware
+	router.Use(middleware.Logger)
+	router.Use(middleware.Recoverer)
+	router.Use(middleware.RealIP)
+	router.Use(middleware.Timeout(60 * time.Second))
+
+	if cfg.Server.EnableCORS {
+		router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+				w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
+	}
+
+	// Load templates
+	pattern := "templates/*.html"
+	if cfg.Paths.TemplatesDir != "" {
+		pattern = filepath.Join(cfg.Paths.TemplatesDir, "*.html")
+	}
+	templates, err := template.ParseGlob(pattern)
+	if err != nil {
+		// If templates don't exist, create a basic set
+		templates = template.New("base")
+	}
+
+	s := &Server{
+		config:    cfg,
+		service:   svc,
+		router:    router,
+		templates: templates,
+	}
+
+	// Register routes
+	s.registerRoutes()
+
+	return s
+}
+
+// registerRoutes registers all API routes and web handlers.
+func (s *Server) registerRoutes() {
+	// Health check endpoint
+	s.router.Get("/api/health", s.handleHealth)
+
+	// Ingest endpoint
+	s.router.Post("/api/ingest", s.handleIngest)
+
+	// Search endpoint
+	s.router.Post("/api/search", s.handleSearch)
+
+	// Query endpoint (LLM-powered)
+	s.router.Post("/api/query", s.handleQuery)
+
+	// List documents endpoint
+	s.router.Get("/api/documents", s.handleListDocuments)
+
+	// Web UI routes
+	s.router.Get("/", s.handleHome)
+	s.router.Get("/search", s.handleSearchPage)
+	s.router.Post("/search", s.handleSearchSubmit)
+	s.router.Get("/ingest", s.handleIngestPage)
+	s.router.Post("/ingest", s.handleIngestSubmit)
+	s.router.Get("/documents", s.handleDocumentsPage)
+
+	// Static assets
+	s.router.Get("/static/*", s.handleStatic)
+}
+
+// Start starts the web server.
+func (s *Server) Start() error {
+	addr := s.config.Server.ListenAddr()
+
+	s.server = &http.Server{
+		Addr:    addr,
+		Handler: s.router,
+	}
+
+	// Start server in goroutine
+	go func() {
+		_, _ = fmt.Printf("🚀 Web server starting on http://%s\n", addr)
+		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			_, _ = fmt.Printf("❌ Server error: %v\n", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	fmt.Println("🛑 Shutting down server...")
+
+	// Graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := s.server.Shutdown(ctx); err != nil {
+		return fmt.Errorf("server shutdown failed: %w", err)
+	}
+
+	return nil
+}
+
+// Stop gracefully stops the server.
+func (s *Server) Stop(ctx context.Context) error {
+	if s.server != nil {
+		return s.server.Shutdown(ctx)
+	}
+	return nil
+}
+
+// API Handlers.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	_, err := s.service.CheckHealth(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": fmt.Sprintf("Service unhealthy: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(map[string]string{
+		"status": "healthy",
+	})
+}
+
+func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Content string `json:"content"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	if body.Content == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": "Content is required",
+		})
+		return
+	}
+
+	doc, err := s.service.IngestDocument(r.Context(), body.Content)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to ingest: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(map[string]any{
+		"message":     "Document ingested successfully",
+		"document_id": doc.ID,
+		"chunks":      len(doc.Chunks),
+		"tags":        doc.Tags,
+	})
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Query    string  `json:"query"`
+		Limit    int     `default:"5" json:"limit"`
+		MinScore float64 `default:"0.5" json:"min_score"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	if body.Query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": "Query is required",
+		})
+		return
+	}
+
+	if body.Limit == 0 {
+		body.Limit = 5
+	}
+
+	results, err := s.service.Search(r.Context(), body.Query, body.Limit, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": fmt.Sprintf("Search failed: %v", err),
+		})
+		return
+	}
+
+	// Filter by minScore
+	filtered := []map[string]any{}
+	for _, r := range results {
+		if float64(r.Similarity) >= body.MinScore {
+			filtered = append(filtered, map[string]any{
+				"chunk_id":       r.ChunkID,
+				"document_id":    r.DocumentID,
+				"content":        r.Content,
+				"header_path":    r.HeaderPath,
+				"level":          r.Level,
+				"start_line":     r.StartLine,
+				"end_line":       r.EndLine,
+				"document_title": r.DocumentTitle,
+				"similarity":     r.Similarity,
+			})
+		}
+	}
+
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(map[string]any{
+		"results": filtered,
+		"count":   len(filtered),
+	})
+}
+
+func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Query   string `json:"query"`
+		Model   string `default:"gemma:2b" json:"model"`
+		History []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"history,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	if body.Query == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": "Query is required",
+		})
+		return
+	}
+
+	if body.Model == "" {
+		body.Model = "gemma:2b"
+	}
+
+	// Convert history format
+	history := make([]struct {
+		Role    string
+		Content string
+	}, len(body.History))
+	for i, h := range body.History {
+		history[i].Role = h.Role
+		history[i].Content = h.Content
+	}
+
+	response, sources, err := s.service.QueryWithLLM(r.Context(), body.Query, body.Model, history)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": fmt.Sprintf("Query failed: %v", err),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(map[string]any{
+		"response": response,
+		"sources":  sources,
+	})
+}
+
+func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
+	docs, err := s.service.ListDocuments(r.Context())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		enc := json.NewEncoder(w)
+		_ = enc.Encode(map[string]string{
+			"error": fmt.Sprintf("Failed to list documents: %v", err),
+		})
+		return
+	}
+
+	// Convert to simple format
+	simpleDocs := []map[string]any{}
+	for _, d := range docs {
+		simpleDocs = append(simpleDocs, map[string]any{
+			"id":          d.ID,
+			"title":       d.Title,
+			"tags":        d.Tags,
+			"categories":  d.Categories,
+			"chunk_count": d.ChunkCount,
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(map[string]any{
+		"documents": simpleDocs,
+		"count":     len(simpleDocs),
+	})
+}
+
+// Web UI Handlers.
+func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
+	s.renderTemplate(w, "home.html", map[string]any{
+		"Title": "RAGabast - Home",
+	})
+}
+
+func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
+	s.renderTemplate(w, "search.html", map[string]any{
+		"Title": "RAGabast - Search",
+	})
+}
+
+func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	query := r.FormValue("query")
+	if query == "" {
+		http.Error(w, "Query is required", http.StatusBadRequest)
+		return
+	}
+
+	// Perform search
+	results, err := s.service.Search(r.Context(), query, 5, nil)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.renderTemplate(w, "search_results.html", map[string]any{
+		"Title":   "Search Results",
+		"Query":   query,
+		"Results": results,
+	})
+}
+
+func (s *Server) handleIngestPage(w http.ResponseWriter, r *http.Request) {
+	s.renderTemplate(w, "ingest.html", map[string]any{
+		"Title": "RAGabast - Ingest",
+	})
+}
+
+func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	content := r.FormValue("content")
+	if content == "" {
+		http.Error(w, "Content is required", http.StatusBadRequest)
+		return
+	}
+
+	// Ingest document
+	doc, err := s.service.IngestDocument(r.Context(), content)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Ingest failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.renderTemplate(w, "ingest_success.html", map[string]any{
+		"Title":      "Ingest Successful",
+		"DocumentID": doc.ID,
+		"Chunks":     len(doc.Chunks),
+		"Tags":       doc.Tags,
+	})
+}
+
+func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {
+	docs, err := s.service.ListDocuments(r.Context())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to list documents: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.renderTemplate(w, "documents.html", map[string]any{
+		"Title":     "RAGabast - Documents",
+		"Documents": docs,
+	})
+}
+
+func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+	// For now, serve a basic response
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte("Static assets would be served here"))
+}
+
+// renderTemplate renders a template with the given data.
+func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data any) {
+	// If templates are not loaded, serve basic HTML
+	if s.templates == nil || len(s.templates.Templates()) == 0 {
+		s.serveBasicHTML(w, templateName, data)
+		return
+	}
+
+	tmpl := s.templates.Lookup(templateName)
+	if tmpl == nil {
+		http.NotFound(w, nil)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
+	}
+}
+
+// serveBasicHTML serves basic HTML when templates are not available.
+func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	// Simple HTML templates
+	switch templateName {
+	case "home.html":
+		s.serveHomeHTML(w, data)
+	case "search.html":
+		s.serveSearchHTML(w, data)
+	case "search_results.html":
+		s.serveSearchResultsHTML(w, data)
+	case "ingest.html":
+		s.serveIngestHTML(w, data)
+	case "ingest_success.html":
+		s.serveIngestSuccessHTML(w, data)
+	case "documents.html":
+		s.serveDocumentsHTML(w, data)
+	default:
+		http.NotFound(w, nil)
+	}
+}
+
+func (s *Server) serveHomeHTML(w http.ResponseWriter, data any) {
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+    <title>%s</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body class="container mt-4">
+    <h1 class="title">RAGabast - RAG System</h1>
+    <div class="buttons">
+        <a href="/ingest" class="button is-primary">Ingest Document</a>
+        <a href="/search" class="button is-info">Search</a>
+        <a href="/documents" class="button is-link">Documents</a>
+        <a href="/docs" class="button is-light">API Docs</a>
+    </div>
+</body>
+</html>`, data.(map[string]any)["Title"])
+}
+
+func (s *Server) serveSearchHTML(w http.ResponseWriter, data any) {
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+    <title>%s</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body class="container mt-4">
+    <h1 class="title">Search Documents</h1>
+    <form method="post" action="/search">
+        <div class="field">
+            <label class="label">Query</label>
+            <div class="control">
+                <input class="input" type="text" name="query" placeholder="Enter your search query..." required>
+            </div>
+        </div>
+        <div class="field">
+            <div class="control">
+                <button class="button is-info" type="submit">Search</button>
+                <a href="/" class="button is-light">Back</a>
+            </div>
+        </div>
+    </form>
+</body>
+</html>`, data.(map[string]any)["Title"])
+}
+
+func (s *Server) serveSearchResultsHTML(w http.ResponseWriter, data any) {
+	results := data.(map[string]any)["Results"]
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+    <title>%s</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body class="container mt-4">
+    <h1 class="title">Search Results</h1>
+    <p class="subtitle">Query: %s</p>
+    <a href="/search" class="button is-light mb-4">New Search</a>
+`, data.(map[string]any)["Title"], data.(map[string]any)["Query"])
+
+	if results != nil {
+		_, _ = fmt.Fprintf(w, `<div class="columns is-multiline">`)
+		for _, r := range results.([]any) {
+			result := r.(map[string]any)
+			_, _ = fmt.Fprintf(w, `<div class="column is-full">
+                <div class="box">
+                    <h4 class="title is-4">%s</h4>
+                    <p class="subtitle is-6">Document: %s | Similarity: %.3f</p>
+                    <div class="content"><p>%s</p></div>
+                    <p class="is-size-7">Path: %s (Level %d)</p>
+                </div>
+            </div>`,
+				result["DocumentTitle"],
+				result["DocumentID"],
+				result["Similarity"],
+				result["Content"],
+				result["HeaderPath"],
+				result["Level"])
+		}
+		_, _ = fmt.Fprintf(w, `</div>`)
+	} else {
+		_, _ = fmt.Fprintf(w, `<p>No results found.</p>`)
+	}
+
+	_, _ = fmt.Fprintf(w, `</body></html>`)
+}
+
+func (s *Server) serveIngestHTML(w http.ResponseWriter, data any) {
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+    <title>%s</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body class="container mt-4">
+    <h1 class="title">Ingest Document</h1>
+    <form method="post" action="/ingest">
+        <div class="field">
+            <label class="label">Docubilder Content</label>
+            <div class="control">
+                <textarea class="textarea" name="content" rows="15" placeholder="Paste your docubilder markdown content here..." required></textarea>
+            </div>
+            <p class="help">Include YAML frontmatter with fingerprint, uid, tags, categories, and URLs</p>
+        </div>
+        <div class="field">
+            <div class="control">
+                <button class="button is-primary" type="submit">Ingest</button>
+                <a href="/" class="button is-light">Back</a>
+            </div>
+        </div>
+    </form>
+</body>
+</html>`, data.(map[string]any)["Title"])
+}
+
+func (s *Server) serveIngestSuccessHTML(w http.ResponseWriter, data any) {
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+    <title>%s</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body class="container mt-4">
+    <div class="notification is-success">
+        <h1 class="title">Document Ingested Successfully!</h1>
+        <p><strong>Document ID:</strong> %s</p>
+        <p><strong>Chunks Created:</strong> %d</p>
+        <p><strong>Tags:</strong> %v</p>
+    </div>
+    <div class="buttons">
+        <a href="/ingest" class="button is-primary">Ingest Another</a>
+        <a href="/search" class="button is-info">Search</a>
+        <a href="/" class="button is-light">Home</a>
+    </div>
+</body>
+</html>`, data.(map[string]any)["Title"],
+		data.(map[string]any)["DocumentID"],
+		data.(map[string]any)["Chunks"],
+		data.(map[string]any)["Tags"])
+}
+
+func (s *Server) serveDocumentsHTML(w http.ResponseWriter, data any) {
+	docs := data.(map[string]any)["Documents"]
+	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+    <title>%s</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+</head>
+<body class="container mt-4">
+    <h1 class="title">Ingested Documents</h1>
+    <a href="/" class="button is-light mb-4">Back</a>
+`, data.(map[string]any)["Title"])
+
+	if docs != nil && len(docs.([]any)) > 0 {
+		_, _ = fmt.Fprintf(w, `<table class="table is-fullwidth is-striped">
+            <thead><tr><th>Title</th><th>ID</th><th>Tags</th><th>Category</th><th>Chunks</th></tr></thead>
+            <tbody>`)
+		for _, d := range docs.([]any) {
+			doc := d.(map[string]any)
+			_, _ = fmt.Fprintf(w, `<tr>
+                <td>%s</td>
+                <td><code>%s</code></td>
+                <td>%v</td>
+                <td>%s</td>
+                <td>%d</td>
+            </tr>`, doc["Title"], doc["ID"], doc["Tags"], doc["Category"], doc["Chunks"])
+		}
+		_, _ = fmt.Fprintf(w, `</tbody></table>`)
+	} else {
+		_, _ = fmt.Fprintf(w, `<p>No documents ingested yet.</p>`)
+	}
+
+	_, _ = fmt.Fprintf(w, `</body></html>`)
+}

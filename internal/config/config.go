@@ -1,0 +1,367 @@
+package config
+
+import (
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Config represents the application configuration.
+type Config struct {
+	// Ollama configuration.
+	Ollama OllamaConfig `yaml:"ollama"`
+
+	// Vector database configuration.
+	VectorDB VectorDBConfig `yaml:"vectordb"`
+
+	// Server configuration.
+	Server ServerConfig `yaml:"server"`
+
+	// Processing configuration.
+	Processing ProcessingConfig `yaml:"processing"`
+
+	// Paths configuration.
+	Paths PathsConfig `yaml:"paths"`
+}
+
+// OllamaConfig holds Ollama API configuration.
+type OllamaConfig struct {
+	// BaseURL is the Ollama API endpoint.
+	BaseURL string `env:"OLLAMA_BASE_URL" yaml:"base_url"`
+
+	// EmbeddingModel is the model used for embeddings.
+	EmbeddingModel string `env:"OLLAMA_EMBEDDING_MODEL" yaml:"embedding_model"`
+
+	// GenerationModel is the model used for text generation.
+	GenerationModel string `env:"OLLAMA_GENERATION_MODEL" yaml:"generation_model"`
+
+	// Timeout for API calls.
+	Timeout time.Duration `env:"OLLAMA_TIMEOUT" yaml:"timeout"`
+
+	// KeepAlive determines if connections should be kept alive.
+	KeepAlive bool `env:"OLLAMA_KEEP_ALIVE" yaml:"keep_alive"`
+}
+
+// VectorDBConfig holds vector database configuration.
+type VectorDBConfig struct {
+	// Persistence directory.
+	PersistenceDir string `env:"VECTOR_DB_DIR" yaml:"persistence_dir"`
+
+	// CollectionName is the name of the chromem-go collection.
+	CollectionName string `env:"VECTOR_DB_COLLECTION" yaml:"collection_name"`
+
+	// EmbeddingDimension is the expected dimension of embeddings.
+	EmbeddingDimension int `env:"VECTOR_DB_DIMENSION" yaml:"embedding_dimension"`
+}
+
+// ServerConfig holds web server configuration.
+type ServerConfig struct {
+	// Address to bind the server.
+	Address string `env:"SERVER_ADDRESS" yaml:"address"`
+
+	// Port to bind the server.
+	Port int `env:"SERVER_PORT" yaml:"port"`
+
+	// Enable CORS.
+	EnableCORS bool `env:"SERVER_ENABLE_CORS" yaml:"enable_cors"`
+
+	// ReadTimeout for HTTP requests.
+	ReadTimeout time.Duration `env:"SERVER_READ_TIMEOUT" yaml:"read_timeout"`
+
+	// WriteTimeout for HTTP responses.
+	WriteTimeout time.Duration `env:"SERVER_WRITE_TIMEOUT" yaml:"write_timeout"`
+}
+
+// ListenAddr returns an address suitable for net/http Server.Addr.
+//
+// Rules:
+// - If Address already includes a port (e.g. ":8080" or "0.0.0.0:8080"), it is returned as-is.
+// - Otherwise Address is treated as a host and combined with Port.
+// - If Port is 0, 8080 is used.
+func (s ServerConfig) ListenAddr() string {
+	addr := strings.TrimSpace(s.Address)
+	port := s.Port
+	if port == 0 {
+		port = 8080
+	}
+
+	if addr == "" {
+		addr = "0.0.0.0"
+	}
+
+	// If addr already includes a port, keep it.
+	if _, _, err := net.SplitHostPort(addr); err == nil {
+		return addr
+	}
+
+	return net.JoinHostPort(addr, strconv.Itoa(port))
+}
+
+// ProcessingConfig holds document processing configuration.
+type ProcessingConfig struct {
+	// MaxChunkSize is the maximum size of a chunk in characters.
+	MaxChunkSize int `env:"PROCESSING_MAX_CHUNK_SIZE" yaml:"max_chunk_size"`
+
+	// MinChunkSize is the minimum size of a chunk in characters.
+	MinChunkSize int `env:"PROCESSING_MIN_CHUNK_SIZE" yaml:"min_chunk_size"`
+
+	// ChunkOverlap is the number of characters to overlap between chunks.
+	ChunkOverlap int `env:"PROCESSING_CHUNK_OVERLAP" yaml:"chunk_overlap"`
+
+	// MaxConcurrentProcessing is the maximum number of concurrent document processing operations.
+	MaxConcurrentProcessing int `env:"PROCESSING_MAX_CONCURRENT" yaml:"max_concurrent_processing"`
+}
+
+// PathsConfig holds file path configuration.
+type PathsConfig struct {
+	// DataDir is the base directory for all data.
+	DataDir string `env:"DATA_DIR" yaml:"data_dir"`
+
+	// DocumentsDir is where ingested documents are stored.
+	DocumentsDir string `env:"DOCUMENTS_DIR" yaml:"documents_dir"`
+
+	// TempDir for temporary files.
+	TempDir string `env:"TEMP_DIR" yaml:"temp_dir"`
+
+	// TemplatesDir for web templates.
+	TemplatesDir string `env:"TEMPLATES_DIR" yaml:"templates_dir"`
+}
+
+// DefaultConfig returns a configuration with sensible defaults.
+func DefaultConfig() *Config {
+	// Get current working directory.
+	wd, _ := os.Getwd()
+	if wd == "" {
+		wd = "."
+	}
+
+	return &Config{
+		Ollama: OllamaConfig{
+			BaseURL:         "http://localhost:11434",
+			EmbeddingModel:  "nomic-embed-text:v1.5",
+			GenerationModel: "gemma:2b",
+			Timeout:         30 * time.Second,
+			KeepAlive:       true,
+		},
+		VectorDB: VectorDBConfig{
+			PersistenceDir:     filepath.Join(wd, "data", "vectors"),
+			CollectionName:     "ragabast",
+			EmbeddingDimension: 768, // nomic-embed-text-v1.5 dimension
+		},
+		Server: ServerConfig{
+			Address:      "0.0.0.0",
+			Port:         8080,
+			EnableCORS:   true,
+			ReadTimeout:  15 * time.Second,
+			WriteTimeout: 15 * time.Second,
+		},
+		Processing: ProcessingConfig{
+			MaxChunkSize:            1000,
+			MinChunkSize:            100,
+			ChunkOverlap:            100,
+			MaxConcurrentProcessing: 5,
+		},
+		Paths: PathsConfig{
+			DataDir:      filepath.Join(wd, "data"),
+			DocumentsDir: filepath.Join(wd, "data", "documents"),
+			TempDir:      filepath.Join(wd, "data", "temp"),
+			TemplatesDir: filepath.Join(wd, "templates"),
+		},
+	}
+}
+
+// LoadConfig loads configuration from a YAML file.
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	cfg := DefaultConfig()
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Apply environment variable overrides.
+	cfg.ApplyEnvOverrides()
+
+	return cfg, nil
+}
+
+// SaveConfig saves the configuration to a YAML file.
+func (c *Config) SaveConfig(path string) error {
+	// Ensure directory exists.
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
+}
+
+// ApplyEnvOverrides applies environment variable overrides to config fields.
+func (c *Config) ApplyEnvOverrides() {
+	// Ollama config.
+	if url := os.Getenv("OLLAMA_BASE_URL"); url != "" {
+		c.Ollama.BaseURL = url
+	}
+	if model := os.Getenv("OLLAMA_EMBEDDING_MODEL"); model != "" {
+		c.Ollama.EmbeddingModel = model
+	}
+	if model := os.Getenv("OLLAMA_GENERATION_MODEL"); model != "" {
+		c.Ollama.GenerationModel = model
+	}
+	if timeout := os.Getenv("OLLAMA_TIMEOUT"); timeout != "" {
+		if d, err := time.ParseDuration(timeout); err == nil {
+			c.Ollama.Timeout = d
+		}
+	}
+
+	// VectorDB config.
+	if dir := os.Getenv("VECTOR_DB_DIR"); dir != "" {
+		c.VectorDB.PersistenceDir = dir
+	}
+	if coll := os.Getenv("VECTOR_DB_COLLECTION"); coll != "" {
+		c.VectorDB.CollectionName = coll
+	}
+
+	// Server config.
+	if addr := os.Getenv("SERVER_ADDRESS"); addr != "" {
+		c.Server.Address = addr
+	}
+	if port := os.Getenv("SERVER_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			c.Server.Port = p
+		}
+	}
+
+	// Paths config.
+	if dir := os.Getenv("DATA_DIR"); dir != "" {
+		c.Paths.DataDir = dir
+	}
+	if dir := os.Getenv("DOCUMENTS_DIR"); dir != "" {
+		c.Paths.DocumentsDir = dir
+	}
+	if dir := os.Getenv("TEMPLATES_DIR"); dir != "" {
+		c.Paths.TemplatesDir = dir
+	}
+}
+
+// Validate checks if the configuration is valid.
+func (c *Config) Validate() error {
+	var errs []string
+
+	// Validate Ollama config.
+	if c.Ollama.BaseURL == "" {
+		errs = append(errs, "ollama.base_url is required")
+	}
+	if c.Ollama.EmbeddingModel == "" {
+		errs = append(errs, "ollama.embedding_model is required")
+	}
+	if c.Ollama.GenerationModel == "" {
+		errs = append(errs, "ollama.generation_model is required")
+	}
+	if c.Ollama.Timeout <= 0 {
+		errs = append(errs, "ollama.timeout must be positive")
+	}
+
+	// Validate VectorDB config.
+	if c.VectorDB.PersistenceDir == "" {
+		errs = append(errs, "vectordb.persistence_dir is required")
+	}
+	if c.VectorDB.CollectionName == "" {
+		errs = append(errs, "vectordb.collection_name is required")
+	}
+	if c.VectorDB.EmbeddingDimension <= 0 {
+		errs = append(errs, "vectordb.embedding_dimension must be positive")
+	}
+
+	// Validate Server config.
+	if c.Server.Address == "" {
+		errs = append(errs, "server.address is required")
+	}
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
+		errs = append(errs, "server.port must be between 1 and 65535")
+	}
+
+	// Validate Processing config.
+	if c.Processing.MaxChunkSize <= 0 {
+		errs = append(errs, "processing.max_chunk_size must be positive")
+	}
+	if c.Processing.MinChunkSize <= 0 {
+		errs = append(errs, "processing.min_chunk_size must be positive")
+	}
+	if c.Processing.MinChunkSize > c.Processing.MaxChunkSize {
+		errs = append(errs, "processing.min_chunk_size cannot be greater than max_chunk_size")
+	}
+
+	// Validate Paths config.
+	if c.Paths.DataDir == "" {
+		errs = append(errs, "paths.data_dir is required")
+	}
+	if c.Paths.DocumentsDir == "" {
+		errs = append(errs, "paths.documents_dir is required")
+	}
+	if c.Paths.TemplatesDir == "" {
+		errs = append(errs, "paths.templates_dir is required")
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("configuration validation failed:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+
+	return nil
+}
+
+// EnsureDirectories creates all necessary directories for the configuration.
+func (c *Config) EnsureDirectories() error {
+	dirs := []string{
+		c.Paths.DataDir,
+		c.Paths.DocumentsDir,
+		c.Paths.TempDir,
+		c.VectorDB.PersistenceDir,
+	}
+
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	return nil
+}
+
+// GetServerAddress returns the full server address.
+func (c *Config) GetServerAddress() string {
+	return c.Server.ListenAddr()
+}
+
+// GetOllamaEmbeddingURL returns the full URL for embedding requests.
+func (c *Config) GetOllamaEmbeddingURL() string {
+	return fmt.Sprintf("%s/api/embeddings", strings.TrimRight(c.Ollama.BaseURL, "/"))
+}
+
+// GetOllamaGenerateURL returns the full URL for generation requests.
+func (c *Config) GetOllamaGenerateURL() string {
+	return fmt.Sprintf("%s/api/generate", strings.TrimRight(c.Ollama.BaseURL, "/"))
+}
+
+// GetOllamaTagsURL returns the full URL for model listing.
+func (c *Config) GetOllamaTagsURL() string {
+	return fmt.Sprintf("%s/api/tags", strings.TrimRight(c.Ollama.BaseURL, "/"))
+}
