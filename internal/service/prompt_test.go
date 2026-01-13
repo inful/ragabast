@@ -25,6 +25,8 @@ func TestBuildQueryPrompt_IncludesQueryAndContext(t *testing.T) {
 	prompt, system, err := buildQueryPrompt("what is this?", []string{"Doc A: Chunk A"})
 	require.NoError(t, err)
 	require.Contains(t, system, "You are a helpful assistant")
+	require.Contains(t, system, "Links:")
+	require.Contains(t, system, "Only include URLs")
 	require.Contains(t, system, "<context>")
 	require.Contains(t, system, "- Doc A: Chunk A")
 	require.Contains(t, prompt, "Question: what is this?")
