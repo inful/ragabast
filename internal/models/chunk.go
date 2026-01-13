@@ -52,6 +52,18 @@ type Chunk struct {
 
 	// DocumentURLs are the source URLs associated with the parent document.
 	DocumentURLs []string `bson:"document_urls" json:"document_urls"`
+
+	// DocumentTags are user-defined labels for the parent document.
+	DocumentTags []string `bson:"document_tags" json:"document_tags"`
+
+	// DocumentCategories are hierarchical classifications for the parent document.
+	DocumentCategories []string `bson:"document_categories" json:"document_categories"`
+
+	// DocumentCreatedAt is the parent document creation time.
+	DocumentCreatedAt time.Time `bson:"document_created_at" json:"document_created_at"`
+
+	// DocumentUpdatedAt is the parent document update time.
+	DocumentUpdatedAt time.Time `bson:"document_updated_at" json:"document_updated_at"`
 }
 
 // NewChunk creates a new chunk with default values.

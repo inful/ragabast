@@ -77,6 +77,18 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 		if len(chunks[i].DocumentURLs) == 0 {
 			chunks[i].DocumentURLs = doc.URLs
 		}
+		if len(chunks[i].DocumentTags) == 0 {
+			chunks[i].DocumentTags = doc.Tags
+		}
+		if len(chunks[i].DocumentCategories) == 0 {
+			chunks[i].DocumentCategories = doc.Categories
+		}
+		if chunks[i].DocumentCreatedAt.IsZero() {
+			chunks[i].DocumentCreatedAt = doc.CreatedAt
+		}
+		if chunks[i].DocumentUpdatedAt.IsZero() {
+			chunks[i].DocumentUpdatedAt = doc.UpdatedAt
+		}
 	}
 
 	embeddings, err := vo.embeddings.GenerateChunkEmbeddings(ctx, chunks)

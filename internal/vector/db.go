@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/philippgille/chromem-go"
 	"github.com/ragabast/internal/models"
@@ -91,6 +92,18 @@ func (db *VectorDB) AddChunk(ctx context.Context, chunk *models.Chunk, embedding
 	if len(chunk.DocumentURLs) > 0 {
 		metadata["document_urls"] = strings.Join(chunk.DocumentURLs, "\n")
 	}
+	if len(chunk.DocumentTags) > 0 {
+		metadata["document_tags"] = strings.Join(chunk.DocumentTags, "\n")
+	}
+	if len(chunk.DocumentCategories) > 0 {
+		metadata["document_categories"] = strings.Join(chunk.DocumentCategories, "\n")
+	}
+	if !chunk.DocumentCreatedAt.IsZero() {
+		metadata["document_created_at"] = chunk.DocumentCreatedAt.UTC().Format(time.RFC3339)
+	}
+	if !chunk.DocumentUpdatedAt.IsZero() {
+		metadata["document_updated_at"] = chunk.DocumentUpdatedAt.UTC().Format(time.RFC3339)
+	}
 
 	// Add optional metadata if present
 	if chunk.Fingerprint != "" {
@@ -149,6 +162,18 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 		}
 		if len(chunk.DocumentURLs) > 0 {
 			metadata["document_urls"] = strings.Join(chunk.DocumentURLs, "\n")
+		}
+		if len(chunk.DocumentTags) > 0 {
+			metadata["document_tags"] = strings.Join(chunk.DocumentTags, "\n")
+		}
+		if len(chunk.DocumentCategories) > 0 {
+			metadata["document_categories"] = strings.Join(chunk.DocumentCategories, "\n")
+		}
+		if !chunk.DocumentCreatedAt.IsZero() {
+			metadata["document_created_at"] = chunk.DocumentCreatedAt.UTC().Format(time.RFC3339)
+		}
+		if !chunk.DocumentUpdatedAt.IsZero() {
+			metadata["document_updated_at"] = chunk.DocumentUpdatedAt.UTC().Format(time.RFC3339)
 		}
 
 		if chunk.Fingerprint != "" {
@@ -289,16 +314,21 @@ func (db *VectorDB) GetChunk(ctx context.Context, chunkID string) (*models.Chunk
 	}
 
 	return &models.Chunk{
-		ID:            doc.Metadata["chunk_id"],
-		DocumentID:    doc.Metadata["document_id"],
-		Content:       doc.Content,
-		HeaderPath:    doc.Metadata["header_path"],
-		Level:         level,
-		StartLine:     startLine,
-		EndLine:       endLine,
-		DocumentTitle: doc.Metadata["document_title"],
-		Fingerprint:   doc.Metadata["fingerprint"],
-		UID:           doc.Metadata["uid"],
+		ID:                 doc.Metadata["chunk_id"],
+		DocumentID:         doc.Metadata["document_id"],
+		Content:            doc.Content,
+		HeaderPath:         doc.Metadata["header_path"],
+		Level:              level,
+		StartLine:          startLine,
+		EndLine:            endLine,
+		DocumentTitle:      doc.Metadata["document_title"],
+		Fingerprint:        doc.Metadata["fingerprint"],
+		UID:                doc.Metadata["uid"],
+		DocumentURLs:       splitNonEmptyLines(doc.Metadata["document_urls"]),
+		DocumentTags:       splitNonEmptyLines(doc.Metadata["document_tags"]),
+		DocumentCategories: splitNonEmptyLines(doc.Metadata["document_categories"]),
+		DocumentCreatedAt:  parseRFC3339(doc.Metadata["document_created_at"]),
+		DocumentUpdatedAt:  parseRFC3339(doc.Metadata["document_updated_at"]),
 	}, nil
 }
 
@@ -344,16 +374,21 @@ func (db *VectorDB) GetChunksByDocument(ctx context.Context, documentID string) 
 		}
 
 		chunks[i] = &models.Chunk{
-			ID:            result.Metadata["chunk_id"],
-			DocumentID:    result.Metadata["document_id"],
-			Content:       result.Content,
-			HeaderPath:    result.Metadata["header_path"],
-			Level:         level,
-			StartLine:     startLine,
-			EndLine:       endLine,
-			DocumentTitle: result.Metadata["document_title"],
-			Fingerprint:   result.Metadata["fingerprint"],
-			UID:           result.Metadata["uid"],
+			ID:                 result.Metadata["chunk_id"],
+			DocumentID:         result.Metadata["document_id"],
+			Content:            result.Content,
+			HeaderPath:         result.Metadata["header_path"],
+			Level:              level,
+			StartLine:          startLine,
+			EndLine:            endLine,
+			DocumentTitle:      result.Metadata["document_title"],
+			Fingerprint:        result.Metadata["fingerprint"],
+			UID:                result.Metadata["uid"],
+			DocumentURLs:       splitNonEmptyLines(result.Metadata["document_urls"]),
+			DocumentTags:       splitNonEmptyLines(result.Metadata["document_tags"]),
+			DocumentCategories: splitNonEmptyLines(result.Metadata["document_categories"]),
+			DocumentCreatedAt:  parseRFC3339(result.Metadata["document_created_at"]),
+			DocumentUpdatedAt:  parseRFC3339(result.Metadata["document_updated_at"]),
 		}
 	}
 
@@ -446,20 +481,24 @@ func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentIn
 			continue
 		}
 
-		if _, exists := docMap[docID]; !exists {
-			docMap[docID] = models.DocumentInfo{
+		info, exists := docMap[docID]
+		if !exists {
+			info = models.DocumentInfo{
 				ID:          docID,
 				UID:         result.Metadata["uid"],
 				Fingerprint: result.Metadata["fingerprint"],
 				Title:       result.Metadata["document_title"],
-				ChunkCount:  1,
+				Tags:        splitNonEmptyLines(result.Metadata["document_tags"]),
+				Categories:  splitNonEmptyLines(result.Metadata["document_categories"]),
+				URLs:        splitNonEmptyLines(result.Metadata["document_urls"]),
+				CreatedAt:   parseRFC3339(result.Metadata["document_created_at"]),
+				UpdatedAt:   parseRFC3339(result.Metadata["document_updated_at"]),
+				ChunkCount:  0,
 			}
-		} else {
-			// Increment chunk count
-			info := docMap[docID]
-			info.ChunkCount++
-			docMap[docID] = info
 		}
+
+		info.ChunkCount++
+		docMap[docID] = info
 	}
 
 	// Convert map to slice
@@ -469,6 +508,33 @@ func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentIn
 	}
 
 	return docs, nil
+}
+
+func splitNonEmptyLines(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+
+	parts := strings.Split(s, "\n")
+	filtered := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+	return filtered
+}
+
+func parseRFC3339(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 // Close cleans up resources.

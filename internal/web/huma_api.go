@@ -1,7 +1,9 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"strings"
 
@@ -92,6 +94,66 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI) {
 		if content == "" {
 			return nil, huma.Error400BadRequest("content is required")
 		}
+
+		doc, err := svc.IngestDocument(ctx, content)
+		if err != nil {
+			return nil, huma.Error400BadRequest("failed to ingest")
+		}
+
+		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{
+			Message:    "Document ingested successfully",
+			DocumentID: doc.ID,
+			Chunks:     len(doc.Chunks),
+		}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "ingest-raw",
+		Method:      http.MethodPost,
+		Path:        "/api/ingest/raw",
+		Summary:     "Ingest a docubilder markdown document (raw body)",
+	}, func(ctx context.Context, input *struct {
+		RawBody []byte `contentType:"text/markdown" required:"true"`
+	},
+	) (*struct{ Body ingestResponseBody }, error) {
+		if len(bytes.TrimSpace(input.RawBody)) == 0 {
+			return nil, huma.Error400BadRequest("request body is required")
+		}
+		content := string(input.RawBody)
+
+		doc, err := svc.IngestDocument(ctx, content)
+		if err != nil {
+			return nil, huma.Error400BadRequest("failed to ingest")
+		}
+
+		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{
+			Message:    "Document ingested successfully",
+			DocumentID: doc.ID,
+			Chunks:     len(doc.Chunks),
+		}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "ingest-file",
+		Method:      http.MethodPost,
+		Path:        "/api/ingest/file",
+		Summary:     "Ingest a docubilder markdown document (multipart upload)",
+	}, func(ctx context.Context, input *struct {
+		RawBody huma.MultipartFormFiles[struct {
+			File huma.FormFile `form:"file" required:"true"`
+		}]
+	},
+	) (*struct{ Body ingestResponseBody }, error) {
+		form := input.RawBody.Data()
+		b, err := io.ReadAll(form.File)
+		if err != nil {
+			return nil, huma.Error400BadRequest("failed to read uploaded file")
+		}
+
+		if len(bytes.TrimSpace(b)) == 0 {
+			return nil, huma.Error400BadRequest("file is empty")
+		}
+		content := string(b)
 
 		doc, err := svc.IngestDocument(ctx, content)
 		if err != nil {

@@ -1,7 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
@@ -11,12 +15,13 @@ import (
 )
 
 type fakeHumaService struct {
-	healthErr error
-	ingested  *models.Document
-	ingestErr error
-	answer    string
-	debug     *service.QueryDebugInfo
-	queryErr  error
+	healthErr         error
+	ingested          *models.Document
+	ingestErr         error
+	lastIngestContent string
+	answer            string
+	debug             *service.QueryDebugInfo
+	queryErr          error
 }
 
 func (f *fakeHumaService) CheckHealth(ctx context.Context) (bool, error) {
@@ -27,6 +32,7 @@ func (f *fakeHumaService) IngestDocument(ctx context.Context, content string) (*
 	if f.ingestErr != nil {
 		return nil, f.ingestErr
 	}
+	f.lastIngestContent = content
 	if f.ingested != nil {
 		return f.ingested, nil
 	}
@@ -81,6 +87,55 @@ func TestHumaAPI_Ingest_ValidatesContent(t *testing.T) {
 
 	w := api.Post("/api/ingest", map[string]any{"content": ""})
 	require.Equal(t, 400, w.Code)
+}
+
+func TestHumaAPI_IngestRaw_AcceptsMarkdownBody(t *testing.T) {
+	h, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	RegisterHumaOperations(api, svc)
+
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	body := []byte("---\nuid: a\nurls:\n  - https://example.com\n---\n\n# Title\nHi\n")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/api/ingest/raw", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "text/markdown")
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, 200, resp.StatusCode)
+	require.Equal(t, string(body), svc.lastIngestContent)
+}
+
+func TestHumaAPI_IngestFile_AcceptsMultipartUpload(t *testing.T) {
+	h, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	RegisterHumaOperations(api, svc)
+
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+
+	fileBytes := []byte("---\nuid: a\nurls:\n  - https://example.com\n---\n\n# Title\nHi\n")
+
+	var b bytes.Buffer
+	w := multipart.NewWriter(&b)
+	part, err := w.CreateFormFile("file", "sample.md")
+	require.NoError(t, err)
+	_, err = part.Write(fileBytes)
+	require.NoError(t, err)
+	require.NoError(t, w.Close())
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, srv.URL+"/api/ingest/file", &b)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, 200, resp.StatusCode)
+	require.Equal(t, string(fileBytes), svc.lastIngestContent)
 }
 
 func TestHumaAPI_Query_ReturnsLinks(t *testing.T) {
