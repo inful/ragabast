@@ -126,6 +126,7 @@ type QueryDebugInfo struct {
 	Model   string
 	Results []models.SearchResult
 	Context string
+	System  string
 	Prompt  string
 }
 
@@ -148,8 +149,11 @@ func (s *Service) QueryDebug(ctx context.Context, query string, limit int) (stri
 		return "No relevant information found.", nil, nil
 	}
 
-	context := buildQueryContext(results)
-	prompt := buildQueryPrompt(query, context)
+	contextItems := buildQueryContextItems(results)
+	prompt, systemPrompt, err := buildQueryPrompt(query, contextItems)
+	if err != nil {
+		return "", nil, fmt.Errorf("prompt build failed: %w", err)
+	}
 
 	model := s.config.Ollama.GenerationModel
 	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)
@@ -162,7 +166,8 @@ func (s *Service) QueryDebug(ctx context.Context, query string, limit int) (stri
 	return response, &QueryDebugInfo{
 		Model:   model,
 		Results: results,
-		Context: context,
+		Context: strings.Join(contextItems, "\n\n"),
+		System:  systemPrompt,
 		Prompt:  prompt,
 	}, nil
 }

@@ -13,13 +13,27 @@ func TestBuildQueryContext_FormatsResults(t *testing.T) {
 		{DocumentTitle: "Doc B", Content: "Chunk B"},
 	}
 
-	ctx := buildQueryContext(results)
-	require.Contains(t, ctx, "Result 1 (from Doc A):\nChunk A")
-	require.Contains(t, ctx, "Result 2 (from Doc B):\nChunk B")
+	items := buildQueryContextItems(results)
+	require.Len(t, items, 2)
+	require.Contains(t, items[0], "Doc A")
+	require.Contains(t, items[0], "Chunk A")
+	require.Contains(t, items[1], "Doc B")
+	require.Contains(t, items[1], "Chunk B")
 }
 
 func TestBuildQueryPrompt_IncludesQueryAndContext(t *testing.T) {
-	prompt := buildQueryPrompt("what is this?", "some context")
-	require.Contains(t, prompt, "answer the question: what is this?")
-	require.Contains(t, prompt, "Context:\nsome context")
+	prompt, system, err := buildQueryPrompt("what is this?", []string{"Doc A: Chunk A"})
+	require.NoError(t, err)
+	require.Contains(t, system, "You are a helpful assistant")
+	require.Contains(t, system, "<context>")
+	require.Contains(t, system, "- Doc A: Chunk A")
+	require.Contains(t, prompt, "Question: what is this?")
+	require.Contains(t, prompt, "Answer:")
+}
+
+func TestBuildQueryPrompt_OmitsContextBlockWhenEmpty(t *testing.T) {
+	prompt, system, err := buildQueryPrompt("what is this?", nil)
+	require.NoError(t, err)
+	require.NotContains(t, system, "<context>")
+	require.Contains(t, prompt, "Question: what is this?")
 }
