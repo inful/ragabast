@@ -19,8 +19,11 @@ This file provides guidance to agents when working with code in this repository.
 - When working with software libraries, API, third party tools, etc, first check with the context7 mcp for the most up to date documentations.
 - For anything that involves complex analysis, planning and designing, use sequential thinking mcp.
 - Always use conventional commits; amend if necessary to keep history clean.
+- When adding a new feature, use a strict TDD approach.
+- When fixing a bug, make sure you first create a test to reproduce the bug before proceeding to fix it.
+- When testing the huma endpoints, use the humatest package.
 - Stage only relevant files for each commit (avoid `git add -A`).
-- Fix all `golangci-lint` issues before committing.
+- Fix all `golangci-lint` issues before committing. Use the --fix flag to ensure minimal intervention is necessary.
 - Run the full test suite (`go test ./...`) and ensure it passes before committing.
 
 ### CLI Framework
