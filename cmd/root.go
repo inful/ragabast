@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -16,26 +17,61 @@ import (
 
 // CLI represents the main command-line interface structure.
 type CLI struct {
-	Ingest IngestCmd `cmd:"" help:"Ingest and process docubilder documents"`
-	Query  QueryCmd  `cmd:"" help:"Query the vector database with natural language"`
-	Serve  ServeCmd  `cmd:"" help:"Start the web server"`
-	Status StatusCmd `cmd:"" help:"Check system health and status"`
-	List   ListCmd   `cmd:"" help:"List ingested documents"`
-	Search SearchCmd `cmd:"" help:"Semantic search across documents"`
+	Ingest IngestCmd     `cmd:"" help:"Ingest and process docubilder documents"`
+	Query  QueryCmd      `cmd:"" help:"Query the vector database with natural language"`
+	Serve  ServeCmd      `cmd:"" help:"Start the web server"`
+	Init   ConfigInitCmd `cmd:"" help:"Write a starter config file (alias for 'config init')"`
+	Config ConfigCmd     `cmd:"" help:"Manage configuration"`
+	Status StatusCmd     `cmd:"" help:"Check system health and status"`
+	List   ListCmd       `cmd:"" help:"List ingested documents"`
+	Search SearchCmd     `cmd:"" help:"Semantic search across documents"`
+}
+
+type ConfigOpts struct {
+	Config string `short:"c" name:"config" env:"RAGABAST_CONFIG" help:"Path to config file (YAML). If not set, tries config.yml then config.yaml."`
+}
+
+// ConfigCmd represents the config command.
+type ConfigCmd struct {
+	Init ConfigInitCmd `cmd:"" help:"Write a starter config file"`
+}
+
+// ConfigInitCmd writes a config file to disk.
+type ConfigInitCmd struct {
+	Path  string `default:"config.yml" help:"Output path" arg:"" optional:""`
+	Force bool   `short:"f" help:"Overwrite if the file already exists"`
+}
+
+func (c *ConfigInitCmd) Run(ctx *kong.Context) error {
+	path := strings.TrimSpace(c.Path)
+	if path == "" {
+		path = config.DefaultConfigYML
+	}
+
+	if _, err := os.Stat(path); err == nil && !c.Force {
+		return fmt.Errorf("config file already exists: %s (use --force to overwrite)", path)
+	}
+
+	cfg := config.DefaultConfig()
+	if err := cfg.SaveConfig(path); err != nil {
+		return err
+	}
+
+	log.Printf("Wrote config file: %s\n", path)
+	return nil
 }
 
 // IngestCmd represents the ingest command.
 type IngestCmd struct {
+	ConfigOpts
 	Files []string `help:"Docubilder files to ingest" arg:"" type:"existingfile"`
 	Path  string   `short:"p" help:"Directory path to scan for documents"`
 }
 
 func (c *IngestCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.Load(c.Config)
 	if err != nil {
-		cfg = config.DefaultConfig()
-		// Apply environment variable overrides
-		cfg.ApplyEnvOverrides()
+		return err
 	}
 
 	svc, err := service.NewService(cfg)
@@ -74,16 +110,16 @@ func (c *IngestCmd) Run(ctx *kong.Context) error {
 
 // QueryCmd represents the query command.
 type QueryCmd struct {
+	ConfigOpts
 	Query   string `help:"Natural language query" arg:""`
 	TopK    int    `short:"k" default:"5" help:"Number of results to consider"`
 	Verbose bool   `short:"v" help:"Show source documents"`
 }
 
 func (c *QueryCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.Load(c.Config)
 	if err != nil {
-		cfg = config.DefaultConfig()
-		cfg.ApplyEnvOverrides()
+		return err
 	}
 
 	svc, err := service.NewService(cfg)
@@ -117,15 +153,15 @@ func (c *QueryCmd) Run(ctx *kong.Context) error {
 
 // ServeCmd represents the serve command.
 type ServeCmd struct {
+	ConfigOpts
 	Host string `short:"h" help:"Server host (overrides config)"`
 	Port int    `short:"p" help:"Server port (overrides config)"`
 }
 
 func (c *ServeCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.Load(c.Config)
 	if err != nil {
-		cfg = config.DefaultConfig()
-		cfg.ApplyEnvOverrides()
+		return err
 	}
 
 	// Override bind host/port if flags are provided.
@@ -147,14 +183,14 @@ func (c *ServeCmd) Run(ctx *kong.Context) error {
 
 // StatusCmd represents the status command.
 type StatusCmd struct {
+	ConfigOpts
 	Verbose bool `short:"v" help:"Verbose output"`
 }
 
 func (c *StatusCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.Load(c.Config)
 	if err != nil {
-		cfg = config.DefaultConfig()
-		cfg.ApplyEnvOverrides()
+		return err
 	}
 
 	svc, err := service.NewService(cfg)
@@ -197,14 +233,14 @@ func (c *StatusCmd) Run(ctx *kong.Context) error {
 
 // ListCmd represents the list command.
 type ListCmd struct {
+	ConfigOpts
 	Verbose bool `short:"v" help:"Show detailed information"`
 }
 
 func (c *ListCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.Load(c.Config)
 	if err != nil {
-		cfg = config.DefaultConfig()
-		cfg.ApplyEnvOverrides()
+		return err
 	}
 
 	svc, err := service.NewService(cfg)
@@ -244,6 +280,7 @@ func (c *ListCmd) Run(ctx *kong.Context) error {
 
 // SearchCmd represents the search command.
 type SearchCmd struct {
+	ConfigOpts
 	Query   string `help:"Search query" arg:""`
 	TopK    int    `short:"k" default:"5" help:"Number of results"`
 	DocID   string `short:"d" help:"Filter by document ID"`
@@ -251,10 +288,9 @@ type SearchCmd struct {
 }
 
 func (c *SearchCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.Load(c.Config)
 	if err != nil {
-		cfg = config.DefaultConfig()
-		cfg.ApplyEnvOverrides()
+		return err
 	}
 
 	svc, err := service.NewService(cfg)

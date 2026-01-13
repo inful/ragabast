@@ -1,0 +1,32 @@
+# Copy this file to ./config.yml (ignored by git) and tweak values as needed.
+
+ollama:
+  base_url: http://localhost:11434
+  embedding_model: nomic-embed-text:v1.5
+  generation_model: gemma:2b
+  timeout: 30s
+  keep_alive: true
+
+vectordb:
+  persistence_dir: data/vectors
+  collection_name: ragabast
+  embedding_dimension: 768
+
+server:
+  address: 0.0.0.0
+  port: 8080
+  enable_cors: true
+  read_timeout: 15s
+  write_timeout: 15s
+
+processing:
+  max_chunk_size: 1000
+  min_chunk_size: 100
+  chunk_overlap: 100
+  max_concurrent_processing: 5
+
+paths:
+  data_dir: data
+  documents_dir: data/documents
+  temp_dir: data/temp
+  templates_dir: templates

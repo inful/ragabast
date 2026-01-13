@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -10,6 +11,14 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	// DefaultConfigYML is the default config filename.
+	DefaultConfigYML = "config.yml"
+
+	// DefaultConfigYAML is an alternate default config filename.
+	DefaultConfigYAML = "config.yaml"
 )
 
 // Config represents the application configuration.
@@ -176,6 +185,40 @@ func DefaultConfig() *Config {
 			TemplatesDir: filepath.Join(wd, "templates"),
 		},
 	}
+}
+
+// Load loads configuration.
+//
+// Precedence:
+//  1. If path is provided, it is used.
+//  2. If DefaultConfigYML exists in the working directory, it is used.
+//  3. If DefaultConfigYAML exists in the working directory, it is used.
+//  4. Otherwise, defaults are used.
+//
+// In all cases, environment variable overrides are applied (see ApplyEnvOverrides).
+func Load(path string) (*Config, error) {
+	if strings.TrimSpace(path) != "" {
+		return LoadConfig(path)
+	}
+
+	if fileExists(DefaultConfigYML) {
+		return LoadConfig(DefaultConfigYML)
+	}
+	if fileExists(DefaultConfigYAML) {
+		return LoadConfig(DefaultConfigYAML)
+	}
+
+	cfg := DefaultConfig()
+	cfg.ApplyEnvOverrides()
+	return cfg, nil
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	if err == nil {
+		return !info.IsDir()
+	}
+	return !errors.Is(err, os.ErrNotExist)
 }
 
 // LoadConfig loads configuration from a YAML file.
