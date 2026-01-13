@@ -19,3 +19,9 @@ func TestAppendLinksSection_DoesNotDuplicate(t *testing.T) {
 	out := appendLinksSection(in, []string{"https://example.com/a", "https://example.com/b"})
 	require.Equal(t, in, out)
 }
+
+func TestAppendLinksSection_DoesNotDuplicate_WhenLinksInline(t *testing.T) {
+	in := "Answer text.\n\nLinks: https://example.com/a, https://example.com/b"
+	out := appendLinksSection(in, []string{"https://example.com/a", "https://example.com/b"})
+	require.Equal(t, in, out)
+}

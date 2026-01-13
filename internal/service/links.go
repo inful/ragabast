@@ -27,7 +27,9 @@ func extractURLs(results []models.SearchResult) []string {
 
 func hasLinksSection(answer string) bool {
 	for line := range strings.SplitSeq(answer, "\n") {
-		if strings.TrimSpace(line) == "Links:" {
+		trimmed := strings.TrimSpace(line)
+		lower := strings.ToLower(trimmed)
+		if lower == "links:" || strings.HasPrefix(lower, "links:") {
 			return true
 		}
 	}
