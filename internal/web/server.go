@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ragabast/internal/config"
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/service"
 )
 
 type serviceAPI interface {
@@ -23,6 +23,7 @@ type serviceAPI interface {
 	IngestDocument(ctx context.Context, content string) (*models.Document, error)
 	Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error)
 	ListDocuments(ctx context.Context) ([]models.DocumentInfo, error)
+	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
 	QueryWithLLM(ctx context.Context, query string, model string, history []struct {
 		Role    string
 		Content string
@@ -94,20 +95,8 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 
 // registerRoutes registers all API routes and web handlers.
 func (s *Server) registerRoutes() {
-	// Health check endpoint
-	s.router.Get("/api/health", s.handleHealth)
-
-	// Ingest endpoint
-	s.router.Post("/api/ingest", s.handleIngest)
-
-	// Search endpoint
-	s.router.Post("/api/search", s.handleSearch)
-
-	// Query endpoint (LLM-powered)
-	s.router.Post("/api/query", s.handleQuery)
-
-	// List documents endpoint
-	s.router.Get("/api/documents", s.handleListDocuments)
+	// REST API (Huma).
+	registerHumaAPI(s.router, s.service)
 
 	// Web UI routes
 	s.router.Get("/", s.handleHome)
@@ -162,224 +151,6 @@ func (s *Server) Stop(ctx context.Context) error {
 		return s.server.Shutdown(ctx)
 	}
 	return nil
-}
-
-// API Handlers.
-func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	_, err := s.service.CheckHealth(r.Context())
-	if err != nil {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": fmt.Sprintf("Service unhealthy: %v", err),
-		})
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	_ = enc.Encode(map[string]string{
-		"status": "healthy",
-	})
-}
-
-func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Content string `json:"content"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": "Invalid request body",
-		})
-		return
-	}
-
-	if body.Content == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": "Content is required",
-		})
-		return
-	}
-
-	doc, err := s.service.IngestDocument(r.Context(), body.Content)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": fmt.Sprintf("Failed to ingest: %v", err),
-		})
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	_ = enc.Encode(map[string]any{
-		"message":     "Document ingested successfully",
-		"document_id": doc.ID,
-		"chunks":      len(doc.Chunks),
-		"tags":        doc.Tags,
-	})
-}
-
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Query    string  `json:"query"`
-		Limit    int     `default:"5" json:"limit"`
-		MinScore float64 `default:"0.5" json:"min_score"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": "Invalid request body",
-		})
-		return
-	}
-
-	if body.Query == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": "Query is required",
-		})
-		return
-	}
-
-	if body.Limit == 0 {
-		body.Limit = 5
-	}
-
-	results, err := s.service.Search(r.Context(), body.Query, body.Limit, nil)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": fmt.Sprintf("Search failed: %v", err),
-		})
-		return
-	}
-
-	// Filter by minScore
-	filtered := []map[string]any{}
-	for _, r := range results {
-		if float64(r.Similarity) >= body.MinScore {
-			filtered = append(filtered, map[string]any{
-				"chunk_id":       r.ChunkID,
-				"document_id":    r.DocumentID,
-				"content":        r.Content,
-				"header_path":    r.HeaderPath,
-				"level":          r.Level,
-				"start_line":     r.StartLine,
-				"end_line":       r.EndLine,
-				"document_title": r.DocumentTitle,
-				"similarity":     r.Similarity,
-			})
-		}
-	}
-
-	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	_ = enc.Encode(map[string]any{
-		"results": filtered,
-		"count":   len(filtered),
-	})
-}
-
-func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Query   string `json:"query"`
-		Model   string `default:"gemma:2b" json:"model"`
-		History []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"history,omitempty"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": "Invalid request body",
-		})
-		return
-	}
-
-	if body.Query == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": "Query is required",
-		})
-		return
-	}
-
-	if body.Model == "" {
-		body.Model = "gemma:2b"
-	}
-
-	// Convert history format
-	history := make([]struct {
-		Role    string
-		Content string
-	}, len(body.History))
-	for i, h := range body.History {
-		history[i].Role = h.Role
-		history[i].Content = h.Content
-	}
-
-	response, sources, err := s.service.QueryWithLLM(r.Context(), body.Query, body.Model, history)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": fmt.Sprintf("Query failed: %v", err),
-		})
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	_ = enc.Encode(map[string]any{
-		"response": response,
-		"sources":  sources,
-	})
-}
-
-func (s *Server) handleListDocuments(w http.ResponseWriter, r *http.Request) {
-	docs, err := s.service.ListDocuments(r.Context())
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(map[string]string{
-			"error": fmt.Sprintf("Failed to list documents: %v", err),
-		})
-		return
-	}
-
-	// Convert to simple format
-	simpleDocs := []map[string]any{}
-	for _, d := range docs {
-		simpleDocs = append(simpleDocs, map[string]any{
-			"id":          d.ID,
-			"title":       d.Title,
-			"tags":        d.Tags,
-			"categories":  d.Categories,
-			"chunk_count": d.ChunkCount,
-		})
-	}
-
-	w.WriteHeader(http.StatusOK)
-	enc := json.NewEncoder(w)
-	_ = enc.Encode(map[string]any{
-		"documents": simpleDocs,
-		"count":     len(simpleDocs),
-	})
 }
 
 // Web UI Handlers.
