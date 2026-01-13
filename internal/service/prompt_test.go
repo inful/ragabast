@@ -15,22 +15,25 @@ func TestBuildQueryContext_FormatsResults(t *testing.T) {
 
 	items := buildQueryContextItems(results)
 	require.Len(t, items, 2)
-	require.Contains(t, items[0], "Doc A")
+	require.Contains(t, items[0], "TITLE: Doc A")
+	require.Contains(t, items[0], "CONTENT:")
 	require.Contains(t, items[0], "Chunk A")
+	require.Contains(t, items[0], "SOURCE_URLS:")
 	require.Contains(t, items[0], "https://example.com/a")
-	require.Contains(t, items[1], "Doc B")
+	require.Contains(t, items[1], "TITLE: Doc B")
 	require.Contains(t, items[1], "Chunk B")
 }
 
 func TestBuildQueryPrompt_IncludesQueryAndContext(t *testing.T) {
-	prompt, system, err := buildQueryPrompt("what is this?", []string{"Doc A: Chunk A"})
+	prompt, system, err := buildQueryPrompt("what is this?", []string{"TITLE: Doc A\nCONTENT:\nChunk A"})
 	require.NoError(t, err)
 	require.Contains(t, system, "You are a helpful assistant")
 	require.Contains(t, system, "Links:")
 	require.Contains(t, system, "you MUST include")
 	require.Contains(t, system, "Only include URLs")
 	require.Contains(t, system, "<context>")
-	require.Contains(t, system, "- Doc A: Chunk A")
+	require.Contains(t, system, "<entry")
+	require.Contains(t, system, "TITLE: Doc A")
 	require.Contains(t, prompt, "Question: what is this?")
 	require.Contains(t, prompt, "Answer:")
 }

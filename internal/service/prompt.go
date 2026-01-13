@@ -24,18 +24,20 @@ Style:
 - Prefer short paragraphs or bullets when listing steps or items.
 
 Links:
-- If the context includes a line starting with "Source URLs:", you MUST include a "Links" section at the end of your answer.
-- In that case, include every URL from all "Source URLs:" lines verbatim (deduplicate if repeated).
+- If the context includes a line starting with "SOURCE_URLS:", you MUST include a "Links" section at the end of your answer.
+- In that case, include every URL from all "SOURCE_URLS:" lines verbatim (deduplicate if repeated).
 - Only include URLs that appear in the provided material. Do not invent or guess URLs.
 - If there are no URLs anywhere in the provided material, omit the "Links" section.
 
 {{- if . -}}
 Use only the information inside the following <context> block to answer. If the context does not contain enough relevant information, say "I don't know".
-The bullet points are ordered by relevance (earlier = more relevant).
+The context entries are ordered by relevance (earlier = more relevant).
 
 <context>
-{{- range $context := .}}
-- {{ $context }}
+{{- range $i, $context := .}}
+<entry id="{{ $i }}">
+{{ $context }}
+</entry>
 {{- end }}
 </context>
 {{- end -}}
@@ -46,9 +48,9 @@ Do not mention the knowledge base, context, or search results in your answer.
 func buildQueryContextItems(results []models.SearchResult) []string {
 	items := make([]string, 0, len(results))
 	for _, result := range results {
-		item := fmt.Sprintf("%s: %s", result.DocumentTitle, result.Content)
+		item := fmt.Sprintf("TITLE: %s\nCONTENT:\n%s", result.DocumentTitle, result.Content)
 		if len(result.DocumentURLs) > 0 {
-			item += fmt.Sprintf("\nSource URLs: %s", strings.Join(result.DocumentURLs, ", "))
+			item += fmt.Sprintf("\nSOURCE_URLS: %s", strings.Join(result.DocumentURLs, ", "))
 		}
 		items = append(items, item)
 	}
