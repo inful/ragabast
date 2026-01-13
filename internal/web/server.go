@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -99,7 +100,11 @@ func (s *Server) registerRoutes() {
 	registerHumaAPI(s.router, s.service)
 
 	// Web UI routes
-	s.router.Get("/", s.handleHome)
+	s.router.Get("/", s.handleChatPage)
+	s.router.Get("/chat", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/", http.StatusFound)
+	})
+	s.router.Post("/chat/message", s.handleChatMessage)
 	s.router.Get("/search", s.handleSearchPage)
 	s.router.Post("/search", s.handleSearchSubmit)
 	s.router.Get("/ingest", s.handleIngestPage)
@@ -153,16 +158,39 @@ func (s *Server) Stop(ctx context.Context) error {
 	return nil
 }
 
-// Web UI Handlers.
-func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	s.renderTemplate(w, "home.html", map[string]any{
-		"Title": "RAGabast - Home",
-	})
-}
-
 func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "search.html", map[string]any{
 		"Title": "RAGabast - Search",
+	})
+}
+
+func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
+	s.renderTemplate(w, "chat.html", map[string]any{
+		"Title": "RAGabast - Chat",
+	})
+}
+
+func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+
+	msg := strings.TrimSpace(r.FormValue("message"))
+	if msg == "" {
+		http.Error(w, "Message is required", http.StatusBadRequest)
+		return
+	}
+
+	answer, _, err := s.service.QueryDebugWithOptions(r.Context(), msg, 5, service.LLMOptions{})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Query failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.renderTemplate(w, "chat_message.html", map[string]any{
+		"User":   msg,
+		"Answer": answer,
 	})
 }
 
@@ -254,7 +282,9 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 
 	tmpl := s.templates.Lookup(templateName)
 	if tmpl == nil {
-		http.NotFound(w, nil)
+		// If the template doesn't exist (e.g. templates dir is empty), fall back to the
+		// built-in HTML responses.
+		s.serveBasicHTML(w, templateName, data)
 		return
 	}
 
@@ -270,8 +300,10 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 
 	// Simple HTML templates
 	switch templateName {
-	case "home.html":
-		s.serveHomeHTML(w, data)
+	case "chat.html":
+		s.serveChatHTML(w, data)
+	case "chat_message.html":
+		s.serveChatMessageHTML(w, data)
 	case "search.html":
 		s.serveSearchHTML(w, data)
 	case "search_results.html":
@@ -287,23 +319,119 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 	}
 }
 
-func (s *Server) serveHomeHTML(w http.ResponseWriter, data any) {
+func (s *Server) serveChatHTML(w http.ResponseWriter, data any) {
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
 <head>
-    <title>%s</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+	<title>%s</title>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+	<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+	<style>
+		.chat-log { max-height: 60vh; overflow-y: auto; }
+		.chat-msg { max-width: 100%%; overflow-wrap: anywhere; word-break: break-word; }
+		pre.chat-msg { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; overflow-x: hidden; }
+		.chat-msg a { overflow-wrap: anywhere; word-break: break-word; }
+		.chat-msg pre, .chat-msg code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+		.htmx-indicator { display: none; }
+		.htmx-request.htmx-indicator { display: inline-block; }
+	</style>
 </head>
 <body class="container mt-4">
-    <h1 class="title">RAGabast - RAG System</h1>
-    <div class="buttons">
-        <a href="/ingest" class="button is-primary">Ingest Document</a>
-        <a href="/search" class="button is-info">Search</a>
-        <a href="/documents" class="button is-link">Documents</a>
-        <a href="/docs" class="button is-light">API Docs</a>
-    </div>
+	<h1 class="title">Chat</h1>
+	<p class="subtitle">Ask questions against the ingested documents.</p>
+
+	<div id="chat-messages" class="box chat-log">
+		<div class="content" id="chat-messages-placeholder">
+			<p class="has-text-grey">No messages yet.</p>
+		</div>
+	</div>
+
+	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input" hx-on::before-request="document.getElementById('chat-send')?.classList.add('is-loading')" hx-on::after-request="this.reset(); document.getElementById('chat-send')?.classList.remove('is-loading'); document.getElementById('chat-input')?.focus()" hx-on::response-error="document.getElementById('chat-send')?.classList.remove('is-loading')">
+		<div class="field">
+			<label class="label">Message</label>
+			<div class="control">
+				<textarea id="chat-input" class="textarea" name="message" rows="2" placeholder="Ask a question..." required></textarea>
+			</div>
+		</div>
+		<div class="field is-grouped">
+			<div class="control">
+				<button id="chat-send" class="button is-warning" type="submit">Send</button>
+			</div>
+			<div class="control htmx-indicator" id="chat-indicator">
+				<span class="tag is-light">Thinking…</span>
+			</div>
+		</div>
+	</form>
+
+	<script>
+		(function () {
+			function scrollChatToBottom() {
+				var el = document.getElementById('chat-messages');
+				if (!el) return;
+				el.scrollTop = el.scrollHeight;
+			}
+
+			function submitChatForm() {
+				var form = document.getElementById('chat-form');
+				if (!form) return;
+				if (typeof form.requestSubmit === 'function') {
+					form.requestSubmit();
+					return;
+				}
+				form.submit();
+			}
+
+			var input = document.getElementById('chat-input');
+			if (input) {
+				input.addEventListener('keydown', function (e) {
+					// Cmd+Enter (macOS) or Ctrl+Enter (Windows/Linux) submits.
+					if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+						e.preventDefault();
+						submitChatForm();
+					}
+					// Esc clears the input.
+					if (e.key === 'Escape') {
+						e.preventDefault();
+						input.value = '';
+						input.focus();
+					}
+				});
+			}
+
+			document.body.addEventListener('htmx:afterSwap', function (evt) {
+				if (evt.target && evt.target.id === 'chat-messages') {
+					scrollChatToBottom();
+				}
+			});
+
+			// If the page loads with existing content (future), keep it pinned.
+			scrollChatToBottom();
+		})();
+	</script>
 </body>
 </html>`, data.(map[string]any)["Title"])
+}
+
+func (s *Server) serveChatMessageHTML(w http.ResponseWriter, data any) {
+	user := template.HTMLEscapeString(data.(map[string]any)["User"].(string))
+	answer, err := renderChatMarkdownToSafeHTML(data.(map[string]any)["Answer"].(string))
+	if err != nil {
+		answer = template.HTMLEscapeString(data.(map[string]any)["Answer"].(string))
+	}
+
+	// Remove placeholder if this is the first message.
+	_, _ = fmt.Fprint(w, `<div hx-swap-oob="delete" id="chat-messages-placeholder"></div>`)
+
+	_, _ = fmt.Fprintf(w, `<div class="content">
+	<div class="box">
+		<p class="has-text-weight-semibold">You</p>
+		<pre class="chat-msg">%s</pre>
+	</div>
+	<div class="box has-background-light">
+		<p class="has-text-weight-semibold">Assistant</p>
+		<div class="chat-msg content">%s</div>
+	</div>
+</div>`, user, answer)
 }
 
 func (s *Server) serveSearchHTML(w http.ResponseWriter, data any) {

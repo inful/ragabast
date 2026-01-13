@@ -540,16 +540,50 @@ func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentIn
 		info, exists := docMap[docID]
 		if !exists {
 			info = models.DocumentInfo{
-				ID:          docID,
-				UID:         result.Metadata["uid"],
-				Fingerprint: result.Metadata["fingerprint"],
-				Title:       result.Metadata["document_title"],
-				Tags:        splitNonEmptyLines(result.Metadata["document_tags"]),
-				Categories:  splitNonEmptyLines(result.Metadata["document_categories"]),
-				URLs:        splitNonEmptyLines(result.Metadata["document_urls"]),
-				CreatedAt:   parseRFC3339(result.Metadata["document_created_at"]),
-				UpdatedAt:   parseRFC3339(result.Metadata["document_updated_at"]),
-				ChunkCount:  0,
+				ID:         docID,
+				ChunkCount: 0,
+			}
+		}
+
+		// Merge document-level fields from any chunk that has them.
+		if info.UID == "" {
+			if uid := result.Metadata["uid"]; uid != "" {
+				info.UID = uid
+			}
+		}
+		if info.Fingerprint == "" {
+			if fp := result.Metadata["fingerprint"]; fp != "" {
+				info.Fingerprint = fp
+			}
+		}
+		if info.Title == "" {
+			if title := result.Metadata["document_title"]; title != "" {
+				info.Title = title
+			}
+		}
+		if len(info.Tags) == 0 {
+			if tags := splitNonEmptyLines(result.Metadata["document_tags"]); len(tags) > 0 {
+				info.Tags = tags
+			}
+		}
+		if len(info.Categories) == 0 {
+			if cats := splitNonEmptyLines(result.Metadata["document_categories"]); len(cats) > 0 {
+				info.Categories = cats
+			}
+		}
+		if len(info.URLs) == 0 {
+			if urls := splitNonEmptyLines(result.Metadata["document_urls"]); len(urls) > 0 {
+				info.URLs = urls
+			}
+		}
+		if info.CreatedAt.IsZero() {
+			if created := parseRFC3339(result.Metadata["document_created_at"]); !created.IsZero() {
+				info.CreatedAt = created
+			}
+		}
+		if info.UpdatedAt.IsZero() {
+			if updated := parseRFC3339(result.Metadata["document_updated_at"]); !updated.IsZero() {
+				info.UpdatedAt = updated
 			}
 		}
 
