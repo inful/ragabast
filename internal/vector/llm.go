@@ -64,14 +64,21 @@ func NewOllamaLLMClientWithTimeout(baseURL, model string, timeout time.Duration)
 
 // Generate generates text based on the given prompt.
 func (c *OllamaLLMClient) Generate(ctx context.Context, prompt string) (string, error) {
+	return c.GenerateWithOptions(ctx, prompt, nil)
+}
+
+// GenerateWithOptions generates text based on the given prompt and optional Ollama options
+// (e.g. temperature). See Ollama "generate" options.
+func (c *OllamaLLMClient) GenerateWithOptions(ctx context.Context, prompt string, options map[string]any) (string, error) {
 	if prompt == "" {
 		return "", models.ErrGenerationFailed
 	}
 
 	request := OllamaGenerateRequest{
-		Model:  c.model,
-		Prompt: prompt,
-		Stream: false,
+		Model:   c.model,
+		Prompt:  prompt,
+		Stream:  false,
+		Options: options,
 	}
 
 	jsonData, err := json.Marshal(request)

@@ -111,9 +111,10 @@ func (c *IngestCmd) Run(ctx *kong.Context) error {
 // QueryCmd represents the query command.
 type QueryCmd struct {
 	ConfigOpts
-	Query   string `help:"Natural language query" arg:""`
-	TopK    int    `short:"k" default:"5" help:"Number of results to consider"`
-	Verbose bool   `short:"v" help:"Show source documents"`
+	Query       string   `help:"Natural language query" arg:""`
+	TopK        int      `short:"k" default:"5" help:"Number of results to consider"`
+	Temperature *float64 `help:"LLM temperature (sampling). If omitted, uses model default."`
+	Verbose     bool     `short:"v" help:"Show source documents"`
 }
 
 func (c *QueryCmd) Run(ctx *kong.Context) error {
@@ -133,9 +134,13 @@ func (c *QueryCmd) Run(ctx *kong.Context) error {
 	var response string
 	var debug *service.QueryDebugInfo
 	if c.Verbose {
-		response, debug, err = svc.QueryDebug(ctxApp, c.Query, c.TopK)
+		response, debug, err = svc.QueryDebugWithOptions(ctxApp, c.Query, c.TopK, service.LLMOptions{Temperature: c.Temperature})
 	} else {
-		response, err = svc.Query(ctxApp, c.Query, c.TopK)
+		if c.Temperature != nil {
+			response, _, err = svc.QueryDebugWithOptions(ctxApp, c.Query, c.TopK, service.LLMOptions{Temperature: c.Temperature})
+		} else {
+			response, err = svc.Query(ctxApp, c.Query, c.TopK)
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)

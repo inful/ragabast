@@ -130,15 +130,25 @@ type QueryDebugInfo struct {
 	Prompt  string
 }
 
+// LLMOptions controls generation parameters.
+type LLMOptions struct {
+	Temperature *float64
+}
+
 // Query performs a search and generates a natural language response using LLM.
 func (s *Service) Query(ctx context.Context, query string, limit int) (string, error) {
-	response, _, err := s.QueryDebug(ctx, query, limit)
+	response, _, err := s.QueryDebugWithOptions(ctx, query, limit, LLMOptions{})
 	return response, err
 }
 
 // QueryDebug performs a search and generates a response, returning debug information
 // about the retrieved chunks and constructed prompt.
 func (s *Service) QueryDebug(ctx context.Context, query string, limit int) (string, *QueryDebugInfo, error) {
+	return s.QueryDebugWithOptions(ctx, query, limit, LLMOptions{})
+}
+
+// QueryDebugWithOptions is like QueryDebug but allows controlling LLM generation options.
+func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts LLMOptions) (string, *QueryDebugInfo, error) {
 	// Search for relevant chunks
 	results, err := s.vectorOps.Search(ctx, query, limit, nil)
 	if err != nil {
@@ -158,7 +168,16 @@ func (s *Service) QueryDebug(ctx context.Context, query string, limit int) (stri
 	model := s.config.Ollama.GenerationModel
 	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)
 
-	response, err := llmClient.Generate(ctx, prompt)
+	llmOptions := map[string]any{}
+	if opts.Temperature != nil {
+		llmOptions["temperature"] = *opts.Temperature
+	}
+	var response string
+	if len(llmOptions) > 0 {
+		response, err = llmClient.GenerateWithOptions(ctx, prompt, llmOptions)
+	} else {
+		response, err = llmClient.Generate(ctx, prompt)
+	}
 	if err != nil {
 		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}
