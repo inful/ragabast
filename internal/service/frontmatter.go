@@ -34,9 +34,11 @@ Rules:
 - Do NOT retrieve or infer anything from any database or vector store.
 - You must NOT modify existing frontmatter keys other than proposing values for: description, tags, categories.
 - Description: one short sentence (max ~180 chars) summarizing the document.
-- Categories: MUST be chosen ONLY from the allowed categories list.
-- Tags: Prefer choosing from allowed tags; you may additionally suggest new tags not in the list when necessary.
+- Categories: MUST be chosen ONLY from the allowed categories list. Suggest 1-3 categories when possible.
+- Tags: Prefer choosing from allowed tags. Suggest 3-8 tags when possible.
+- Tags not in the allowed list MUST be returned in custom_tags (not in tags).
 - Keep existing tags/categories intact: do not remove or rename them.
+- Even if existing frontmatter already includes tags/categories, still suggest additional ones that fit.
 - Output MUST be valid JSON and MUST contain ONLY these keys: description, categories, tags, custom_tags.
 - description may be an empty string if the document already has a description.
 

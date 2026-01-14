@@ -365,3 +365,35 @@ func TestHumaAPI_FrontmatterSuggest_ValidatesInputs(t *testing.T) {
 	})
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
+
+func TestHumaAPI_FrontmatterSuggest_CanonicalizesAllowedAndKeepsCustomTags(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{frontmatterSug: service.FrontmatterSuggestion{
+		Description: "",
+		Categories:  []string{"guides"},
+		Tags:        []string{"RAG", "NewTag"},
+		CustomTags:  nil,
+	}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/frontmatter/suggest", map[string]any{
+		"content":            "---\nuid: u-1\n---\n\n# Title\nHello\n",
+		"allowed_categories": []string{"Guides", "Reference"},
+		"allowed_tags":       []string{"go", "rag"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Frontmatter map[string]any `json:"frontmatter"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	cats, ok := resp.Frontmatter["categories"].([]any)
+	require.True(t, ok)
+	require.Contains(t, cats, "Guides")
+
+	tags, ok := resp.Frontmatter["tags"].([]any)
+	require.True(t, ok)
+	require.Contains(t, tags, "rag")
+	require.Contains(t, tags, "NewTag")
+}

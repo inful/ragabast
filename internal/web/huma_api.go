@@ -170,13 +170,13 @@ func uniqueAppend(dst []string, src []string) []string {
 }
 
 func filterAllowed(values []string, allowed []string) []string {
-	allow := make(map[string]struct{}, len(allowed))
+	allow := make(map[string]string, len(allowed))
 	for _, a := range allowed {
 		a = strings.TrimSpace(a)
 		if a == "" {
 			continue
 		}
-		allow[a] = struct{}{}
+		allow[strings.ToLower(a)] = a
 	}
 	out := make([]string, 0, len(values))
 	for _, v := range values {
@@ -184,12 +184,33 @@ func filterAllowed(values []string, allowed []string) []string {
 		if v == "" {
 			continue
 		}
-		if _, ok := allow[v]; !ok {
+		canonical, ok := allow[strings.ToLower(v)]
+		if !ok {
 			continue
 		}
-		out = append(out, v)
+		out = append(out, canonical)
 	}
-	return out
+	return uniqueNonEmptyStrings(out)
+}
+
+func splitAllowedAndCustomTags(suggested []string, allowed []string) (allowedTags []string, customTags []string) {
+	allow := make(map[string]string, len(allowed))
+	for _, a := range allowed {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		allow[strings.ToLower(a)] = a
+	}
+	for _, v := range uniqueNonEmptyStrings(suggested) {
+		canonical, ok := allow[strings.ToLower(v)]
+		if ok {
+			allowedTags = append(allowedTags, canonical)
+			continue
+		}
+		customTags = append(customTags, v)
+	}
+	return uniqueNonEmptyStrings(allowedTags), uniqueNonEmptyStrings(customTags)
 }
 
 func uniqueNonEmptyStrings(values []string) []string {
@@ -587,8 +608,8 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 		if raw, ok := merged["tags"].([]any); ok {
 			existingTags = normalizeStringSlice(raw)
 		}
-		addedAllowedTags := filterAllowed(sug.Tags, input.Body.AllowedTags)
-		customTags := uniqueNonEmptyStrings(sug.CustomTags)
+		addedAllowedTags, customFromTags := splitAllowedAndCustomTags(sug.Tags, input.Body.AllowedTags)
+		customTags := uniqueAppend(customFromTags, uniqueNonEmptyStrings(sug.CustomTags))
 		finalTags := uniqueAppend(existingTags, uniqueAppend(addedAllowedTags, customTags))
 		if len(finalTags) > 0 {
 			merged["tags"] = finalTags
