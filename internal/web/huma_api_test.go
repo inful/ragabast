@@ -23,6 +23,9 @@ type fakeHumaService struct {
 	lastIngestContent string
 	searchResults     []models.SearchResult
 	searchErr         error
+	documents         []models.DocumentInfo
+	deleteErr         error
+	deletedIDs        []string
 	answer            string
 	debug             *service.QueryDebugInfo
 	queryErr          error
@@ -55,7 +58,15 @@ func (f *fakeHumaService) Search(ctx context.Context, query string, limit int, f
 }
 
 func (f *fakeHumaService) ListDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
-	return nil, nil
+	return f.documents, nil
+}
+
+func (f *fakeHumaService) DeleteDocument(ctx context.Context, documentID string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deletedIDs = append(f.deletedIDs, documentID)
+	return nil
 }
 
 func (f *fakeHumaService) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
@@ -242,4 +253,48 @@ func TestHumaAPI_LinkSuggestions_ValidatesText(t *testing.T) {
 
 	w := api.Post("/api/link-suggestions", map[string]any{"text": ""})
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHumaAPI_DeleteDocument_DeletesKnownDocument(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Delete("/api/documents/doc-1")
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, []string{"doc-1"}, svc.deletedIDs)
+}
+
+func TestHumaAPI_DeleteDocument_Returns404ForUnknownDocument(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Delete("/api/documents/missing")
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.Empty(t, svc.deletedIDs)
+}
+
+func TestHumaAPI_PruneDocuments_DeletesEverythingExceptKeptUIDs(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{documents: []models.DocumentInfo{
+		{ID: "doc-1", UID: "keep"},
+		{ID: "doc-2", UID: "drop"},
+		{ID: "doc-3", UID: "drop"},
+	}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/documents/prune", map[string]any{"keep_uids": []string{"keep"}})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.ElementsMatch(t, []string{"doc-2", "doc-3"}, svc.deletedIDs)
+}
+
+func TestHumaAPI_PruneDocuments_DryRunDoesNotDelete(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/documents/prune", map[string]any{"delete_document_ids": []string{"doc-1"}, "dry_run": true})
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Empty(t, svc.deletedIDs)
 }

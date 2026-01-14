@@ -37,6 +37,10 @@ func (f *fakeService) ListDocuments(ctx context.Context) ([]models.DocumentInfo,
 	return []models.DocumentInfo{}, nil
 }
 
+func (f *fakeService) DeleteDocument(ctx context.Context, documentID string) error {
+	return nil
+}
+
 func (f *fakeService) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
 	if f.queryDebug == nil {
 		f.queryDebug = &service.QueryDebugInfo{Results: []models.SearchResult{}}

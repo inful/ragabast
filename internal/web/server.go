@@ -24,6 +24,7 @@ type serviceAPI interface {
 	IngestDocument(ctx context.Context, content string) (*models.Document, error)
 	Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error)
 	ListDocuments(ctx context.Context) ([]models.DocumentInfo, error)
+	DeleteDocument(ctx context.Context, documentID string) error
 	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
 	QueryWithLLM(ctx context.Context, query string, model string, history []struct {
 		Role    string
