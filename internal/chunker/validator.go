@@ -45,12 +45,7 @@ func ValidateDocument(doc *models.Document) error {
 		return fmt.Errorf("%w: UID is required", models.ErrMissingUID)
 	}
 
-	// Validate at least one URL
-	if len(doc.URLs) == 0 {
-		return fmt.Errorf("%w: at least one URL is required", models.ErrMissingURL)
-	}
-
-	// Validate URLs
+	// Validate URLs (optional)
 	for _, urlStr := range doc.URLs {
 		if _, err := url.ParseRequestURI(urlStr); err != nil {
 			return fmt.Errorf("%w: invalid URL '%s': %w", models.ErrInvalidFormat, urlStr, err)
@@ -73,10 +68,6 @@ func ValidateFrontmatter(fingerprint, uid string, tags, categories []string, url
 
 	if strings.TrimSpace(uid) == "" {
 		return fmt.Errorf("%w: UID is required", models.ErrMissingUID)
-	}
-
-	if len(urls) == 0 {
-		return fmt.Errorf("%w: at least one URL is required", models.ErrMissingURL)
 	}
 
 	for _, urlStr := range urls {

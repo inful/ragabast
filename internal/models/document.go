@@ -67,9 +67,6 @@ func (d *Document) Validate() error {
 	if d.UID == "" {
 		return ErrMissingUID
 	}
-	if len(d.URLs) == 0 {
-		return ErrMissingURL
-	}
 	if d.Content == "" {
 		return ErrMissingContent
 	}

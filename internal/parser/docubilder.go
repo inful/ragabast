@@ -190,16 +190,18 @@ func (p *DocubilderParser) ValidateFrontmatter(raw []byte) error {
 	}
 
 	// Check for required fields
-	required := []string{"uid", "urls"}
+	required := []string{"uid"}
 	for _, field := range required {
 		if _, ok := fm[field]; !ok {
 			return fmt.Errorf("missing required field: %s", field)
 		}
 	}
 
-	// Validate URLs is an array
-	if urls, ok := fm["urls"].([]any); !ok || len(urls) == 0 {
-		return errors.New("urls must be a non-empty array")
+	// Validate URLs is an array when present
+	if rawURLs, ok := fm["urls"]; ok {
+		if _, ok := rawURLs.([]any); !ok {
+			return errors.New("urls must be an array")
+		}
 	}
 
 	return nil
