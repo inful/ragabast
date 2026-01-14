@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
@@ -49,6 +51,13 @@ type OllamaConfig struct {
 
 	// GenerationModel is the model used for text generation.
 	GenerationModel string `env:"OLLAMA_GENERATION_MODEL" yaml:"generation_model"`
+
+	// Temperature controls LLM sampling. If omitted, the model default is used.
+	Temperature *float64 `env:"OLLAMA_TEMPERATURE" yaml:"temperature,omitempty"`
+
+	// Options are model/runtime generation options passed to Ollama's /api/generate "options" object.
+	// Common keys include: top_k, top_p, min_p, num_predict, num_ctx, seed, stop.
+	Options map[string]any `env:"OLLAMA_OPTIONS_JSON" yaml:"options,omitempty"`
 
 	// Timeout for API calls.
 	Timeout time.Duration `env:"OLLAMA_TIMEOUT" yaml:"timeout"`
@@ -152,6 +161,8 @@ func DefaultConfig() *Config {
 		wd = "."
 	}
 
+	defaultTemp := 0.1
+
 	return &Config{
 		Ollama: OllamaConfig{
 			BaseURL:         "http://localhost:11434",
@@ -159,6 +170,14 @@ func DefaultConfig() *Config {
 			GenerationModel: "gemma:2b",
 			Timeout:         30 * time.Second,
 			KeepAlive:       true,
+			// RAG-friendly defaults: low temperature + conservative sampling.
+			Temperature: &defaultTemp,
+			Options: map[string]any{
+				"top_k":       20,
+				"top_p":       0.8,
+				"min_p":       0.05,
+				"num_predict": 512,
+			},
 		},
 		VectorDB: VectorDBConfig{
 			PersistenceDir:     filepath.Join(wd, "data", "vectors"),
@@ -173,9 +192,9 @@ func DefaultConfig() *Config {
 			WriteTimeout: 15 * time.Second,
 		},
 		Processing: ProcessingConfig{
-			MaxChunkSize:            1000,
-			MinChunkSize:            100,
-			ChunkOverlap:            100,
+			MaxChunkSize:            2000,
+			MinChunkSize:            300,
+			ChunkOverlap:            150,
 			MaxConcurrentProcessing: 5,
 		},
 		Paths: PathsConfig{
@@ -276,6 +295,20 @@ func (c *Config) ApplyEnvOverrides() {
 			c.Ollama.Timeout = d
 		}
 	}
+	if temp := os.Getenv("OLLAMA_TEMPERATURE"); temp != "" {
+		if v, err := strconv.ParseFloat(strings.TrimSpace(temp), 64); err == nil {
+			c.Ollama.Temperature = &v
+		}
+	}
+	if raw := os.Getenv("OLLAMA_OPTIONS_JSON"); strings.TrimSpace(raw) != "" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(raw), &m); err == nil {
+			if c.Ollama.Options == nil {
+				c.Ollama.Options = map[string]any{}
+			}
+			maps.Copy(c.Ollama.Options, m)
+		}
+	}
 
 	// VectorDB config.
 	if dir := os.Getenv("VECTOR_DB_DIR"); dir != "" {
@@ -307,6 +340,86 @@ func (c *Config) ApplyEnvOverrides() {
 	}
 }
 
+func validateOllamaOptions(opts map[string]any) error {
+	if len(opts) == 0 {
+		return nil
+	}
+
+	getFloat := func(v any) (float64, bool) {
+		switch t := v.(type) {
+		case float64:
+			return t, true
+		case float32:
+			return float64(t), true
+		case int:
+			return float64(t), true
+		case int64:
+			return float64(t), true
+		case uint:
+			return float64(t), true
+		case uint64:
+			return float64(t), true
+		default:
+			return 0, false
+		}
+	}
+
+	getInt := func(v any) (int64, bool) {
+		switch t := v.(type) {
+		case int:
+			return int64(t), true
+		case int64:
+			return t, true
+		case uint:
+			return int64(t), true
+		case uint64:
+			return int64(t), true
+		case float64:
+			return int64(t), true
+		default:
+			return 0, false
+		}
+	}
+
+	if v, ok := opts["top_p"]; ok {
+		if f, ok := getFloat(v); ok {
+			if f < 0 || f > 1 {
+				return errors.New("ollama.options.top_p must be between 0 and 1")
+			}
+		}
+	}
+	if v, ok := opts["min_p"]; ok {
+		if f, ok := getFloat(v); ok {
+			if f < 0 || f > 1 {
+				return errors.New("ollama.options.min_p must be between 0 and 1")
+			}
+		}
+	}
+	if v, ok := opts["top_k"]; ok {
+		if i, ok := getInt(v); ok {
+			if i < 0 {
+				return errors.New("ollama.options.top_k must be >= 0")
+			}
+		}
+	}
+	if v, ok := opts["num_predict"]; ok {
+		if i, ok := getInt(v); ok {
+			if i <= 0 {
+				return errors.New("ollama.options.num_predict must be > 0")
+			}
+		}
+	}
+	if v, ok := opts["num_ctx"]; ok {
+		if i, ok := getInt(v); ok {
+			if i <= 0 {
+				return errors.New("ollama.options.num_ctx must be > 0")
+			}
+		}
+	}
+
+	return nil
+}
+
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
 	var errs []string
@@ -323,6 +436,14 @@ func (c *Config) Validate() error {
 	}
 	if c.Ollama.Timeout <= 0 {
 		errs = append(errs, "ollama.timeout must be positive")
+	}
+	if c.Ollama.Temperature != nil {
+		if *c.Ollama.Temperature < 0 || *c.Ollama.Temperature > 2 {
+			errs = append(errs, "ollama.temperature must be between 0 and 2")
+		}
+	}
+	if err := validateOllamaOptions(c.Ollama.Options); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	// Validate VectorDB config.

@@ -15,6 +15,10 @@ Precedence:
 
 See [config.example.yml](config.example.yml) for a starting point.
 
+Notes:
+- Set `ollama.temperature` in YAML (or `OLLAMA_TEMPERATURE`) to control sampling.
+- `ragabast query --temperature ...` overrides config/env for that invocation.
+
 ## Usage
 
 - Start the web server: `ragabast serve`
