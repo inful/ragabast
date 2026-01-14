@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,8 @@ type fakeHumaService struct {
 	ingested          *models.Document
 	ingestErr         error
 	lastIngestContent string
+	searchResults     []models.SearchResult
+	searchErr         error
 	answer            string
 	debug             *service.QueryDebugInfo
 	queryErr          error
@@ -42,7 +45,13 @@ func (f *fakeHumaService) IngestDocument(ctx context.Context, content string) (*
 }
 
 func (f *fakeHumaService) Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error) {
-	return nil, nil
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	if limit <= 0 || limit >= len(f.searchResults) {
+		return f.searchResults, nil
+	}
+	return f.searchResults[:limit], nil
 }
 
 func (f *fakeHumaService) ListDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
@@ -180,4 +189,57 @@ func TestHumaAPI_Ingest_Returns429WithRetryAfterWhenSaturated(t *testing.T) {
 	w := api.Post("/api/ingest", map[string]any{"content": "---\nuid: a\n---\n\n# Title\nHi\n"})
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
 	require.Equal(t, "2", w.Header().Get("Retry-After"))
+}
+
+func TestHumaAPI_LinkSuggestions_DedupesAndLimits(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{searchResults: []models.SearchResult{
+		{Similarity: 0.9, DocumentURLs: []string{"https://example.com/a", "https://example.com/b"}},
+		{Similarity: 0.8, DocumentURLs: []string{"https://example.com/b", "https://example.com/c"}},
+		{Similarity: 0.7, DocumentURLs: []string{"https://example.com/d"}},
+	}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/link-suggestions", map[string]any{
+		"text":      "some section text",
+		"top_k":     10,
+		"max_urls":  3,
+		"min_score": 0.0,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		URLs []string `json:"urls"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{"https://example.com/a", "https://example.com/b", "https://example.com/c"}, resp.URLs)
+}
+
+func TestHumaAPI_LinkSuggestions_RespectsMinScore(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{searchResults: []models.SearchResult{
+		{Similarity: 0.9, DocumentURLs: []string{"https://example.com/a"}},
+		{Similarity: 0.4, DocumentURLs: []string{"https://example.com/b"}},
+	}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/link-suggestions", map[string]any{
+		"text":      "some section text",
+		"min_score": 0.5,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		URLs []string `json:"urls"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{"https://example.com/a"}, resp.URLs)
+}
+
+func TestHumaAPI_LinkSuggestions_ValidatesText(t *testing.T) {
+	_, api := humatest.New(t)
+	RegisterHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/link-suggestions", map[string]any{"text": ""})
+	require.Equal(t, http.StatusBadRequest, w.Code)
 }
