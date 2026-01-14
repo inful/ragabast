@@ -37,6 +37,8 @@ Rules:
 - Categories: MUST be chosen ONLY from the allowed categories list. Suggest 1-3 categories when possible.
 - Tags: Prefer choosing from allowed tags. Suggest 3-8 tags when possible.
 - Tags not in the allowed list MUST be returned in custom_tags (not in tags).
+- Tags should be lowercase.
+- Categories must match the allowed categories exactly (including capitalization).
 - Keep existing tags/categories intact: do not remove or rename them.
 - Even if existing frontmatter already includes tags/categories, still suggest additional ones that fit.
 - Output MUST be valid JSON and MUST contain ONLY these keys: description, categories, tags, custom_tags.

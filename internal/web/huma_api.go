@@ -169,6 +169,55 @@ func uniqueAppend(dst []string, src []string) []string {
 	return dst
 }
 
+func normalizeTagsLower(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		v = strings.ToLower(v)
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func canonicalizeCategories(values []string, allowed []string) []string {
+	// Preserve order, but for any category that matches an allowed one (case-insensitive),
+	// return the allowed string (so output casing is stable/capitalized).
+	allow := make(map[string]string, len(allowed))
+	for _, a := range allowed {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		allow[strings.ToLower(a)] = a
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		canonical, ok := allow[strings.ToLower(v)]
+		if ok {
+			v = canonical
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
 func filterAllowed(values []string, allowed []string) []string {
 	allow := make(map[string]string, len(allowed))
 	for _, a := range allowed {
@@ -597,7 +646,7 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 			existingCats = normalizeStringSlice(raw)
 		}
 		addedCats := filterAllowed(sug.Categories, input.Body.AllowedCategories)
-		finalCats := uniqueAppend(existingCats, addedCats)
+		finalCats := canonicalizeCategories(uniqueAppend(existingCats, addedCats), input.Body.AllowedCategories)
 		if len(finalCats) > 0 {
 			merged["categories"] = finalCats
 		}
@@ -610,12 +659,12 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 		}
 		addedAllowedTags, customFromTags := splitAllowedAndCustomTags(sug.Tags, input.Body.AllowedTags)
 		customTags := uniqueAppend(customFromTags, uniqueNonEmptyStrings(sug.CustomTags))
-		finalTags := uniqueAppend(existingTags, uniqueAppend(addedAllowedTags, customTags))
+		finalTags := normalizeTagsLower(uniqueAppend(existingTags, uniqueAppend(addedAllowedTags, customTags)))
 		if len(finalTags) > 0 {
 			merged["tags"] = finalTags
 		}
 		applied["tags_added"] = addedAllowedTags
-		applied["custom_tags_added"] = customTags
+		applied["custom_tags_added"] = normalizeTagsLower(customTags)
 
 		// Ensure response JSON is stable (no yaml.Node etc).
 		_, _ = json.Marshal(merged)

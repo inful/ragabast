@@ -395,5 +395,5 @@ func TestHumaAPI_FrontmatterSuggest_CanonicalizesAllowedAndKeepsCustomTags(t *te
 	tags, ok := resp.Frontmatter["tags"].([]any)
 	require.True(t, ok)
 	require.Contains(t, tags, "rag")
-	require.Contains(t, tags, "NewTag")
+	require.Contains(t, tags, "newtag")
 }
