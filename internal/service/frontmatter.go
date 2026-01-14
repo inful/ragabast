@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -129,10 +130,32 @@ func parseFrontmatterSuggestionJSON(raw string) (FrontmatterSuggestion, error) {
 	s = s[start : end+1]
 
 	var out FrontmatterSuggestion
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return FrontmatterSuggestion{}, fmt.Errorf("invalid JSON: %w", err)
+	firstErr := json.Unmarshal([]byte(s), &out)
+	if firstErr == nil {
+		return out, nil
 	}
-	return out, nil
+
+	repaired := repairJSONObjectLike(s)
+	if repaired != s {
+		if err := json.Unmarshal([]byte(repaired), &out); err == nil {
+			return out, nil
+		}
+	}
+
+	return FrontmatterSuggestion{}, fmt.Errorf("invalid JSON: %w", firstErr)
+}
+
+var (
+	jsonBareKeyRe   = regexp.MustCompile(`([\{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)`)
+	jsonTrailingCom = regexp.MustCompile(`,\s*([\}\]])`)
+)
+
+func repairJSONObjectLike(s string) string {
+	// Quote bare keys: {foo: "bar"} -> {"foo": "bar"}
+	out := jsonBareKeyRe.ReplaceAllString(s, `$1"$2"$3`)
+	// Remove trailing commas before } or ]
+	out = jsonTrailingCom.ReplaceAllString(out, `$1`)
+	return out
 }
 
 func (s *Service) SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (FrontmatterSuggestion, error) {
