@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,7 @@ type QueryDebugInfo struct {
 // LLMOptions controls generation parameters.
 type LLMOptions struct {
 	Temperature *float64
+	History     []ChatMessage
 }
 
 // Query performs a search and generates a natural language response using LLM.
@@ -160,7 +162,7 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	}
 
 	contextItems := buildQueryContextItems(results)
-	prompt, systemPrompt, err := buildQueryPrompt(query, contextItems)
+	prompt, systemPrompt, err := buildQueryPrompt(query, contextItems, opts.History)
 	if err != nil {
 		return "", nil, fmt.Errorf("prompt build failed: %w", err)
 	}
@@ -169,8 +171,11 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)
 
 	llmOptions := map[string]any{}
+	maps.Copy(llmOptions, s.config.Ollama.Options)
 	if opts.Temperature != nil {
 		llmOptions["temperature"] = *opts.Temperature
+	} else if s.config.Ollama.Temperature != nil {
+		llmOptions["temperature"] = *s.config.Ollama.Temperature
 	}
 	var response string
 	if len(llmOptions) > 0 {

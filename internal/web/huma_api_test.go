@@ -22,6 +22,7 @@ type fakeHumaService struct {
 	answer            string
 	debug             *service.QueryDebugInfo
 	queryErr          error
+	lastQueryOpts     service.LLMOptions
 }
 
 func (f *fakeHumaService) CheckHealth(ctx context.Context) (bool, error) {
@@ -48,6 +49,7 @@ func (f *fakeHumaService) ListDocuments(ctx context.Context) ([]models.DocumentI
 }
 
 func (f *fakeHumaService) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
+	f.lastQueryOpts = opts
 	if f.queryErr != nil {
 		return "", nil, f.queryErr
 	}
@@ -147,4 +149,23 @@ func TestHumaAPI_Query_ReturnsLinks(t *testing.T) {
 	require.Equal(t, 200, w.Code)
 	require.Contains(t, w.Body.String(), "Links")
 	require.Contains(t, w.Body.String(), "https://example.com/a")
+}
+
+func TestHumaAPI_Query_ForwardsHistory(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{debug: &service.QueryDebugInfo{Results: []models.SearchResult{{DocumentURLs: []string{"https://example.com/a"}}}}}
+	RegisterHumaOperations(api, svc)
+
+	w := api.Post("/api/query", map[string]any{
+		"query": "How do I deploy it?",
+		"top_k": 5,
+		"history": []map[string]any{
+			{"role": "user", "content": "We are talking about ragabast."},
+			{"role": "assistant", "content": "Ok."},
+		},
+	})
+	require.Equal(t, 200, w.Code)
+	require.Len(t, svc.lastQueryOpts.History, 2)
+	require.Equal(t, "user", svc.lastQueryOpts.History[0].Role)
+	require.Contains(t, svc.lastQueryOpts.History[0].Content, "ragabast")
 }

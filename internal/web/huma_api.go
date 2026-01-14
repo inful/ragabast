@@ -17,6 +17,10 @@ type queryRequestBody struct {
 	TopK        int      `default:"5" doc:"Number of results to consider" json:"top_k" minimum:"1"`
 	Temperature *float64 `doc:"LLM temperature (sampling). If omitted, uses model default." json:"temperature,omitempty"`
 	IncludeHits bool     `doc:"Include retrieved chunks in the response." json:"include_hits,omitempty"`
+	History     []struct {
+		Role    string `doc:"Message role (user|assistant)." json:"role"`
+		Content string `doc:"Message content." json:"content"`
+	} `doc:"Optional conversation history for follow-up questions." json:"history,omitempty"`
 }
 
 type queryResponseBody struct {
@@ -183,7 +187,12 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI) {
 			topK = 5
 		}
 
-		answer, debug, err := svc.QueryDebugWithOptions(ctx, q, topK, service.LLMOptions{Temperature: input.Body.Temperature})
+		history := make([]service.ChatMessage, 0, len(input.Body.History))
+		for _, m := range input.Body.History {
+			history = append(history, service.ChatMessage{Role: m.Role, Content: m.Content})
+		}
+
+		answer, debug, err := svc.QueryDebugWithOptions(ctx, q, topK, service.LLMOptions{Temperature: input.Body.Temperature, History: history})
 		if err != nil {
 			return nil, huma.Error500InternalServerError("query failed")
 		}
