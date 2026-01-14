@@ -623,7 +623,7 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 
 		sug, err := svc.SuggestFrontmatter(ctx, markdown, existing, input.Body.AllowedCategories, input.Body.AllowedTags)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("frontmatter suggestion failed")
+			return nil, huma.Error500InternalServerError("frontmatter suggestion failed: " + err.Error())
 		}
 
 		applied := map[string]any{}
