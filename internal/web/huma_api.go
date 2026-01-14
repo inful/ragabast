@@ -3,13 +3,16 @@ package web
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"gopkg.in/yaml.v3"
 )
 
 type queryRequestBody struct {
@@ -103,6 +106,90 @@ type linkSuggestionsRequestBody struct {
 
 type linkSuggestionsResponseBody struct {
 	URLs []string `json:"urls"`
+}
+
+type frontmatterSuggestRequestBody struct {
+	Content           string   `doc:"Document content (may include YAML frontmatter)." json:"content"`
+	AllowedCategories []string `doc:"Allowed categories list (suggestions must come from here)." json:"allowed_categories"`
+	AllowedTags       []string `doc:"Preferred tags list (suggestions should prefer these)." json:"allowed_tags"`
+}
+
+type frontmatterSuggestResponseBody struct {
+	Frontmatter map[string]any `json:"frontmatter"`
+	Applied     map[string]any `json:"applied"`
+}
+
+func splitDocubilderFrontmatter(raw string) (frontmatterYAML []byte, markdown string, ok bool) {
+	content := strings.TrimSpace(raw)
+	if !strings.HasPrefix(content, "---\n") {
+		return nil, content, false
+	}
+	rest := content[len("---\n"):]
+	before, after, ok0 := strings.Cut(rest, "\n---\n")
+	if !ok0 {
+		return nil, content, false
+	}
+	fm := strings.TrimSpace(before)
+	md := strings.TrimSpace(after)
+	return []byte(fm), md, true
+}
+
+func normalizeStringSlice(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+func uniqueAppend(dst []string, src []string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(src))
+	for _, v := range dst {
+		seen[v] = struct{}{}
+	}
+	for _, v := range src {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		dst = append(dst, v)
+	}
+	return dst
+}
+
+func filterAllowed(values []string, allowed []string) []string {
+	allow := make(map[string]struct{}, len(allowed))
+	for _, a := range allowed {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		allow[a] = struct{}{}
+	}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := allow[v]; !ok {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 func uniqueNonEmptyStrings(values []string) []string {
@@ -433,6 +520,88 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 			return nil, huma.Error500InternalServerError("list documents failed")
 		}
 		return &struct{ Body documentsResponseBody }{Body: documentsResponseBody{Documents: docs}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "frontmatter-suggest",
+		Method:      http.MethodPost,
+		Path:        "/api/frontmatter/suggest",
+		Summary:     "Suggest frontmatter fields",
+		Description: "Uses the LLM to propose description, tags and categories from the document content. This endpoint does NOT retrieve vector DB context.",
+	}, func(ctx context.Context, input *struct{ Body frontmatterSuggestRequestBody }) (*struct {
+		Body frontmatterSuggestResponseBody
+	}, error,
+	) {
+		content := strings.TrimSpace(input.Body.Content)
+		if content == "" {
+			return nil, huma.Error400BadRequest("content is required")
+		}
+		if len(input.Body.AllowedCategories) == 0 {
+			return nil, huma.Error400BadRequest("allowed_categories is required")
+		}
+		if len(input.Body.AllowedTags) == 0 {
+			return nil, huma.Error400BadRequest("allowed_tags is required")
+		}
+
+		fmBytes, markdown, hasFM := splitDocubilderFrontmatter(content)
+		existing := map[string]any{}
+		if hasFM && len(fmBytes) > 0 {
+			if err := yaml.Unmarshal(fmBytes, &existing); err != nil {
+				return nil, huma.Error400BadRequest("invalid YAML frontmatter")
+			}
+		}
+
+		sug, err := svc.SuggestFrontmatter(ctx, markdown, existing, input.Body.AllowedCategories, input.Body.AllowedTags)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("frontmatter suggestion failed")
+		}
+
+		applied := map[string]any{}
+		merged := make(map[string]any, len(existing)+3)
+		maps.Copy(merged, existing)
+
+		// Description: only set if empty/missing.
+		if cur, ok := merged["description"].(string); ok && strings.TrimSpace(cur) != "" {
+			applied["description_set"] = false
+		} else if strings.TrimSpace(sug.Description) != "" {
+			merged["description"] = strings.TrimSpace(sug.Description)
+			applied["description_set"] = true
+		} else {
+			applied["description_set"] = false
+		}
+
+		// Categories: keep existing, add allowed suggestions.
+		existingCats := []string{}
+		if raw, ok := merged["categories"].([]any); ok {
+			existingCats = normalizeStringSlice(raw)
+		}
+		addedCats := filterAllowed(sug.Categories, input.Body.AllowedCategories)
+		finalCats := uniqueAppend(existingCats, addedCats)
+		if len(finalCats) > 0 {
+			merged["categories"] = finalCats
+		}
+		applied["categories_added"] = addedCats
+
+		// Tags: keep existing, add allowed tags + custom tags.
+		existingTags := []string{}
+		if raw, ok := merged["tags"].([]any); ok {
+			existingTags = normalizeStringSlice(raw)
+		}
+		addedAllowedTags := filterAllowed(sug.Tags, input.Body.AllowedTags)
+		customTags := uniqueNonEmptyStrings(sug.CustomTags)
+		finalTags := uniqueAppend(existingTags, uniqueAppend(addedAllowedTags, customTags))
+		if len(finalTags) > 0 {
+			merged["tags"] = finalTags
+		}
+		applied["tags_added"] = addedAllowedTags
+		applied["custom_tags_added"] = customTags
+
+		// Ensure response JSON is stable (no yaml.Node etc).
+		_, _ = json.Marshal(merged)
+
+		return &struct {
+			Body frontmatterSuggestResponseBody
+		}{Body: frontmatterSuggestResponseBody{Frontmatter: merged, Applied: applied}}, nil
 	})
 
 	huma.Register(api, huma.Operation{

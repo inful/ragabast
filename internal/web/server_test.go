@@ -41,6 +41,10 @@ func (f *fakeService) DeleteDocument(ctx context.Context, documentID string) err
 	return nil
 }
 
+func (f *fakeService) SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error) {
+	return service.FrontmatterSuggestion{}, nil
+}
+
 func (f *fakeService) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
 	if f.queryDebug == nil {
 		f.queryDebug = &service.QueryDebugInfo{Results: []models.SearchResult{}}

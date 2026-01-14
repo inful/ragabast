@@ -38,6 +38,10 @@ func (f *fakeChatService) DeleteDocument(ctx context.Context, documentID string)
 	return nil
 }
 
+func (f *fakeChatService) SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error) {
+	return service.FrontmatterSuggestion{}, nil
+}
+
 func (f *fakeChatService) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
 	return f.answer, &service.QueryDebugInfo{Results: []models.SearchResult{}}, nil
 }

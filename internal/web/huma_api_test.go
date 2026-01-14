@@ -30,6 +30,8 @@ type fakeHumaService struct {
 	debug             *service.QueryDebugInfo
 	queryErr          error
 	lastQueryOpts     service.LLMOptions
+	frontmatterSug    service.FrontmatterSuggestion
+	frontmatterErr    error
 }
 
 func (f *fakeHumaService) CheckHealth(ctx context.Context) (bool, error) {
@@ -93,6 +95,13 @@ func (f *fakeHumaService) QueryWithLLM(ctx context.Context, query string, model 
 }, error,
 ) {
 	return "", nil, nil
+}
+
+func (f *fakeHumaService) SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error) {
+	if f.frontmatterErr != nil {
+		return service.FrontmatterSuggestion{}, f.frontmatterErr
+	}
+	return f.frontmatterSug, nil
 }
 
 func TestHumaAPI_Health(t *testing.T) {
@@ -297,4 +306,62 @@ func TestHumaAPI_PruneDocuments_DryRunDoesNotDelete(t *testing.T) {
 	w := api.Post("/api/documents/prune", map[string]any{"delete_document_ids": []string{"doc-1"}, "dry_run": true})
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Empty(t, svc.deletedIDs)
+}
+
+func TestHumaAPI_FrontmatterSuggest_MergesAndGuards(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{frontmatterSug: service.FrontmatterSuggestion{
+		Description: "Suggested description.",
+		Categories:  []string{"Guides", "INVALID"},
+		Tags:        []string{"go", "rag"},
+		CustomTags:  []string{"custom-tag"},
+	}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/frontmatter/suggest", map[string]any{
+		"content":            "---\nuid: u-1\ndescription: existing desc\ntags:\n  - existing\nother: keepme\n---\n\n# Title\nHello\n",
+		"allowed_categories": []string{"Guides", "Reference"},
+		"allowed_tags":       []string{"go", "rag"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Frontmatter map[string]any `json:"frontmatter"`
+		Applied     map[string]any `json:"applied"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	// Existing frontmatter preserved.
+	require.Equal(t, "keepme", resp.Frontmatter["other"])
+	// Existing description not overwritten.
+	require.Equal(t, "existing desc", resp.Frontmatter["description"])
+
+	// Categories filtered to allowed list and merged.
+	cats, ok := resp.Frontmatter["categories"].([]any)
+	require.True(t, ok)
+	require.Contains(t, cats, "Guides")
+	require.NotContains(t, cats, "INVALID")
+
+	// Tags merged (existing + allowed + custom).
+	tags, ok := resp.Frontmatter["tags"].([]any)
+	require.True(t, ok)
+	require.Contains(t, tags, "existing")
+	require.Contains(t, tags, "go")
+	require.Contains(t, tags, "rag")
+	require.Contains(t, tags, "custom-tag")
+
+	// Applied should mention that we did not overwrite description.
+	require.Equal(t, false, resp.Applied["description_set"])
+}
+
+func TestHumaAPI_FrontmatterSuggest_ValidatesInputs(t *testing.T) {
+	_, api := humatest.New(t)
+	RegisterHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/frontmatter/suggest", map[string]any{
+		"content":            "# Hi",
+		"allowed_categories": []string{},
+		"allowed_tags":       []string{"go"},
+	})
+	require.Equal(t, http.StatusBadRequest, w.Code)
 }
