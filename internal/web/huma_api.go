@@ -74,7 +74,7 @@ type documentsResponseBody struct {
 	Documents []models.DocumentInfo `json:"documents"`
 }
 
-func RegisterHumaOperations(api huma.API, svc serviceAPI) {
+func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter) {
 	huma.Register(api, huma.Operation{
 		OperationID: "health",
 		Method:      http.MethodGet,
@@ -94,6 +94,13 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI) {
 		Path:        "/api/ingest",
 		Summary:     "Ingest a docubilder document",
 	}, func(ctx context.Context, input *struct{ Body ingestRequestBody }) (*struct{ Body ingestResponseBody }, error) {
+		if limiter != nil {
+			if !limiter.TryAcquire() {
+				return nil, huma.ErrorWithHeaders(huma.Error429TooManyRequests("ingest busy"), limiter.RetryAfterHeader())
+			}
+			defer limiter.Release()
+		}
+
 		content := strings.TrimSpace(input.Body.Content)
 		if content == "" {
 			return nil, huma.Error400BadRequest("content is required")
@@ -120,6 +127,13 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI) {
 		RawBody []byte `contentType:"text/markdown" required:"true"`
 	},
 	) (*struct{ Body ingestResponseBody }, error) {
+		if limiter != nil {
+			if !limiter.TryAcquire() {
+				return nil, huma.ErrorWithHeaders(huma.Error429TooManyRequests("ingest busy"), limiter.RetryAfterHeader())
+			}
+			defer limiter.Release()
+		}
+
 		if len(bytes.TrimSpace(input.RawBody)) == 0 {
 			return nil, huma.Error400BadRequest("request body is required")
 		}
@@ -148,6 +162,13 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI) {
 		}]
 	},
 	) (*struct{ Body ingestResponseBody }, error) {
+		if limiter != nil {
+			if !limiter.TryAcquire() {
+				return nil, huma.ErrorWithHeaders(huma.Error429TooManyRequests("ingest busy"), limiter.RetryAfterHeader())
+			}
+			defer limiter.Release()
+		}
+
 		form := input.RawBody.Data()
 		b, err := io.ReadAll(form.File)
 		if err != nil {

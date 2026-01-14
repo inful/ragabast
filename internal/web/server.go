@@ -97,7 +97,7 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 // registerRoutes registers all API routes and web handlers.
 func (s *Server) registerRoutes() {
 	// REST API (Huma).
-	registerHumaAPI(s.router, s.service)
+	registerHumaAPI(s.router, s.config, s.service)
 
 	// Web UI routes
 	s.router.Get("/", s.handleChatPage)

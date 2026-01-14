@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/ragabast/internal/models"
@@ -76,7 +77,7 @@ func (f *fakeHumaService) QueryWithLLM(ctx context.Context, query string, model 
 
 func TestHumaAPI_Health(t *testing.T) {
 	_, api := humatest.New(t)
-	RegisterHumaOperations(api, &fakeHumaService{})
+	RegisterHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second))
 
 	w := api.Get("/api/health")
 	require.Equal(t, 200, w.Code)
@@ -85,7 +86,7 @@ func TestHumaAPI_Health(t *testing.T) {
 
 func TestHumaAPI_Ingest_ValidatesContent(t *testing.T) {
 	_, api := humatest.New(t)
-	RegisterHumaOperations(api, &fakeHumaService{})
+	RegisterHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second))
 
 	w := api.Post("/api/ingest", map[string]any{"content": ""})
 	require.Equal(t, 400, w.Code)
@@ -94,7 +95,7 @@ func TestHumaAPI_Ingest_ValidatesContent(t *testing.T) {
 func TestHumaAPI_IngestRaw_AcceptsMarkdownBody(t *testing.T) {
 	h, api := humatest.New(t)
 	svc := &fakeHumaService{}
-	RegisterHumaOperations(api, svc)
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -114,7 +115,7 @@ func TestHumaAPI_IngestRaw_AcceptsMarkdownBody(t *testing.T) {
 func TestHumaAPI_IngestFile_AcceptsMultipartUpload(t *testing.T) {
 	h, api := humatest.New(t)
 	svc := &fakeHumaService{}
-	RegisterHumaOperations(api, svc)
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
 
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -143,7 +144,7 @@ func TestHumaAPI_IngestFile_AcceptsMultipartUpload(t *testing.T) {
 func TestHumaAPI_Query_ReturnsLinks(t *testing.T) {
 	_, api := humatest.New(t)
 	svc := &fakeHumaService{debug: &service.QueryDebugInfo{Results: []models.SearchResult{{DocumentURLs: []string{"https://example.com/a"}}}}}
-	RegisterHumaOperations(api, svc)
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
 
 	w := api.Post("/api/query", map[string]any{"query": "what is ragabast?", "top_k": 5})
 	require.Equal(t, 200, w.Code)
@@ -154,7 +155,7 @@ func TestHumaAPI_Query_ReturnsLinks(t *testing.T) {
 func TestHumaAPI_Query_ForwardsHistory(t *testing.T) {
 	_, api := humatest.New(t)
 	svc := &fakeHumaService{debug: &service.QueryDebugInfo{Results: []models.SearchResult{{DocumentURLs: []string{"https://example.com/a"}}}}}
-	RegisterHumaOperations(api, svc)
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
 
 	w := api.Post("/api/query", map[string]any{
 		"query": "How do I deploy it?",
@@ -168,4 +169,15 @@ func TestHumaAPI_Query_ForwardsHistory(t *testing.T) {
 	require.Len(t, svc.lastQueryOpts.History, 2)
 	require.Equal(t, "user", svc.lastQueryOpts.History[0].Role)
 	require.Contains(t, svc.lastQueryOpts.History[0].Content, "ragabast")
+}
+
+func TestHumaAPI_Ingest_Returns429WithRetryAfterWhenSaturated(t *testing.T) {
+	_, api := humatest.New(t)
+	limiter := NewIngestLimiter(1, 2*time.Second)
+	require.True(t, limiter.TryAcquire())
+	RegisterHumaOperations(api, &fakeHumaService{}, limiter)
+
+	w := api.Post("/api/ingest", map[string]any{"content": "---\nuid: a\n---\n\n# Title\nHi\n"})
+	require.Equal(t, http.StatusTooManyRequests, w.Code)
+	require.Equal(t, "2", w.Header().Get("Retry-After"))
 }
