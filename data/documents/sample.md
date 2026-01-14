@@ -9,10 +9,10 @@ categories:
   - "guides"
 urls:
   - "https://example.com/docs/sample"
-  - "https://github.com/ragabast"
+  - "https://github.com/inful/ragabast"
 created_at: "2026-01-12T22:00:00Z"
 updated_at: "2026-01-12T22:00:00Z"
-fingerprint: b7add053acff6f4d1f5a7b6e66f7d6e6a8e2d9d8b1f956c534027be0f41fd3f9
+fingerprint: b7add053acff6f4d1f5a7b6e66f7d6e6a8e2d9d8b1f956c534027be0f41ed3f9
 ---
 
 # Getting Started with Ragabast
