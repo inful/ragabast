@@ -104,6 +104,26 @@ func (f *fakeHumaService) SuggestFrontmatter(ctx context.Context, content string
 	return f.frontmatterSug, nil
 }
 
+func (f *fakeHumaService) GetNormalizedTags(ctx context.Context) ([]string, error) {
+	return []string{"go", "rag", "api"}, nil
+}
+
+func (f *fakeHumaService) GetNormalizedCategories(ctx context.Context) ([]string, error) {
+	return []string{"Guides", "Reference", "Tutorials"}, nil
+}
+
+func (f *fakeHumaService) GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error) {
+	tags, err = f.GetNormalizedTags(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	categories, err = f.GetNormalizedCategories(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tags, categories, nil
+}
+
 func TestHumaAPI_Health(t *testing.T) {
 	_, api := humatest.New(t)
 	RegisterHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second))
@@ -354,6 +374,44 @@ func TestHumaAPI_FrontmatterSuggest_MergesAndGuards(t *testing.T) {
 	require.Equal(t, false, resp.Applied["description_set"])
 }
 
+func TestHumaAPI_FrontmatterSuggest_MergesExistingWithAllowed(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{frontmatterSug: service.FrontmatterSuggestion{
+		Description: "New description.",
+		Categories:  []string{"guides"},
+		Tags:        []string{"go", "newtag"},
+		CustomTags:  nil,
+	}}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	// The service should receive merged allowed lists that include existing tags/categories
+	// This test verifies that existing tags and categories are added to the allowed lists
+	w := api.Post("/api/frontmatter/suggest", map[string]any{
+		"content":            "---\nuid: u-1\ncategories:\n  - Reference\ntags:\n  - existing\n---\n\n# Title\nHello\n",
+		"allowed_categories": []string{"Guides", "Reference"},
+		"allowed_tags":       []string{"go", "rag"},
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Frontmatter map[string]any `json:"frontmatter"`
+		Applied     map[string]any `json:"applied"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+	// Verify the final result includes both existing and new
+	cats, ok := resp.Frontmatter["categories"].([]any)
+	require.True(t, ok)
+	require.Contains(t, cats, "Guides")    // From LLM suggestion (allowed)
+	require.Contains(t, cats, "Reference") // From existing
+
+	tags, ok := resp.Frontmatter["tags"].([]any)
+	require.True(t, ok)
+	require.Contains(t, tags, "existing") // From existing
+	require.Contains(t, tags, "go")       // From LLM suggestion (allowed)
+	require.Contains(t, tags, "newtag")   // From LLM suggestion (allowed)
+}
+
 func TestHumaAPI_FrontmatterSuggest_ValidatesInputs(t *testing.T) {
 	_, api := humatest.New(t)
 	RegisterHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second))
@@ -396,4 +454,51 @@ func TestHumaAPI_FrontmatterSuggest_CanonicalizesAllowedAndKeepsCustomTags(t *te
 	require.True(t, ok)
 	require.Contains(t, tags, "rag")
 	require.Contains(t, tags, "newtag")
+}
+
+func TestHumaAPI_GetTags_ReturnsNormalizedTags(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Get("/api/tags")
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Tags []string `json:"tags"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{"go", "rag", "api"}, resp.Tags)
+}
+
+func TestHumaAPI_GetCategories_ReturnsNormalizedCategories(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Get("/api/categories")
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Categories []string `json:"categories"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{"Guides", "Reference", "Tutorials"}, resp.Categories)
+}
+
+func TestHumaAPI_GetTagsAndCategories_ReturnsBoth(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Get("/api/tags-categories")
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Tags       []string `json:"tags"`
+		Categories []string `json:"categories"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, []string{"go", "rag", "api"}, resp.Tags)
+	require.Equal(t, []string{"Guides", "Reference", "Tutorials"}, resp.Categories)
 }

@@ -119,6 +119,19 @@ type frontmatterSuggestResponseBody struct {
 	Applied     map[string]any `json:"applied"`
 }
 
+type tagsResponseBody struct {
+	Tags []string `json:"tags"`
+}
+
+type categoriesResponseBody struct {
+	Categories []string `json:"categories"`
+}
+
+type tagsAndCategoriesResponseBody struct {
+	Tags       []string `json:"tags"`
+	Categories []string `json:"categories"`
+}
+
 func splitDocubilderFrontmatter(raw string) (frontmatterYAML []byte, markdown string, ok bool) {
 	content := strings.TrimSpace(raw)
 	if !strings.HasPrefix(content, "---\n") {
@@ -621,7 +634,23 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 			}
 		}
 
-		sug, err := svc.SuggestFrontmatter(ctx, markdown, existing, input.Body.AllowedCategories, input.Body.AllowedTags)
+		// Merge existing tags/categories with allowed lists for the LLM
+		mergedAllowedCategories := uniqueNonEmptyStrings(input.Body.AllowedCategories)
+		mergedAllowedTags := uniqueNonEmptyStrings(input.Body.AllowedTags)
+
+		// Add existing categories to allowed list
+		if raw, ok := existing["categories"].([]any); ok {
+			existingCats := normalizeStringSlice(raw)
+			mergedAllowedCategories = uniqueAppend(mergedAllowedCategories, existingCats)
+		}
+
+		// Add existing tags to allowed list
+		if raw, ok := existing["tags"].([]any); ok {
+			existingTags := normalizeStringSlice(raw)
+			mergedAllowedTags = uniqueAppend(mergedAllowedTags, existingTags)
+		}
+
+		sug, err := svc.SuggestFrontmatter(ctx, markdown, existing, mergedAllowedCategories, mergedAllowedTags)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("frontmatter suggestion failed: " + err.Error())
 		}
@@ -758,6 +787,53 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 
 		resp := pruneDocumentsResponseBody{DryRun: body.DryRun, Deleted: toDelete, Kept: kept, NotFound: notFound}
 		return &struct{ Body pruneDocumentsResponseBody }{Body: resp}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-tags",
+		Method:      http.MethodGet,
+		Path:        "/api/tags",
+		Summary:     "Get normalized tags",
+		Description: "Returns all unique tags from the vector database, normalized to lowercase and sorted.",
+	}, func(ctx context.Context, input *struct{}) (*struct{ Body tagsResponseBody }, error) {
+		tags, err := svc.GetNormalizedTags(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to retrieve tags")
+		}
+		return &struct{ Body tagsResponseBody }{Body: tagsResponseBody{Tags: tags}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-categories",
+		Method:      http.MethodGet,
+		Path:        "/api/categories",
+		Summary:     "Get normalized categories",
+		Description: "Returns all unique categories from the vector database, trimmed of whitespace and sorted.",
+	}, func(ctx context.Context, input *struct{}) (*struct{ Body categoriesResponseBody }, error) {
+		categories, err := svc.GetNormalizedCategories(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to retrieve categories")
+		}
+		return &struct{ Body categoriesResponseBody }{Body: categoriesResponseBody{Categories: categories}}, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-tags-and-categories",
+		Method:      http.MethodGet,
+		Path:        "/api/tags-categories",
+		Summary:     "Get both tags and categories",
+		Description: "Returns all unique tags (lowercase) and categories (preserved case) from the vector database.",
+	}, func(ctx context.Context, input *struct{}) (*struct{ Body tagsAndCategoriesResponseBody }, error) {
+		tags, categories, err := svc.GetTagsAndCategories(ctx)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("failed to retrieve tags and categories")
+		}
+		return &struct{ Body tagsAndCategoriesResponseBody }{
+			Body: tagsAndCategoriesResponseBody{
+				Tags:       tags,
+				Categories: categories,
+			},
+		}, nil
 	})
 }
 

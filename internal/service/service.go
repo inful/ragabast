@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/ragabast/internal/chunker"
@@ -432,6 +433,74 @@ func (s *Service) QueryWithLLM(ctx context.Context, query string, model string, 
 	return response, sources, nil
 }
 
+// GetNormalizedTags retrieves all unique tags from the vector database, normalized to lowercase.
+func (s *Service) GetNormalizedTags(ctx context.Context) ([]string, error) {
+	docs, err := s.vectorOps.GetUniqueDocuments(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	tagSet := make(map[string]bool)
+	for _, doc := range docs {
+		for _, tag := range doc.Tags {
+			normalized := strings.ToLower(strings.TrimSpace(tag))
+			if normalized != "" {
+				tagSet[normalized] = true
+			}
+		}
+	}
+
+	tags := make([]string, 0, len(tagSet))
+	for tag := range tagSet {
+		tags = append(tags, tag)
+	}
+
+	// Sort for consistent ordering
+	return sortStrings(tags), nil
+}
+
+// GetNormalizedCategories retrieves all unique categories from the vector database.
+// Categories are kept as-is (preserving capitalization) but trimmed of whitespace.
+func (s *Service) GetNormalizedCategories(ctx context.Context) ([]string, error) {
+	docs, err := s.vectorOps.GetUniqueDocuments(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	categorySet := make(map[string]bool)
+	for _, doc := range docs {
+		for _, category := range doc.Categories {
+			normalized := strings.TrimSpace(category)
+			if normalized != "" {
+				categorySet[normalized] = true
+			}
+		}
+	}
+
+	categories := make([]string, 0, len(categorySet))
+	for category := range categorySet {
+		categories = append(categories, category)
+	}
+
+	// Sort for consistent ordering
+	return sortStrings(categories), nil
+}
+
+// GetTagsAndCategories retrieves both normalized tags and categories.
+func (s *Service) GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error) {
+	tags, err = s.GetNormalizedTags(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	categories, err = s.GetNormalizedCategories(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return tags, categories, nil
+}
+
 // CheckHealth validates service health.
 func (s *Service) CheckHealth(ctx context.Context) (bool, error) {
 	err := s.ValidateConnection(ctx)
@@ -439,4 +508,10 @@ func (s *Service) CheckHealth(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// sortStrings is a helper to sort string slices in place and return them.
+func sortStrings(strs []string) []string {
+	sort.Strings(strs)
+	return strs
 }
