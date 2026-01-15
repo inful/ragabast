@@ -35,6 +35,9 @@ type serviceAPI interface {
 		Content string
 		Score   float64
 	}, error)
+	GetNormalizedTags(ctx context.Context) ([]string, error)
+	GetNormalizedCategories(ctx context.Context) ([]string, error)
+	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)
 }
 
 // Server represents the web server.

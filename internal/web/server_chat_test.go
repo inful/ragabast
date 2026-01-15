@@ -58,6 +58,26 @@ func (f *fakeChatService) QueryWithLLM(ctx context.Context, query string, model 
 	return "", nil, nil
 }
 
+func (f *fakeChatService) GetNormalizedTags(ctx context.Context) ([]string, error) {
+	return []string{"go", "rag", "api"}, nil
+}
+
+func (f *fakeChatService) GetNormalizedCategories(ctx context.Context) ([]string, error) {
+	return []string{"Guides", "Reference", "Tutorials"}, nil
+}
+
+func (f *fakeChatService) GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error) {
+	tags, err = f.GetNormalizedTags(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	categories, err = f.GetNormalizedCategories(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tags, categories, nil
+}
+
 func TestChatPage_RendersHTMXForm(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeChatService{answer: "ok"})

@@ -64,6 +64,26 @@ func (f *fakeService) QueryWithLLM(ctx context.Context, query string, model stri
 	return "", nil, nil
 }
 
+func (f *fakeService) GetNormalizedTags(ctx context.Context) ([]string, error) {
+	return []string{"go", "rag", "api"}, nil
+}
+
+func (f *fakeService) GetNormalizedCategories(ctx context.Context) ([]string, error) {
+	return []string{"Guides", "Reference", "Tutorials"}, nil
+}
+
+func (f *fakeService) GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error) {
+	tags, err = f.GetNormalizedTags(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	categories, err = f.GetNormalizedCategories(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return tags, categories, nil
+}
+
 func TestHandleSearchAPI_FiltersByMinScore(t *testing.T) {
 	cfg := config.DefaultConfig()
 	svc := &fakeService{
