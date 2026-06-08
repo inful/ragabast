@@ -41,22 +41,38 @@ type Config struct {
 	Paths PathsConfig `yaml:"paths"`
 }
 
-// OllamaConfig holds Ollama API configuration.
+// OllamaConfig holds configuration for the embedding and chat-completions
+// servers. The struct keeps the historical name for backwards-compatible
+// config files, but the two URLs are independent: you can point embeddings
+// at one server (e.g. Ollama running the nomic-embed-text image) and chat
+// at a different OpenAI-compatible server (vLLM, llama.cpp, LM Studio, etc.).
 type OllamaConfig struct {
-	// BaseURL is the Ollama API endpoint.
+	// BaseURL is the embeddings server endpoint. Defaults to a local Ollama
+	// instance running the nomic-embed-text image.
 	BaseURL string `env:"OLLAMA_BASE_URL" yaml:"base_url"`
 
-	// EmbeddingModel is the model used for embeddings.
+	// EmbeddingModel is the model used for embeddings on the embeddings server.
 	EmbeddingModel string `env:"OLLAMA_EMBEDDING_MODEL" yaml:"embedding_model"`
 
-	// GenerationModel is the model used for text generation.
-	GenerationModel string `env:"OLLAMA_GENERATION_MODEL" yaml:"generation_model"`
+	// ChatBaseURL is the OpenAI-compatible chat completions server endpoint.
+	// Defaults to the same local Ollama instance (which exposes
+	// /v1/chat/completions from 0.5+), but can point at vLLM, llama.cpp
+	// --server, LM Studio, llama-stack, OpenRouter, OpenAI, etc.
+	ChatBaseURL string `env:"OLLAMA_CHAT_BASE_URL" yaml:"chat_base_url"`
+
+	// ChatModel is the model name sent to the chat completions server.
+	ChatModel string `env:"OLLAMA_CHAT_MODEL" yaml:"chat_model"`
+
+	// APIKey is sent as `Authorization: Bearer <key>` to the chat server.
+	// Leave empty for unauthenticated local servers.
+	APIKey string `env:"OLLAMA_API_KEY" yaml:"api_key"`
 
 	// Temperature controls LLM sampling. If omitted, the model default is used.
 	Temperature *float64 `env:"OLLAMA_TEMPERATURE" yaml:"temperature,omitempty"`
 
-	// Options are model/runtime generation options passed to Ollama's /api/generate "options" object.
-	// Common keys include: top_k, top_p, min_p, num_predict, num_ctx, seed, stop.
+	// Options are model/runtime generation options forwarded to the chat server
+	// (e.g. top_p, top_k, num_predict). These are merged into the top-level
+	// /v1/chat/completions request body, so any vendor-specific field works.
 	Options map[string]any `env:"OLLAMA_OPTIONS_JSON" yaml:"options,omitempty"`
 
 	// Timeout for API calls.
@@ -64,10 +80,6 @@ type OllamaConfig struct {
 
 	// KeepAlive determines if connections should be kept alive.
 	KeepAlive bool `env:"OLLAMA_KEEP_ALIVE" yaml:"keep_alive"`
-
-	// EnableThinking enables thinking mode for Ollama.
-	// When enabled, adds a control message with role "control" and content "thinking" to the messages array.
-	EnableThinking bool `env:"OLLAMA_ENABLE_THINKING" yaml:"enable_thinking"`
 }
 
 // VectorDBConfig holds vector database configuration.
@@ -169,11 +181,12 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Ollama: OllamaConfig{
-			BaseURL:         "http://localhost:11434",
-			EmbeddingModel:  "nomic-embed-text:v1.5",
-			GenerationModel: "gemma:2b",
-			Timeout:         30 * time.Second,
-			KeepAlive:       true,
+			BaseURL:        "http://localhost:11434",
+			ChatBaseURL:    "http://localhost:11434",
+			ChatModel:      "gemma:2b",
+			EmbeddingModel: "nomic-embed-text:v1.5",
+			Timeout:        30 * time.Second,
+			KeepAlive:      true,
 			// RAG-friendly defaults: low temperature + conservative sampling.
 			Temperature: &defaultTemp,
 			Options: map[string]any{
@@ -291,8 +304,14 @@ func (c *Config) ApplyEnvOverrides() {
 	if model := os.Getenv("OLLAMA_EMBEDDING_MODEL"); model != "" {
 		c.Ollama.EmbeddingModel = model
 	}
-	if model := os.Getenv("OLLAMA_GENERATION_MODEL"); model != "" {
-		c.Ollama.GenerationModel = model
+	if url := os.Getenv("OLLAMA_CHAT_BASE_URL"); url != "" {
+		c.Ollama.ChatBaseURL = url
+	}
+	if model := os.Getenv("OLLAMA_CHAT_MODEL"); model != "" {
+		c.Ollama.ChatModel = model
+	}
+	if key := os.Getenv("OLLAMA_API_KEY"); key != "" {
+		c.Ollama.APIKey = key
 	}
 	if timeout := os.Getenv("OLLAMA_TIMEOUT"); timeout != "" {
 		if d, err := time.ParseDuration(timeout); err == nil {
@@ -435,8 +454,11 @@ func (c *Config) Validate() error {
 	if c.Ollama.EmbeddingModel == "" {
 		errs = append(errs, "ollama.embedding_model is required")
 	}
-	if c.Ollama.GenerationModel == "" {
-		errs = append(errs, "ollama.generation_model is required")
+	if c.Ollama.ChatBaseURL == "" {
+		errs = append(errs, "ollama.chat_base_url is required")
+	}
+	if c.Ollama.ChatModel == "" {
+		errs = append(errs, "ollama.chat_model is required")
 	}
 	if c.Ollama.Timeout <= 0 {
 		errs = append(errs, "ollama.timeout must be positive")

@@ -162,8 +162,13 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		return "No relevant information found.", nil, nil
 	}
 
-	model := s.config.Ollama.GenerationModel
-	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)
+	model := s.config.Ollama.ChatModel
+	llmClient := vector.NewOpenAILLMClientWithOptions(
+		s.config.Ollama.ChatBaseURL,
+		model,
+		s.config.Ollama.APIKey,
+		s.config.Ollama.Timeout,
+	)
 
 	llmOptions := map[string]any{}
 	maps.Copy(llmOptions, s.config.Ollama.Options)
@@ -173,28 +178,13 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		llmOptions["temperature"] = *s.config.Ollama.Temperature
 	}
 
-	// Two-hop retrieve-or-final loop is enabled only when thinking mode is on.
-	// This keeps the default behavior stable for non-thinking generation.
-	if s.config.Ollama.EnableThinking {
-		loopResp, loopDbg, loopErr := s.queryWithRetrieveOrFinalLoop(ctx, llmClient, llmOptions, query, results, limit, opts)
-		if loopErr != nil {
-			return "", nil, loopErr
-		}
-		return loopResp, loopDbg, nil
-	}
-
 	contextItems := buildQueryContextItems(results)
 	prompt, systemPrompt, err := buildQueryPrompt(query, contextItems, opts.History)
 	if err != nil {
 		return "", nil, fmt.Errorf("prompt build failed: %w", err)
 	}
 
-	var response string
-	if len(llmOptions) > 0 {
-		response, err = llmClient.GenerateWithOptions(ctx, prompt, llmOptions)
-	} else {
-		response, err = llmClient.Generate(ctx, prompt)
-	}
+	response, err := llmClient.ChatWithSystem(ctx, systemPrompt, prompt, llmOptions)
 	if err != nil {
 		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}
@@ -208,141 +198,6 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		System:  systemPrompt,
 		Prompt:  prompt,
 	}, nil
-}
-
-func (s *Service) queryWithRetrieveOrFinalLoop(
-	ctx context.Context,
-	llmClient *vector.OllamaLLMClient,
-	llmOptions map[string]any,
-	query string,
-	initialResults []models.SearchResult,
-	initialLimit int,
-	opts LLMOptions,
-) (string, *QueryDebugInfo, error) {
-	cfg := defaultRetrieveOrFinalConfig()
-
-	contextItems := buildQueryContextItems(initialResults)
-	decisionPrompt, _, err := buildRetrieveOrFinalPrompt(query, contextItems, opts.History)
-	if err != nil {
-		return "", nil, fmt.Errorf("prompt build failed: %w", err)
-	}
-
-	var decisionRaw string
-	if len(llmOptions) > 0 {
-		decisionRaw, err = llmClient.GenerateWithThinkingWithOptions(ctx, decisionPrompt, llmOptions)
-	} else {
-		decisionRaw, err = llmClient.GenerateWithThinking(ctx, decisionPrompt)
-	}
-	if err != nil {
-		return "", nil, fmt.Errorf("LLM decision failed: %w", err)
-	}
-
-	decision, err := parseRetrieveOrFinalDecision(decisionRaw)
-	if err != nil {
-		// Fall back to answering directly with the initial context.
-		decision = retrieveOrFinalDecision{Action: "final"}
-	}
-	decision = sanitizeRetrieveOrFinalDecision(decision, cfg)
-
-	switch decision.Action {
-	case "retrieve":
-		if len(decision.Queries) == 0 {
-			decision.Action = "final"
-		}
-	case "final":
-		// ok
-	default:
-		decision.Action = "final"
-	}
-
-	results := initialResults
-	if decision.Action == "retrieve" {
-		topK := decision.TopK
-		if topK <= 0 {
-			topK = initialLimit
-		}
-		if topK <= 0 {
-			topK = 5
-		}
-		if topK > cfg.MaxTopK {
-			topK = cfg.MaxTopK
-		}
-
-		results = s.retrieveAdditionalResults(ctx, results, decision.Queries, topK, cfg.MaxTotalChunks)
-	}
-
-	contextItems = buildQueryContextItems(results)
-	finalPrompt, finalSystem, err := buildQueryPrompt(query, contextItems, opts.History)
-	if err != nil {
-		return "", nil, fmt.Errorf("prompt build failed: %w", err)
-	}
-
-	var response string
-	if decision.Action == "final" && decision.Answer != "" {
-		response = decision.Answer
-	} else {
-		if len(llmOptions) > 0 {
-			response, err = llmClient.GenerateWithThinkingWithOptions(ctx, finalPrompt, llmOptions)
-		} else {
-			response, err = llmClient.GenerateWithThinking(ctx, finalPrompt)
-		}
-		if err != nil {
-			return "", nil, fmt.Errorf("LLM generation failed: %w", err)
-		}
-	}
-
-	response = appendLinksSection(response, extractURLs(results))
-	return response, &QueryDebugInfo{
-		Model:   s.config.Ollama.GenerationModel,
-		Results: results,
-		Context: strings.Join(contextItems, "\n\n"),
-		System:  finalSystem,
-		Prompt:  finalPrompt,
-	}, nil
-}
-
-func (s *Service) retrieveAdditionalResults(
-	ctx context.Context,
-	base []models.SearchResult,
-	queries []string,
-	topK int,
-	maxTotal int,
-) []models.SearchResult {
-	if len(queries) == 0 || topK <= 0 || maxTotal <= 0 {
-		return base
-	}
-
-	results := base
-	seen := make(map[string]struct{}, len(results))
-	for _, r := range results {
-		if r.ChunkID == "" {
-			continue
-		}
-		seen[r.ChunkID] = struct{}{}
-	}
-
-	for _, q := range queries {
-		if len(results) >= maxTotal {
-			break
-		}
-		extra, err := s.vectorOps.Search(ctx, q, topK, nil)
-		if err != nil {
-			continue
-		}
-		for _, r := range extra {
-			if len(results) >= maxTotal {
-				break
-			}
-			if r.ChunkID != "" {
-				if _, ok := seen[r.ChunkID]; ok {
-					continue
-				}
-				seen[r.ChunkID] = struct{}{}
-			}
-			results = append(results, r)
-		}
-	}
-	return results
 }
 
 // ListDocuments returns all ingested documents.
@@ -390,10 +245,10 @@ func (s *Service) GetStats(ctx context.Context) (map[string]any, error) {
 	}
 
 	return map[string]any{
-		"total_chunks":     count,
-		"embedding_model":  s.config.Ollama.EmbeddingModel,
-		"generation_model": s.config.Ollama.GenerationModel,
-		"collection_name":  s.config.VectorDB.CollectionName,
+		"total_chunks":    count,
+		"embedding_model": s.config.Ollama.EmbeddingModel,
+		"chat_model":      s.config.Ollama.ChatModel,
+		"collection_name": s.config.VectorDB.CollectionName,
 	}, nil
 }
 
@@ -442,10 +297,15 @@ func (s *Service) QueryWithContext(ctx context.Context, query string, context st
 	}
 
 	// Generate LLM response
-	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, s.config.Ollama.GenerationModel, s.config.Ollama.Timeout)
+	llmClient := vector.NewOpenAILLMClientWithOptions(
+		s.config.Ollama.ChatBaseURL,
+		s.config.Ollama.ChatModel,
+		s.config.Ollama.APIKey,
+		s.config.Ollama.Timeout,
+	)
 	prompt := fmt.Sprintf("Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
 
-	response, err := llmClient.Generate(ctx, prompt)
+	response, err := llmClient.ChatWithSystem(ctx, "", prompt, nil)
 	if err != nil {
 		return "", fmt.Errorf("LLM generation failed: %w", err)
 	}
@@ -570,8 +430,13 @@ func (s *Service) QueryWithLLM(ctx context.Context, query string, model string, 
 	prompt := promptBuilder.String() + fmt.Sprintf("assistant: Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
 
 	// Generate LLM response
-	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)
-	response, err := llmClient.Generate(ctx, prompt)
+	llmClient := vector.NewOpenAILLMClientWithOptions(
+		s.config.Ollama.ChatBaseURL,
+		model,
+		s.config.Ollama.APIKey,
+		s.config.Ollama.Timeout,
+	)
+	response, err := llmClient.ChatWithSystem(ctx, "", prompt, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}

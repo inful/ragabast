@@ -390,14 +390,19 @@ func (s *Service) SuggestFrontmatter(ctx context.Context, content string, existi
 	promptSize := len(prompt)
 	log.Printf("FRONTMATTER_SUGGESTION_PROMPT: line_count=%d, content_len=%d, prompt_len=%d", strings.Count(processedContent, "\n")+1, len(processedContent), promptSize)
 
-	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, s.config.Ollama.GenerationModel, s.config.Ollama.Timeout)
+	llmClient := vector.NewOpenAILLMClientWithOptions(
+		s.config.Ollama.ChatBaseURL,
+		s.config.Ollama.ChatModel,
+		s.config.Ollama.APIKey,
+		s.config.Ollama.Timeout,
+	)
 
 	options := map[string]any{}
 	maps.Copy(options, s.config.Ollama.Options)
 	// Make output more deterministic.
 	options["temperature"] = 0.1
 
-	resp, err := llmClient.GenerateWithOptions(ctx, prompt, options)
+	resp, err := llmClient.ChatWithSystem(ctx, "", prompt, options)
 	if err != nil {
 		return FrontmatterSuggestion{}, fmt.Errorf("LLM generation failed: %w", err)
 	}
