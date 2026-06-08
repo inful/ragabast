@@ -7,10 +7,13 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
+	"github.com/ragabast/internal/config"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
 	"github.com/stretchr/testify/require"
@@ -469,6 +472,103 @@ func TestHumaAPI_GetTags_ReturnsNormalizedTags(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, []string{"go", "rag", "api"}, resp.Tags)
+}
+
+func TestHumaAPI_Query_RetrieveOrFinalTwoHopAddsLinks(t *testing.T) {
+	type ollama struct {
+		srv   *httptest.Server
+		mu    sync.Mutex
+		calls int
+	}
+
+	o := &ollama{}
+	o.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/embeddings":
+			var req struct {
+				Prompt string `json:"prompt"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(err.Error()))
+				return
+			}
+			_ = r.Body.Close()
+
+			p := req.Prompt
+			vec := []float32{0, 0, 1}
+			switch {
+			case strings.Contains(p, "DOC1") || strings.TrimSpace(p) == "q1":
+				vec = []float32{1, 0, 0}
+			case strings.Contains(p, "DOC2") || strings.TrimSpace(p) == "q2":
+				vec = []float32{0, 1, 0}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{"embedding": vec}); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(err.Error()))
+				return
+			}
+			return
+		case "/api/generate":
+			o.mu.Lock()
+			o.calls++
+			callNum := o.calls
+			o.mu.Unlock()
+
+			var out string
+			if callNum == 1 {
+				out = `{"action":"retrieve","queries":["q2"],"top_k":1}`
+			} else {
+				out = "Answer."
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{"response": out, "done": true}); err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(err.Error()))
+				return
+			}
+			return
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer o.srv.Close()
+
+	cfg := config.DefaultConfig()
+	cfg.Ollama.BaseURL = o.srv.URL
+	cfg.Ollama.EnableThinking = true
+	cfg.Ollama.Timeout = 5 * time.Second
+	cfg.VectorDB.PersistenceDir = t.TempDir()
+	cfg.VectorDB.CollectionName = "ragabast-test"
+	cfg.VectorDB.EmbeddingDimension = 3
+	cfg.Processing.MaxChunkSize = 5000
+	cfg.Processing.MinChunkSize = 1
+
+	svc, err := service.NewService(cfg)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	_, err = svc.IngestDocument(ctx, "---\nuid: doc-1\nurls:\n  - https://example.com/doc1\n---\n# Doc 1\nDOC1\n")
+	require.NoError(t, err)
+	_, err = svc.IngestDocument(ctx, "---\nuid: doc-2\nurls:\n  - https://example.com/doc2\n---\n# Doc 2\nDOC2\n")
+	require.NoError(t, err)
+
+	_, api := humatest.New(t)
+	RegisterHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second))
+
+	w := api.Post("/api/query", map[string]any{"query": "q1", "top_k": 1})
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Answer string   `json:"answer"`
+		Links  []string `json:"links"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Contains(t, resp.Answer, "Answer.")
+	require.Contains(t, resp.Answer, "https://example.com/doc1")
+	require.Contains(t, resp.Answer, "https://example.com/doc2")
+	require.ElementsMatch(t, []string{"https://example.com/doc1", "https://example.com/doc2"}, resp.Links)
 }
 
 func TestHumaAPI_GetCategories_ReturnsNormalizedCategories(t *testing.T) {

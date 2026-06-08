@@ -13,14 +13,21 @@ import (
 	"github.com/ragabast/internal/models"
 )
 
+// OllamaMessage represents a message in the conversation.
+type OllamaMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // OllamaGenerateRequest represents the request to generate text via Ollama.
 type OllamaGenerateRequest struct {
-	Model    string         `json:"model"`
-	Prompt   string         `json:"prompt"`
-	Stream   bool           `json:"stream"`
-	Options  map[string]any `json:"options,omitempty"`
-	System   string         `json:"system,omitempty"`
-	Template string         `json:"template,omitempty"`
+	Model    string          `json:"model"`
+	Prompt   string          `json:"prompt"`
+	Stream   bool            `json:"stream"`
+	Options  map[string]any  `json:"options,omitempty"`
+	System   string          `json:"system,omitempty"`
+	Template string          `json:"template,omitempty"`
+	Messages []OllamaMessage `json:"messages,omitempty"`
 }
 
 // OllamaGenerateResponse represents the response from Ollama generate API.
@@ -131,6 +138,123 @@ func (c *OllamaLLMClient) GenerateWithContext(ctx context.Context, systemPrompt,
 		Prompt: userPrompt,
 		Stream: false,
 		System: systemPrompt,
+	}
+
+	jsonData, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to call Ollama API: %w", err)
+	}
+	defer func() {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var generateResp OllamaGenerateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&generateResp); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if generateResp.Response == "" {
+		return "", models.ErrGenerationFailed
+	}
+
+	return generateResp.Response, nil
+}
+
+// GenerateWithThinking generates text with thinking mode enabled.
+// Thinking mode adds a control message to enable reasoning capabilities.
+func (c *OllamaLLMClient) GenerateWithThinking(ctx context.Context, prompt string) (string, error) {
+	return c.GenerateWithThinkingWithOptions(ctx, prompt, nil)
+}
+
+// GenerateWithThinkingWithOptions generates text with thinking mode enabled and optional Ollama options.
+// Thinking mode adds a control message to enable reasoning capabilities.
+func (c *OllamaLLMClient) GenerateWithThinkingWithOptions(ctx context.Context, prompt string, options map[string]any) (string, error) {
+	if prompt == "" {
+		return "", models.ErrGenerationFailed
+	}
+
+	request := OllamaGenerateRequest{
+		Model:   c.model,
+		Prompt:  prompt,
+		Stream:  false,
+		Options: options,
+		Messages: []OllamaMessage{
+			{Role: "control", Content: "thinking"},
+		},
+	}
+
+	jsonData, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/generate", bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to call Ollama API: %w", err)
+	}
+	defer func() {
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Ollama API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var generateResp OllamaGenerateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&generateResp); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if generateResp.Response == "" {
+		return "", models.ErrGenerationFailed
+	}
+
+	return generateResp.Response, nil
+}
+
+// GenerateWithContextAndThinking generates text with both system context and thinking mode enabled.
+func (c *OllamaLLMClient) GenerateWithContextAndThinking(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+	if userPrompt == "" {
+		return "", models.ErrGenerationFailed
+	}
+
+	request := OllamaGenerateRequest{
+		Model:  c.model,
+		Prompt: userPrompt,
+		Stream: false,
+		System: systemPrompt,
+		Messages: []OllamaMessage{
+			{Role: "control", Content: "thinking"},
+		},
 	}
 
 	jsonData, err := json.Marshal(request)

@@ -162,12 +162,6 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		return "No relevant information found.", nil, nil
 	}
 
-	contextItems := buildQueryContextItems(results)
-	prompt, systemPrompt, err := buildQueryPrompt(query, contextItems, opts.History)
-	if err != nil {
-		return "", nil, fmt.Errorf("prompt build failed: %w", err)
-	}
-
 	model := s.config.Ollama.GenerationModel
 	llmClient := vector.NewOllamaLLMClientWithTimeout(s.config.Ollama.BaseURL, model, s.config.Ollama.Timeout)
 
@@ -178,6 +172,23 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	} else if s.config.Ollama.Temperature != nil {
 		llmOptions["temperature"] = *s.config.Ollama.Temperature
 	}
+
+	// Two-hop retrieve-or-final loop is enabled only when thinking mode is on.
+	// This keeps the default behavior stable for non-thinking generation.
+	if s.config.Ollama.EnableThinking {
+		loopResp, loopDbg, loopErr := s.queryWithRetrieveOrFinalLoop(ctx, llmClient, llmOptions, query, results, limit, opts)
+		if loopErr != nil {
+			return "", nil, loopErr
+		}
+		return loopResp, loopDbg, nil
+	}
+
+	contextItems := buildQueryContextItems(results)
+	prompt, systemPrompt, err := buildQueryPrompt(query, contextItems, opts.History)
+	if err != nil {
+		return "", nil, fmt.Errorf("prompt build failed: %w", err)
+	}
+
 	var response string
 	if len(llmOptions) > 0 {
 		response, err = llmClient.GenerateWithOptions(ctx, prompt, llmOptions)
@@ -197,6 +208,141 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		System:  systemPrompt,
 		Prompt:  prompt,
 	}, nil
+}
+
+func (s *Service) queryWithRetrieveOrFinalLoop(
+	ctx context.Context,
+	llmClient *vector.OllamaLLMClient,
+	llmOptions map[string]any,
+	query string,
+	initialResults []models.SearchResult,
+	initialLimit int,
+	opts LLMOptions,
+) (string, *QueryDebugInfo, error) {
+	cfg := defaultRetrieveOrFinalConfig()
+
+	contextItems := buildQueryContextItems(initialResults)
+	decisionPrompt, _, err := buildRetrieveOrFinalPrompt(query, contextItems, opts.History)
+	if err != nil {
+		return "", nil, fmt.Errorf("prompt build failed: %w", err)
+	}
+
+	var decisionRaw string
+	if len(llmOptions) > 0 {
+		decisionRaw, err = llmClient.GenerateWithThinkingWithOptions(ctx, decisionPrompt, llmOptions)
+	} else {
+		decisionRaw, err = llmClient.GenerateWithThinking(ctx, decisionPrompt)
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("LLM decision failed: %w", err)
+	}
+
+	decision, err := parseRetrieveOrFinalDecision(decisionRaw)
+	if err != nil {
+		// Fall back to answering directly with the initial context.
+		decision = retrieveOrFinalDecision{Action: "final"}
+	}
+	decision = sanitizeRetrieveOrFinalDecision(decision, cfg)
+
+	switch decision.Action {
+	case "retrieve":
+		if len(decision.Queries) == 0 {
+			decision.Action = "final"
+		}
+	case "final":
+		// ok
+	default:
+		decision.Action = "final"
+	}
+
+	results := initialResults
+	if decision.Action == "retrieve" {
+		topK := decision.TopK
+		if topK <= 0 {
+			topK = initialLimit
+		}
+		if topK <= 0 {
+			topK = 5
+		}
+		if topK > cfg.MaxTopK {
+			topK = cfg.MaxTopK
+		}
+
+		results = s.retrieveAdditionalResults(ctx, results, decision.Queries, topK, cfg.MaxTotalChunks)
+	}
+
+	contextItems = buildQueryContextItems(results)
+	finalPrompt, finalSystem, err := buildQueryPrompt(query, contextItems, opts.History)
+	if err != nil {
+		return "", nil, fmt.Errorf("prompt build failed: %w", err)
+	}
+
+	var response string
+	if decision.Action == "final" && decision.Answer != "" {
+		response = decision.Answer
+	} else {
+		if len(llmOptions) > 0 {
+			response, err = llmClient.GenerateWithThinkingWithOptions(ctx, finalPrompt, llmOptions)
+		} else {
+			response, err = llmClient.GenerateWithThinking(ctx, finalPrompt)
+		}
+		if err != nil {
+			return "", nil, fmt.Errorf("LLM generation failed: %w", err)
+		}
+	}
+
+	response = appendLinksSection(response, extractURLs(results))
+	return response, &QueryDebugInfo{
+		Model:   s.config.Ollama.GenerationModel,
+		Results: results,
+		Context: strings.Join(contextItems, "\n\n"),
+		System:  finalSystem,
+		Prompt:  finalPrompt,
+	}, nil
+}
+
+func (s *Service) retrieveAdditionalResults(
+	ctx context.Context,
+	base []models.SearchResult,
+	queries []string,
+	topK int,
+	maxTotal int,
+) []models.SearchResult {
+	if len(queries) == 0 || topK <= 0 || maxTotal <= 0 {
+		return base
+	}
+
+	results := base
+	seen := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		if r.ChunkID == "" {
+			continue
+		}
+		seen[r.ChunkID] = struct{}{}
+	}
+
+	for _, q := range queries {
+		if len(results) >= maxTotal {
+			break
+		}
+		extra, err := s.vectorOps.Search(ctx, q, topK, nil)
+		if err != nil {
+			continue
+		}
+		for _, r := range extra {
+			if len(results) >= maxTotal {
+				break
+			}
+			if r.ChunkID != "" {
+				if _, ok := seen[r.ChunkID]; ok {
+					continue
+				}
+				seen[r.ChunkID] = struct{}{}
+			}
+			results = append(results, r)
+		}
+	}
+	return results
 }
 
 // ListDocuments returns all ingested documents.

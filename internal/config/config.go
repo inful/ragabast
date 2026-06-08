@@ -64,6 +64,10 @@ type OllamaConfig struct {
 
 	// KeepAlive determines if connections should be kept alive.
 	KeepAlive bool `env:"OLLAMA_KEEP_ALIVE" yaml:"keep_alive"`
+
+	// EnableThinking enables thinking mode for Ollama.
+	// When enabled, adds a control message with role "control" and content "thinking" to the messages array.
+	EnableThinking bool `env:"OLLAMA_ENABLE_THINKING" yaml:"enable_thinking"`
 }
 
 // VectorDBConfig holds vector database configuration.
