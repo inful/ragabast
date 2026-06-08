@@ -26,9 +26,18 @@ ollama:
   chat_base_url: http://127.0.0.1:8000/v1
   chat_model: OmniCoder-9B-abliterated-MLX-4bit
 
-  # Bearer token for both servers. Leave empty for unauthenticated local
-  # servers. Required for OpenAI, OpenRouter, and any other hosted service.
+  # Bearer token used for both servers. Leave empty for unauthenticated
+  # local servers. Required for OpenAI, OpenRouter, and any other hosted
+  # service. Use the per-server keys below when the chat and embeddings
+  # providers require different tokens.
   api_key: ""
+
+  # Per-server overrides for the bearer token. If set, these win over
+  # `api_key` for their respective server only. Useful when chat and
+  # embeddings live with different providers (e.g. OpenAI for chat, a
+  # local omlx for embeddings).
+  chat_api_key: ""
+  embedding_api_key: ""
 
   # RAG-friendly defaults (lower randomness tends to stick to retrieved context).
   temperature: 0.2

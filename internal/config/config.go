@@ -68,9 +68,20 @@ type OllamaConfig struct {
 	// ChatModel is the model name sent to the chat completions server.
 	ChatModel string `env:"OLLAMA_CHAT_MODEL" yaml:"chat_model"`
 
-	// APIKey is sent as `Authorization: Bearer <key>` to the chat server.
-	// Leave empty for unauthenticated local servers.
+	// APIKey is the default bearer token used for both servers. It is sent
+	// as `Authorization: Bearer <key>` to whichever server doesn't have its
+	// own override set. Leave empty for unauthenticated local servers.
 	APIKey string `env:"OLLAMA_API_KEY" yaml:"api_key"`
+
+	// ChatAPIKey overrides APIKey for the chat completions server only.
+	// Useful when the chat provider (e.g. OpenRouter, OpenAI) requires a
+	// different token than the embeddings provider.
+	ChatAPIKey string `env:"OLLAMA_CHAT_API_KEY" yaml:"chat_api_key"`
+
+	// EmbeddingAPIKey overrides APIKey for the embeddings server only.
+	// Useful when the embeddings provider requires a different token than
+	// the chat provider.
+	EmbeddingAPIKey string `env:"OLLAMA_EMBEDDING_API_KEY" yaml:"embedding_api_key"`
 
 	// Temperature controls LLM sampling. If omitted, the model default is used.
 	Temperature *float64 `env:"OLLAMA_TEMPERATURE" yaml:"temperature,omitempty"`
@@ -318,6 +329,12 @@ func (c *Config) ApplyEnvOverrides() {
 	if key := os.Getenv("OLLAMA_API_KEY"); key != "" {
 		c.Ollama.APIKey = key
 	}
+	if key := os.Getenv("OLLAMA_CHAT_API_KEY"); key != "" {
+		c.Ollama.ChatAPIKey = key
+	}
+	if key := os.Getenv("OLLAMA_EMBEDDING_API_KEY"); key != "" {
+		c.Ollama.EmbeddingAPIKey = key
+	}
 	if timeout := os.Getenv("OLLAMA_TIMEOUT"); timeout != "" {
 		if d, err := time.ParseDuration(timeout); err == nil {
 			c.Ollama.Timeout = d
@@ -446,6 +463,26 @@ func validateOllamaOptions(opts map[string]any) error {
 	}
 
 	return nil
+}
+
+// EffectiveChatAPIKey returns the bearer token to use for the chat
+// completions server. ChatAPIKey wins when set; otherwise the global APIKey
+// is used. Returns the empty string when no auth is configured.
+func (o *OllamaConfig) EffectiveChatAPIKey() string {
+	if o.ChatAPIKey != "" {
+		return o.ChatAPIKey
+	}
+	return o.APIKey
+}
+
+// EffectiveEmbeddingAPIKey returns the bearer token to use for the
+// embeddings server. EmbeddingAPIKey wins when set; otherwise the global
+// APIKey is used. Returns the empty string when no auth is configured.
+func (o *OllamaConfig) EffectiveEmbeddingAPIKey() string {
+	if o.EmbeddingAPIKey != "" {
+		return o.EmbeddingAPIKey
+	}
+	return o.APIKey
 }
 
 // Validate checks if the configuration is valid.

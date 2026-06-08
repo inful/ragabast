@@ -393,7 +393,7 @@ func (s *Service) SuggestFrontmatter(ctx context.Context, content string, existi
 	llmClient := vector.NewOpenAILLMClientWithOptions(
 		s.config.Ollama.ChatBaseURL,
 		s.config.Ollama.ChatModel,
-		s.config.Ollama.APIKey,
+		s.config.Ollama.EffectiveChatAPIKey(),
 		s.config.Ollama.Timeout,
 	)
 

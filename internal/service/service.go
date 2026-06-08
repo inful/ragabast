@@ -36,7 +36,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 	embeddings := vector.NewOpenAIEmbeddingClientWithOptions(
 		cfg.Ollama.BaseURL,
 		cfg.Ollama.EmbeddingModel,
-		cfg.Ollama.APIKey,
+		cfg.Ollama.EffectiveEmbeddingAPIKey(),
 		cfg.Ollama.Timeout,
 	)
 
@@ -171,7 +171,7 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	llmClient := vector.NewOpenAILLMClientWithOptions(
 		s.config.Ollama.ChatBaseURL,
 		model,
-		s.config.Ollama.APIKey,
+		s.config.Ollama.EffectiveChatAPIKey(),
 		s.config.Ollama.Timeout,
 	)
 
@@ -305,7 +305,7 @@ func (s *Service) QueryWithContext(ctx context.Context, query string, context st
 	llmClient := vector.NewOpenAILLMClientWithOptions(
 		s.config.Ollama.ChatBaseURL,
 		s.config.Ollama.ChatModel,
-		s.config.Ollama.APIKey,
+		s.config.Ollama.EffectiveChatAPIKey(),
 		s.config.Ollama.Timeout,
 	)
 	prompt := fmt.Sprintf("Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
@@ -438,7 +438,7 @@ func (s *Service) QueryWithLLM(ctx context.Context, query string, model string, 
 	llmClient := vector.NewOpenAILLMClientWithOptions(
 		s.config.Ollama.ChatBaseURL,
 		model,
-		s.config.Ollama.APIKey,
+		s.config.Ollama.EffectiveChatAPIKey(),
 		s.config.Ollama.Timeout,
 	)
 	response, err := llmClient.ChatWithSystem(ctx, "", prompt, nil)

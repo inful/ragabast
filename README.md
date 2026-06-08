@@ -24,6 +24,10 @@ Notes:
 - The embeddings server (`ollama.base_url` / `ollama.embedding_model`) speaks
   the OpenAI Embeddings API. Works against Ollama 0.5+ (with the
   `nomic-embed-text` image), vLLM, llama.cpp `--embedding`, LM Studio, and OpenAI.
+- Use `ollama.api_key` as the default bearer token for both servers. Set
+  `ollama.chat_api_key` and/or `ollama.embedding_api_key` (env:
+  `OLLAMA_CHAT_API_KEY`, `OLLAMA_EMBEDDING_API_KEY`) when the chat and
+  embeddings providers require different tokens.
 - Changing `embedding_model` (or its `EmbeddingDimension` in `vectordb:`) requires
   re-ingesting all documents: stop the server, `rm -rf data/vectors/`, and run
   `ragabast ingest` again.

@@ -91,3 +91,63 @@ func TestValidate_RejectsOutOfRangeOllamaTopP(t *testing.T) {
 	cfg.Ollama.Options = map[string]any{"top_p": 1.2}
 	require.Error(t, cfg.Validate())
 }
+
+func TestEffectiveAPIKeys_DefaultsToGlobal(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ollama.APIKey = "global-key"
+
+	require.Equal(t, "global-key", cfg.Ollama.EffectiveChatAPIKey())
+	require.Equal(t, "global-key", cfg.Ollama.EffectiveEmbeddingAPIKey())
+}
+
+func TestEffectiveAPIKeys_PerServerOverrides(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ollama.APIKey = "global-key"
+	cfg.Ollama.ChatAPIKey = "chat-only-key"
+	cfg.Ollama.EmbeddingAPIKey = "embed-only-key"
+
+	require.Equal(t, "chat-only-key", cfg.Ollama.EffectiveChatAPIKey())
+	require.Equal(t, "embed-only-key", cfg.Ollama.EffectiveEmbeddingAPIKey())
+}
+
+func TestEffectiveAPIKeys_OnlyChatOverride(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ollama.APIKey = "global-key"
+	cfg.Ollama.ChatAPIKey = "chat-only-key"
+
+	require.Equal(t, "chat-only-key", cfg.Ollama.EffectiveChatAPIKey())
+	require.Equal(t, "global-key", cfg.Ollama.EffectiveEmbeddingAPIKey())
+}
+
+func TestEffectiveAPIKeys_OnlyEmbeddingOverride(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ollama.APIKey = "global-key"
+	cfg.Ollama.EmbeddingAPIKey = "embed-only-key"
+
+	require.Equal(t, "global-key", cfg.Ollama.EffectiveChatAPIKey())
+	require.Equal(t, "embed-only-key", cfg.Ollama.EffectiveEmbeddingAPIKey())
+}
+
+func TestEffectiveAPIKeys_NoAuthReturnsEmpty(t *testing.T) {
+	cfg := DefaultConfig()
+
+	require.Empty(t, cfg.Ollama.EffectiveChatAPIKey())
+	require.Empty(t, cfg.Ollama.EffectiveEmbeddingAPIKey())
+}
+
+func TestLoad_AppliesPerServerAPIKeyEnvOverrides(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	t.Setenv("OLLAMA_API_KEY", "global-key")
+	t.Setenv("OLLAMA_CHAT_API_KEY", "chat-key")
+	t.Setenv("OLLAMA_EMBEDDING_API_KEY", "embed-key")
+
+	loaded, err := Load("")
+	require.NoError(t, err)
+	require.Equal(t, "global-key", loaded.Ollama.APIKey)
+	require.Equal(t, "chat-key", loaded.Ollama.ChatAPIKey)
+	require.Equal(t, "embed-key", loaded.Ollama.EmbeddingAPIKey)
+	require.Equal(t, "chat-key", loaded.Ollama.EffectiveChatAPIKey())
+	require.Equal(t, "embed-key", loaded.Ollama.EffectiveEmbeddingAPIKey())
+}
