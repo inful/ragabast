@@ -14,7 +14,7 @@ import (
 
 // Chunker implements H1/H2-based document chunking with hierarchical context preservation.
 type Chunker struct {
-	parser  *parser.DocubilderParser
+	parser  *parser.DocbuilderParser
 	maxSize int
 	minSize int
 	overlap int
@@ -23,7 +23,7 @@ type Chunker struct {
 // NewChunker creates a new chunker with the specified configuration.
 func NewChunker(maxSize, minSize, overlap int) *Chunker {
 	return &Chunker{
-		parser:  parser.NewDocubilderParser(),
+		parser:  parser.NewDocbuilderParser(),
 		maxSize: maxSize,
 		minSize: minSize,
 		overlap: overlap,

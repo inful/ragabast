@@ -40,7 +40,7 @@ type queryHit struct {
 }
 
 type ingestRequestBody struct {
-	Content string `doc:"Docubilder document content (including YAML frontmatter)." json:"content"`
+	Content string `doc:"Docbuilder document content (including YAML frontmatter)." json:"content"`
 }
 
 type ingestResponseBody struct {
@@ -132,7 +132,7 @@ type tagsAndCategoriesResponseBody struct {
 	Categories []string `json:"categories"`
 }
 
-func splitDocubilderFrontmatter(raw string) (frontmatterYAML []byte, markdown string, ok bool) {
+func splitDocbuilderFrontmatter(raw string) (frontmatterYAML []byte, markdown string, ok bool) {
 	content := strings.TrimSpace(raw)
 	if !strings.HasPrefix(content, "---\n") {
 		return nil, content, false
@@ -349,7 +349,7 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 		OperationID: "ingest",
 		Method:      http.MethodPost,
 		Path:        "/api/ingest",
-		Summary:     "Ingest a docubilder document",
+		Summary:     "Ingest a docbuilder document",
 	}, func(ctx context.Context, input *struct{ Body ingestRequestBody }) (*struct{ Body ingestResponseBody }, error) {
 		if limiter != nil {
 			if !limiter.TryAcquire() {
@@ -379,7 +379,7 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 		OperationID: "ingest-raw",
 		Method:      http.MethodPost,
 		Path:        "/api/ingest/raw",
-		Summary:     "Ingest a docubilder markdown document (raw body)",
+		Summary:     "Ingest a docbuilder markdown document (raw body)",
 	}, func(ctx context.Context, input *struct {
 		RawBody []byte `contentType:"text/markdown" required:"true"`
 	},
@@ -412,7 +412,7 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 		OperationID: "ingest-file",
 		Method:      http.MethodPost,
 		Path:        "/api/ingest/file",
-		Summary:     "Ingest a docubilder markdown document (multipart upload)",
+		Summary:     "Ingest a docbuilder markdown document (multipart upload)",
 	}, func(ctx context.Context, input *struct {
 		RawBody huma.MultipartFormFiles[struct {
 			File huma.FormFile `form:"file" required:"true"`
@@ -626,7 +626,7 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 			return nil, huma.Error400BadRequest("allowed_tags is required")
 		}
 
-		fmBytes, markdown, hasFM := splitDocubilderFrontmatter(content)
+		fmBytes, markdown, hasFM := splitDocbuilderFrontmatter(content)
 		existing := map[string]any{}
 		if hasFM && len(fmBytes) > 0 {
 			if err := yaml.Unmarshal(fmBytes, &existing); err != nil {

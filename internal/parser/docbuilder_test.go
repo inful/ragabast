@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidateFrontmatter(t *testing.T) {
-	p := NewDocubilderParser()
+	p := NewDocbuilderParser()
 
 	noFrontmatter := []byte("# Title\n\nBody")
 	err := p.ValidateFrontmatter(noFrontmatter)
@@ -22,7 +22,7 @@ func TestValidateFrontmatter(t *testing.T) {
 }
 
 func TestParseDocument_GeneratesFingerprintAndStableID(t *testing.T) {
-	p := NewDocubilderParser()
+	p := NewDocbuilderParser()
 
 	raw := []byte("---\nfingerprint: \"auto-generated-if-empty\"\nuid: sample\nurls:\n  - https://example.com\n---\n\n# Title\nHello\n")
 
@@ -31,7 +31,7 @@ func TestParseDocument_GeneratesFingerprintAndStableID(t *testing.T) {
 }
 
 func TestParseDocument_RequiresExplicitFingerprintAndStableID(t *testing.T) {
-	p := NewDocubilderParser()
+	p := NewDocbuilderParser()
 
 	fp := "b7add053acff6f4d1f5a7b6e66f7d6e6a8e2d9d8b1f956c534027be0f41fd3f9"
 	raw := []byte("---\nfingerprint: " + fp + "\nuid: sample\nurls:\n  - https://example.com\n---\n\n# Title\nHello\n")
@@ -44,7 +44,7 @@ func TestParseDocument_RequiresExplicitFingerprintAndStableID(t *testing.T) {
 }
 
 func TestParseDocument_AllowsMissingURLs(t *testing.T) {
-	p := NewDocubilderParser()
+	p := NewDocbuilderParser()
 
 	fp := "b7add053acff6f4d1f5a7b6e66f7d6e6a8e2d9d8b1f956c534027be0f41fd3f9"
 	raw := []byte("---\nfingerprint: " + fp + "\nuid: sample\n---\n\n# Title\nHello\n")

@@ -519,9 +519,9 @@ func (s *Server) serveIngestHTML(w http.ResponseWriter, data any) {
     <h1 class="title">Ingest Document</h1>
     <form method="post" action="/ingest">
         <div class="field">
-            <label class="label">Docubilder Content</label>
+            <label class="label">Docbuilder Content</label>
             <div class="control">
-                <textarea class="textarea" name="content" rows="15" placeholder="Paste your docubilder markdown content here..." required></textarea>
+                <textarea class="textarea" name="content" rows="15" placeholder="Paste your docbuilder markdown content here..." required></textarea>
             </div>
             <p class="help">Include YAML frontmatter with fingerprint, uid, tags, categories, and URLs</p>
         </div>

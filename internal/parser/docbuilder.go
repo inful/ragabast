@@ -12,16 +12,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// DocubilderParser parses markdown documents with YAML frontmatter in the docubilder format.
-type DocubilderParser struct{}
+// DocbuilderParser parses markdown documents with YAML frontmatter in the docbuilder format.
+type DocbuilderParser struct{}
 
-// NewDocubilderParser creates a new parser instance.
-func NewDocubilderParser() *DocubilderParser {
-	return &DocubilderParser{}
+// NewDocbuilderParser creates a new parser instance.
+func NewDocbuilderParser() *DocbuilderParser {
+	return &DocbuilderParser{}
 }
 
 // ParseDocument parses a document from raw bytes.
-func (p *DocubilderParser) ParseDocument(rawContent []byte, filePath string) (*models.Document, error) {
+func (p *DocbuilderParser) ParseDocument(rawContent []byte, filePath string) (*models.Document, error) {
 	doc := models.NewDocument()
 	doc.RawContent = rawContent
 	doc.FilePath = filePath
@@ -41,7 +41,7 @@ func (p *DocubilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	doc.Content = strings.TrimSpace(string(content))
 
 	// Make document IDs stable (dedupe-friendly).
-	// Use the docubilder UID as the stable identifier; fingerprint is strictly content-based.
+	// Use the docbuilder UID as the stable identifier; fingerprint is strictly content-based.
 	doc.ID = doc.UID
 
 	// Extract title from first H1 header
@@ -56,7 +56,7 @@ func (p *DocubilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 }
 
 // extractFrontmatter separates YAML frontmatter from markdown content.
-func (p *DocubilderParser) extractFrontmatter(raw []byte) ([]byte, []byte, error) {
+func (p *DocbuilderParser) extractFrontmatter(raw []byte) ([]byte, []byte, error) {
 	content := bytes.TrimSpace(raw)
 
 	// Check for frontmatter delimiter
@@ -79,7 +79,7 @@ func (p *DocubilderParser) extractFrontmatter(raw []byte) ([]byte, []byte, error
 }
 
 // parseFrontmatter parses YAML frontmatter into the document structure.
-func (p *DocubilderParser) parseFrontmatter(data []byte, doc *models.Document) error {
+func (p *DocbuilderParser) parseFrontmatter(data []byte, doc *models.Document) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -91,7 +91,7 @@ func (p *DocubilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 
 	// Extract fingerprint
 	if fp, ok := frontmatter["fingerprint"].(string); ok {
-		// Docubilder convention: this placeholder means "compute it".
+		// Docbuilder convention: this placeholder means "compute it".
 		if fp != "auto-generated-if-empty" {
 			doc.Fingerprint = fp
 		}
@@ -147,12 +147,12 @@ func (p *DocubilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 }
 
 // generateFingerprint creates a stable content fingerprint.
-func (p *DocubilderParser) generateFingerprint(content string) string {
+func (p *DocbuilderParser) generateFingerprint(content string) string {
 	return mdfp.CalculateFingerprint(content)
 }
 
 // extractTitle finds the first H1 header in the markdown content.
-func (p *DocubilderParser) extractTitle(content string) string {
+func (p *DocbuilderParser) extractTitle(content string) string {
 	lines := strings.SplitSeq(content, "\n")
 	for line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -164,7 +164,7 @@ func (p *DocubilderParser) extractTitle(content string) string {
 }
 
 // ParseChunk parses a chunk of content (used for chunking operations).
-func (p *DocubilderParser) ParseChunk(content string, headerPath string, level int, startLine, endLine int) *models.Chunk {
+func (p *DocbuilderParser) ParseChunk(content string, headerPath string, level int, startLine, endLine int) *models.Chunk {
 	chunk := models.NewChunk()
 	chunk.Content = content
 	chunk.HeaderPath = headerPath
@@ -175,7 +175,7 @@ func (p *DocubilderParser) ParseChunk(content string, headerPath string, level i
 }
 
 // ValidateFrontmatter checks if the frontmatter contains all required fields.
-func (p *DocubilderParser) ValidateFrontmatter(raw []byte) error {
+func (p *DocbuilderParser) ValidateFrontmatter(raw []byte) error {
 	frontmatterBytes, _, err := p.extractFrontmatter(raw)
 	if err != nil {
 		return err
@@ -208,7 +208,7 @@ func (p *DocubilderParser) ValidateFrontmatter(raw []byte) error {
 }
 
 // FormatFrontmatter formats a document's metadata back into YAML frontmatter.
-func (p *DocubilderParser) FormatFrontmatter(doc *models.Document) ([]byte, error) {
+func (p *DocbuilderParser) FormatFrontmatter(doc *models.Document) ([]byte, error) {
 	frontmatter := map[string]any{
 		"fingerprint": doc.Fingerprint,
 		"uid":         doc.UID,
@@ -228,7 +228,7 @@ func (p *DocubilderParser) FormatFrontmatter(doc *models.Document) ([]byte, erro
 }
 
 // ExtractHeaders extracts all H1 and H2 headers with their positions.
-func (p *DocubilderParser) ExtractHeaders(content string) []models.HeaderInfo {
+func (p *DocbuilderParser) ExtractHeaders(content string) []models.HeaderInfo {
 	var headers []models.HeaderInfo
 	lines := strings.Split(content, "\n")
 
@@ -253,6 +253,6 @@ func (p *DocubilderParser) ExtractHeaders(content string) []models.HeaderInfo {
 }
 
 // GenerateFingerprint creates a SHA256 hash of the content (public version).
-func (p *DocubilderParser) GenerateFingerprint(content string) string {
+func (p *DocbuilderParser) GenerateFingerprint(content string) string {
 	return p.generateFingerprint(content)
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Document represents a docubilder document with YAML frontmatter.
+// Document represents a docbuilder document with YAML frontmatter.
 type Document struct {
 	// ID is the unique identifier for the document.
 	ID string `bson:"_id" json:"id"`

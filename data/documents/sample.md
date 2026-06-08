@@ -5,8 +5,8 @@ tags:
   - "tutorial"
   - "test"
 categories:
-  - "documentation"
-  - "guides"
+  - "Documentation"
+  - "Guides"
 urls:
   - "https://example.com/docs/sample"
   - "https://github.com/inful/ragabast"
@@ -22,7 +22,7 @@ Ragabast is a production-ready RAG/LLM information retrieval system built in Go.
 ## Introduction
 
 This system provides:
-- Document ingestion with custom "docubilder" format
+- Document ingestion with custom "docbuilder" format
 - H1/H2-based chunking with hierarchical context
 - Vector embeddings via Ollama (nomic-embed-text-v1.5)
 - CLI and web interfaces

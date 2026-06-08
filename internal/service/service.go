@@ -19,7 +19,7 @@ import (
 // Service orchestrates the RAG system operations.
 type Service struct {
 	config    *config.Config
-	parser    *parser.DocubilderParser
+	parser    *parser.DocbuilderParser
 	chunker   *chunker.Chunker
 	vectorOps *vector.VectorOperations
 }
@@ -39,7 +39,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 	vectorOps := vector.NewVectorOperations(db, embeddings)
 
 	// Initialize parser and chunker
-	docParser := parser.NewDocubilderParser()
+	docParser := parser.NewDocbuilderParser()
 	chunker := chunker.NewChunker(cfg.Processing.MaxChunkSize, cfg.Processing.MinChunkSize, cfg.Processing.ChunkOverlap)
 
 	return &Service{
@@ -50,7 +50,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}, nil
 }
 
-// IngestFile processes a single docubilder file.
+// IngestFile processes a single docbuilder file.
 func (s *Service) IngestFile(ctx context.Context, filePath string) error {
 	// Read file content
 	content, err := os.ReadFile(filePath)
@@ -83,7 +83,7 @@ func (s *Service) IngestFile(ctx context.Context, filePath string) error {
 	return nil
 }
 
-// IngestDirectory processes all docubilder files in a directory.
+// IngestDirectory processes all docbuilder files in a directory.
 func (s *Service) IngestDirectory(ctx context.Context, dirPath string) error {
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
@@ -347,7 +347,7 @@ func (s *Service) IngestText(ctx context.Context, text string, uid string, tags 
 	return nil
 }
 
-// IngestDocument processes a docubilder document from raw content.
+// IngestDocument processes a docbuilder document from raw content.
 func (s *Service) IngestDocument(ctx context.Context, content string) (*models.Document, error) {
 	// Parse document
 	doc, err := s.parser.ParseDocument([]byte(content), "web_upload")

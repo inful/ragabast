@@ -14,7 +14,7 @@ graph TB
     end
 
     subgraph "Document Processing"
-        parser[Docubilder Parser]
+        parser[Docbuilder Parser]
         chunker[Chunking Engine]
         validator[Validation Layer]
     end
@@ -82,7 +82,7 @@ graph TB
 ## Data Flow
 
 1. **Document Ingestion**: 
-   - Docubilder Markdown → Parser → Chunker → Embeddings → Vector DB
+   - Docbuilder Markdown → Parser → Chunker → Embeddings → Vector DB
 
 2. **Query Processing**:
    - User Query → Embedding → Vector Search → Context Retrieval → LLM Generation → Response

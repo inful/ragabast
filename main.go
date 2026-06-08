@@ -13,7 +13,7 @@ func main() {
 
 	ctx := kong.Parse(&cli,
 		kong.Name("ragabast"),
-		kong.Description("RAG/LLM Information Retrieval System with Docubilder support"),
+		kong.Description("RAG/LLM Information Retrieval System with Docbuilder support"),
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{
 			Compact: true,

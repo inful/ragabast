@@ -17,7 +17,7 @@ import (
 
 // CLI represents the main command-line interface structure.
 type CLI struct {
-	Ingest IngestCmd     `cmd:"" help:"Ingest and process docubilder documents"`
+	Ingest IngestCmd     `cmd:"" help:"Ingest and process docbuilder documents"`
 	Query  QueryCmd      `cmd:"" help:"Query the vector database with natural language"`
 	Serve  ServeCmd      `cmd:"" help:"Start the web server"`
 	Init   ConfigInitCmd `cmd:"" help:"Write a starter config file (alias for 'config init')"`
@@ -64,7 +64,7 @@ func (c *ConfigInitCmd) Run(ctx *kong.Context) error {
 // IngestCmd represents the ingest command.
 type IngestCmd struct {
 	ConfigOpts
-	Files []string `help:"Docubilder files to ingest" arg:"" type:"existingfile"`
+	Files []string `help:"Docbuilder files to ingest" arg:"" type:"existingfile"`
 	Path  string   `short:"p" help:"Directory path to scan for documents"`
 }
 
