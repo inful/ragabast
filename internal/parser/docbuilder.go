@@ -40,6 +40,12 @@ func (p *DocbuilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	// Set content
 	doc.Content = strings.TrimSpace(string(content))
 
+	// Compute fingerprint when not explicitly provided.
+	// Docbuilder convention: "fingerprint: auto-generated-if-empty" means the system should compute it.
+	if strings.TrimSpace(doc.Fingerprint) == "" {
+		doc.Fingerprint = p.generateFingerprint(doc.Content)
+	}
+
 	// Make document IDs stable (dedupe-friendly).
 	// Use the docbuilder UID as the stable identifier; fingerprint is strictly content-based.
 	doc.ID = doc.UID

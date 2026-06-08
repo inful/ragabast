@@ -26,11 +26,15 @@ func TestParseDocument_GeneratesFingerprintAndStableID(t *testing.T) {
 
 	raw := []byte("---\nfingerprint: \"auto-generated-if-empty\"\nuid: sample\nurls:\n  - https://example.com\n---\n\n# Title\nHello\n")
 
-	_, err := p.ParseDocument(raw, "test.md")
-	require.Error(t, err)
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "sample", doc.ID)
+	require.Equal(t, "sample", doc.UID)
+	require.NotEmpty(t, doc.Fingerprint)
+	require.Equal(t, p.GenerateFingerprint(doc.Content), doc.Fingerprint)
 }
 
-func TestParseDocument_RequiresExplicitFingerprintAndStableID(t *testing.T) {
+func TestParseDocument_PreservesExplicitFingerprintAndStableID(t *testing.T) {
 	p := NewDocbuilderParser()
 
 	fp := "b7add053acff6f4d1f5a7b6e66f7d6e6a8e2d9d8b1f956c534027be0f41fd3f9"
