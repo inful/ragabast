@@ -36,3 +36,5 @@ config.yaml
 # .vscode/
 ragabast
 data/vectors
+.tokensave
+tmp/
