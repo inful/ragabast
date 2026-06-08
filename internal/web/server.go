@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -47,6 +48,17 @@ type Server struct {
 	router    *chi.Mux
 	server    *http.Server
 	templates *template.Template
+}
+
+// internalError logs the underlying error and returns a generic 500 to the
+// client. The full error chain is preserved in the server log so operators
+// can diagnose without exposing internal details (model names, server URLs,
+// stack traces) to the user.
+func internalError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if err != nil {
+		log.Printf("server: %s %s: %v", op, r.URL.Path, err)
+	}
+	http.Error(w, "Internal server error", http.StatusInternalServerError)
 }
 
 // NewServer creates a new web server.
@@ -189,7 +201,7 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 
 	answer, _, err := s.service.QueryDebugWithOptions(r.Context(), msg, 5, service.LLMOptions{})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Query failed: %v", err), http.StatusInternalServerError)
+		internalError(w, r, "query", err)
 		return
 	}
 
@@ -214,7 +226,7 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 	// Perform search
 	results, err := s.service.Search(r.Context(), query, 5, nil)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Search failed: %v", err), http.StatusInternalServerError)
+		internalError(w, r, "search", err)
 		return
 	}
 
@@ -246,7 +258,7 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 	// Ingest document
 	doc, err := s.service.IngestDocument(r.Context(), content)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Ingest failed: %v", err), http.StatusInternalServerError)
+		internalError(w, r, "ingest", err)
 		return
 	}
 
@@ -261,7 +273,7 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {
 	docs, err := s.service.ListDocuments(r.Context())
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to list documents: %v", err), http.StatusInternalServerError)
+		internalError(w, r, "list documents", err)
 		return
 	}
 
@@ -295,7 +307,7 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, fmt.Sprintf("Template error: %v", err), http.StatusInternalServerError)
+		internalError(w, nil, "template render", err)
 	}
 }
 

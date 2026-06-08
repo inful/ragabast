@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,7 +16,8 @@ import (
 )
 
 type fakeChatService struct {
-	answer string
+	answer   string
+	queryErr error
 }
 
 func (f *fakeChatService) CheckHealth(ctx context.Context) (bool, error) {
@@ -43,6 +45,9 @@ func (f *fakeChatService) SuggestFrontmatter(ctx context.Context, content string
 }
 
 func (f *fakeChatService) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
+	if f.queryErr != nil {
+		return "", nil, f.queryErr
+	}
 	return f.answer, &service.QueryDebugInfo{Results: []models.SearchResult{}}, nil
 }
 
@@ -115,4 +120,26 @@ func TestChatMessage_AppendsUserAndAssistant(t *testing.T) {
 	require.Contains(t, body, "target=\"_blank\"")
 	require.Contains(t, body, "noopener noreferrer")
 	require.Contains(t, body, "https://example.com/a?x=1&amp;y=2")
+}
+
+// TestChatMessage_ServiceErrorReturnsGeneric500 ensures the server does not
+// leak internal error details (model names, server URLs, stack traces) to
+// the client. The full error is logged server-side.
+func TestChatMessage_ServiceErrorReturnsGeneric500(t *testing.T) {
+	cfg := config.DefaultConfig()
+	svc := &fakeChatService{queryErr: errors.New("embeddings API returned status 401: API key required")}
+	s := NewServer(cfg, svc)
+
+	form := url.Values{}
+	form.Set("message", "hello")
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.Equal(t, "Internal server error\n", w.Body.String())
+	require.NotContains(t, w.Body.String(), "API key")
+	require.NotContains(t, w.Body.String(), "401")
 }
