@@ -112,6 +112,9 @@ func (db *VectorDB) AddChunk(ctx context.Context, chunk *models.Chunk, embedding
 	if chunk.UID != "" {
 		metadata["uid"] = chunk.UID
 	}
+	if chunk.ParentID != "" {
+		metadata["parent_id"] = chunk.ParentID
+	}
 
 	doc := chromem.Document{
 		ID:        chunk.ID,
@@ -181,6 +184,9 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 		}
 		if chunk.UID != "" {
 			metadata["uid"] = chunk.UID
+		}
+		if chunk.ParentID != "" {
+			metadata["parent_id"] = chunk.ParentID
 		}
 
 		docs[i] = chromem.Document{
@@ -260,29 +266,21 @@ func (db *VectorDB) Search(ctx context.Context, queryEmbedding []float32, limit 
 		}
 
 		searchResults[i] = models.SearchResult{
-			ChunkID:       result.Metadata["chunk_id"],
-			DocumentID:    result.Metadata["document_id"],
-			Content:       result.Content,
-			HeaderPath:    result.Metadata["header_path"],
-			Level:         level,
-			StartLine:     startLine,
-			EndLine:       endLine,
-			DocumentTitle: result.Metadata["document_title"],
-			DocumentURLs:  nil,
-			Similarity:    result.Similarity,
-			Fingerprint:   result.Metadata["fingerprint"],
-			UID:           result.Metadata["uid"],
-		}
-		if urls, ok := result.Metadata["document_urls"]; ok && urls != "" {
-			parts := strings.Split(urls, "\n")
-			filtered := make([]string, 0, len(parts))
-			for _, p := range parts {
-				if p == "" {
-					continue
-				}
-				filtered = append(filtered, p)
-			}
-			searchResults[i].DocumentURLs = filtered
+			ChunkID:            result.Metadata["chunk_id"],
+			DocumentID:         result.Metadata["document_id"],
+			Content:            result.Content,
+			HeaderPath:         result.Metadata["header_path"],
+			Level:              level,
+			StartLine:          startLine,
+			EndLine:            endLine,
+			DocumentTitle:      result.Metadata["document_title"],
+			DocumentURLs:       splitMetadataList(result.Metadata["document_urls"]),
+			DocumentTags:       splitMetadataList(result.Metadata["document_tags"]),
+			DocumentCategories: splitMetadataList(result.Metadata["document_categories"]),
+			ParentID:           result.Metadata["parent_id"],
+			Similarity:         result.Similarity,
+			Fingerprint:        result.Metadata["fingerprint"],
+			UID:                result.Metadata["uid"],
 		}
 	}
 
@@ -448,6 +446,28 @@ func (db *VectorDB) Count() (int, error) {
 	defer db.mu.RUnlock()
 
 	return db.collection.Count(), nil
+}
+
+// splitMetadataList splits a metadata value that was stored as
+// newline-joined items into a slice with empty entries filtered out.
+// Returns nil for empty input so the SearchResult keeps the
+// `omitempty` JSON contract.
+func splitMetadataList(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "\n")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // DocumentFingerprint returns the stored fingerprint for a document if it exists.

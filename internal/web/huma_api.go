@@ -17,7 +17,7 @@ import (
 
 type queryRequestBody struct {
 	Query       string   `doc:"Natural language query" json:"query"`
-	TopK        int      `default:"5" doc:"Number of results to consider" json:"top_k" minimum:"1"`
+	TopK        int      `default:"5" doc:"Number of results to consider" json:"top_k" maximum:"50" minimum:"1"`
 	Temperature *float64 `doc:"LLM temperature (sampling). If omitted, uses model default." json:"temperature,omitempty"`
 	IncludeHits bool     `doc:"Include retrieved chunks in the response." json:"include_hits,omitempty"`
 	History     []struct {

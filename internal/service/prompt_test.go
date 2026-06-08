@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -8,13 +9,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// stubFetcher is a test ChunkFetcher backed by a map.
+type stubFetcher struct {
+	chunks map[string]*models.Chunk
+	err    error
+}
+
+func (s stubFetcher) FetchChunk(_ context.Context, id string) (*models.Chunk, bool, error) {
+	if s.err != nil {
+		return nil, false, s.err
+	}
+	c, ok := s.chunks[id]
+	return c, ok, nil
+}
+
 func TestBuildQueryContext_FormatsResults(t *testing.T) {
 	results := []models.SearchResult{
 		{DocumentTitle: "Doc A", Content: "Chunk A", DocumentURLs: []string{"https://example.com/a"}},
 		{DocumentTitle: "Doc B", Content: "Chunk B with https://example.com/b."},
 	}
 
-	items := buildQueryContextItems(results)
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
 	require.Len(t, items, 2)
 	require.Contains(t, items[0], "TITLE: Doc A")
 	require.Contains(t, items[0], "CONTENT:")
@@ -27,6 +42,134 @@ func TestBuildQueryContext_FormatsResults(t *testing.T) {
 	require.Contains(t, items[1], "https://example.com/b")
 }
 
+func TestBuildQueryContext_OmitsEmptyOptionalFields(t *testing.T) {
+	results := []models.SearchResult{
+		{DocumentTitle: "Plain", Content: "body"},
+	}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
+	require.Len(t, items, 1)
+	require.NotContains(t, items[0], "SECTION:")
+	require.NotContains(t, items[0], "TAGS:")
+	require.NotContains(t, items[0], "CATEGORIES:")
+	require.NotContains(t, items[0], "PARENT_CONTEXT:")
+	require.NotContains(t, items[0], "SOURCE_URLS:")
+}
+
+func TestBuildQueryContext_IncludesSection(t *testing.T) {
+	results := []models.SearchResult{
+		{
+			DocumentTitle: "Doc",
+			HeaderPath:    "Setup > Configuration",
+			Content:       "body",
+		},
+	}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
+	require.Contains(t, items[0], "SECTION: Setup > Configuration")
+}
+
+func TestBuildQueryContext_IncludesTagsAndCategories(t *testing.T) {
+	results := []models.SearchResult{
+		{
+			DocumentTitle:      "Doc",
+			Content:            "body",
+			DocumentTags:       []string{"tutorial", "go"},
+			DocumentCategories: []string{"Guides", "Reference"},
+		},
+	}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
+	require.Contains(t, items[0], "TAGS: tutorial, go")
+	require.Contains(t, items[0], "CATEGORIES: Guides, Reference")
+}
+
+func TestBuildQueryContext_PrependsParentContext(t *testing.T) {
+	results := []models.SearchResult{
+		{
+			ChunkID:       "child-1",
+			ParentID:      "parent-1",
+			DocumentTitle: "Doc",
+			Content:       "child body",
+		},
+	}
+	fetcher := stubFetcher{chunks: map[string]*models.Chunk{
+		"parent-1": {ID: "parent-1", Content: "section intro"},
+	}}
+	items := buildQueryContextItems(context.Background(), results, fetcher)
+	require.Len(t, items, 1)
+	require.Contains(t, items[0], "PARENT_CONTEXT:")
+	require.Contains(t, items[0], "section intro")
+	require.Contains(t, items[0], "child body")
+
+	// Parent must come before the child body in the rendered block.
+	parentIdx := strings.Index(items[0], "PARENT_CONTEXT:")
+	childIdx := strings.Index(items[0], "child body")
+	require.Greater(t, childIdx, parentIdx)
+}
+
+func TestBuildQueryContext_SkipsParentWhenAlreadyInResultSet(t *testing.T) {
+	results := []models.SearchResult{
+		{ChunkID: "parent-1", Content: "I am the parent"},
+		{
+			ChunkID:  "child-1",
+			ParentID: "parent-1",
+			Content:  "child body",
+		},
+	}
+	// Provide a fetcher that would otherwise return content for parent-1;
+	// since parent-1 is already in the result set, the fetcher must not be
+	// consulted at all.
+	fetcher := stubFetcher{chunks: map[string]*models.Chunk{
+		"parent-1": {ID: "parent-1", Content: "should NOT be used"},
+	}}
+	items := buildQueryContextItems(context.Background(), results, fetcher)
+	require.Len(t, items, 2)
+	require.NotContains(t, items[1], "PARENT_CONTEXT:")
+	require.NotContains(t, items[1], "should NOT be used")
+}
+
+func TestBuildQueryContext_SkipsParentWhenFetcherReturnsFalse(t *testing.T) {
+	results := []models.SearchResult{
+		{ChunkID: "child-1", ParentID: "missing-parent", Content: "child body"},
+	}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{chunks: map[string]*models.Chunk{}})
+	require.Len(t, items, 1)
+	require.NotContains(t, items[0], "PARENT_CONTEXT:")
+}
+
+func TestBuildQueryContext_SkipsParentWhenFetcherErrors(t *testing.T) {
+	results := []models.SearchResult{
+		{ChunkID: "child-1", ParentID: "missing-parent", Content: "child body"},
+	}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{err: context.DeadlineExceeded})
+	require.Len(t, items, 1)
+	require.NotContains(t, items[0], "PARENT_CONTEXT:")
+}
+
+func TestBuildQueryContext_SkipsParentWhenParentContentEmpty(t *testing.T) {
+	results := []models.SearchResult{
+		{ChunkID: "child-1", ParentID: "parent-1", Content: "child body"},
+	}
+	fetcher := stubFetcher{chunks: map[string]*models.Chunk{
+		"parent-1": {ID: "parent-1", Content: "   "},
+	}}
+	items := buildQueryContextItems(context.Background(), results, fetcher)
+	require.NotContains(t, items[0], "PARENT_CONTEXT:")
+}
+
+func TestBuildQueryContext_EntryOrderingMatchesResults(t *testing.T) {
+	results := []models.SearchResult{
+		{DocumentTitle: "A", Content: "alpha"},
+		{DocumentTitle: "B", Content: "beta"},
+		{DocumentTitle: "C", Content: "gamma"},
+	}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
+	require.Len(t, items, 3)
+	// Entry ids are added by the user-message builder, not here, so we
+	// just check that the documents appear in the original order.
+	for i, title := range []string{"A", "B", "C"} {
+		require.Contains(t, items[i], "TITLE: "+title)
+	}
+}
+
 func TestBuildQueryContext_DedupesURLsAcrossFrontmatterAndBody(t *testing.T) {
 	results := []models.SearchResult{
 		{
@@ -36,11 +179,8 @@ func TestBuildQueryContext_DedupesURLsAcrossFrontmatterAndBody(t *testing.T) {
 		},
 	}
 
-	items := buildQueryContextItems(results)
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
 	require.Len(t, items, 1)
-	// The URL appears once in the chunk body and once on the SOURCE_URLS
-	// line, but the SOURCE_URLS line itself should only list the URL
-	// once (not duplicated between frontmatter and extracted body URLs).
 	require.Equal(t, 1, strings.Count(items[0], "SOURCE_URLS: https://example.com/a"))
 }
 
@@ -52,7 +192,7 @@ func TestBuildQueryContext_DropsEmptyFrontmatterURLs(t *testing.T) {
 			DocumentURLs:  []string{"", "  ", "https://example.com/keep"},
 		},
 	}
-	items := buildQueryContextItems(results)
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
 	require.Len(t, items, 1)
 	require.Contains(t, items[0], "https://example.com/keep")
 	require.NotContains(t, items[0], ", ,")
@@ -66,9 +206,6 @@ func TestBuildQueryMessages_SystemAndUserAreDistinct(t *testing.T) {
 	require.Equal(t, "system", msgs[0].Role)
 	require.Equal(t, "user", msgs[1].Role)
 
-	// System message carries the policy and the conversation/context blocks
-	// when the template emits them, but the user message NEVER duplicates
-	// the system prompt.
 	require.Contains(t, msgs[0].Content, "You are a retrieval-augmented assistant")
 	require.Contains(t, msgs[0].Content, "Treat the context as the only source of truth")
 	require.Contains(t, msgs[0].Content, "Links:")

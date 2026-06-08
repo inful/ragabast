@@ -183,7 +183,7 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		llmOptions["temperature"] = *s.config.Ollama.Temperature
 	}
 
-	contextItems := buildQueryContextItems(results)
+	contextItems := buildQueryContextItems(ctx, results, vectorChunkFetcher{s: s})
 	messages, err := buildQueryMessages(query, contextItems, opts.History)
 	if err != nil {
 		return "", nil, fmt.Errorf("prompt build failed: %w", err)
@@ -434,4 +434,22 @@ func (s *Service) CheckHealth(ctx context.Context) (bool, error) {
 func sortStrings(strs []string) []string {
 	sort.Strings(strs)
 	return strs
+}
+
+// vectorChunkFetcher adapts the prompt layer's ChunkFetcher interface
+// to the Service's own GetChunk method, so the prompt builder can
+// pull parent context without depending on the vector package.
+type vectorChunkFetcher struct {
+	s *Service
+}
+
+func (v vectorChunkFetcher) FetchChunk(ctx context.Context, id string) (*models.Chunk, bool, error) {
+	chunk, err := v.s.GetChunk(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if chunk == nil {
+		return nil, false, nil
+	}
+	return chunk, true, nil
 }

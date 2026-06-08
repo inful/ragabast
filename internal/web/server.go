@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -51,6 +52,32 @@ func internalError(w http.ResponseWriter, r *http.Request, op string, err error)
 		log.Printf("server: %s %s: %v", op, r.URL.Path, err)
 	}
 	http.Error(w, "Internal server error", http.StatusInternalServerError)
+}
+
+// defaultChatTopK is the number of retrieved chunks the chat form uses when
+// the client does not pass an explicit top_k. Each chunk is augmented with
+// its parent section header, so 5 results is a comfortable default.
+const defaultChatTopK = 5
+
+// maxChatTopK caps the chat form's top_k to prevent a runaway client from
+// pulling the entire vector DB into the LLM context.
+const maxChatTopK = 50
+
+// chatTopK reads an optional 'top_k' form value, falling back to
+// defaultChatTopK. Out-of-range or unparseable values are clamped.
+func chatTopK(r *http.Request) int {
+	raw := strings.TrimSpace(r.FormValue("top_k"))
+	if raw == "" {
+		return defaultChatTopK
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return defaultChatTopK
+	}
+	if v > maxChatTopK {
+		return maxChatTopK
+	}
+	return v
 }
 
 // NewServer creates a new web server.
@@ -191,7 +218,7 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, _, err := s.service.QueryDebugWithOptions(r.Context(), msg, 5, service.LLMOptions{})
+	answer, _, err := s.service.QueryDebugWithOptions(r.Context(), msg, chatTopK(r), service.LLMOptions{})
 	if err != nil {
 		internalError(w, r, "query", err)
 		return

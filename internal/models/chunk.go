@@ -123,16 +123,19 @@ type DocumentTree struct {
 
 // SearchResult represents a result from vector similarity search.
 type SearchResult struct {
-	ChunkID       string   `json:"chunk_id"`
-	DocumentID    string   `json:"document_id"`
-	Content       string   `json:"content"`
-	HeaderPath    string   `json:"header_path"`
-	Level         int      `json:"level"`
-	StartLine     int      `json:"start_line"`
-	EndLine       int      `json:"end_line"`
-	DocumentTitle string   `json:"document_title"`
-	DocumentURLs  []string `json:"document_urls,omitempty"`
-	Similarity    float32  `json:"similarity"`
-	Fingerprint   string   `json:"fingerprint,omitempty"`
-	UID           string   `json:"uid,omitempty"`
+	ChunkID            string   `json:"chunk_id"`
+	DocumentID         string   `json:"document_id"`
+	Content            string   `json:"content"`
+	HeaderPath         string   `json:"header_path,omitempty"`
+	Level              int      `json:"level"`
+	StartLine          int      `json:"start_line"`
+	EndLine            int      `json:"end_line"`
+	DocumentTitle      string   `json:"document_title"`
+	DocumentURLs       []string `json:"document_urls,omitempty"`
+	DocumentTags       []string `json:"document_tags,omitempty"`
+	DocumentCategories []string `json:"document_categories,omitempty"`
+	ParentID           string   `json:"parent_id,omitempty"`
+	Similarity         float32  `json:"similarity"`
+	Fingerprint        string   `json:"fingerprint,omitempty"`
+	UID                string   `json:"uid,omitempty"`
 }
