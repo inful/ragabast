@@ -1,9 +1,35 @@
-# Copy this file to ./config.yml (ignored by git) and tweak values as needed.
+# Copy this file to ./config.yml (config.yml is ignored by git) and tweak as needed.
+#
+# ragabast uses two OpenAI-compatible endpoints. You can point both at the
+# same server (omlx, vLLM, LM Studio, llama.cpp --server, OpenAI) or run
+# them separately. Embeddings and chat are independent of each other.
+#
+# Servers that work out of the box (any OpenAI Chat Completions + Embeddings
+# server):
+#   - omlx              http://127.0.0.1:8000/v1
+#   - vLLM              http://host:8000/v1
+#   - LM Studio         http://localhost:1234/v1
+#   - llama.cpp server  http://localhost:8080/v1
+#   - llama-stack       http://localhost:8321/v1
+#   - OpenAI            https://api.openai.com/v1
+#   - Ollama (0.5+)     http://localhost:11434/v1
+#
+# Trailing /v1 in the URL is optional; the client strips it before
+# appending /v1/chat/completions and /v1/embeddings.
 
 ollama:
-  base_url: http://localhost:11434
-  embedding_model: nomic-embed-text:v1.5
-  generation_model: gemma:2b
+  # Embeddings server (OpenAI /v1/embeddings)
+  base_url: http://127.0.0.1:8000/v1
+  embedding_model: nomicai-modernbert-embed-base-bf16
+
+  # Chat completions server (OpenAI /v1/chat/completions)
+  chat_base_url: http://127.0.0.1:8000/v1
+  chat_model: OmniCoder-9B-abliterated-MLX-4bit
+
+  # Bearer token for both servers. Leave empty for unauthenticated local
+  # servers. Required for OpenAI, OpenRouter, and any other hosted service.
+  api_key: ""
+
   # RAG-friendly defaults (lower randomness tends to stick to retrieved context).
   temperature: 0.2
   options:
@@ -17,6 +43,14 @@ ollama:
 vectordb:
   persistence_dir: data/vectors
   collection_name: ragabast
+
+  # MUST match the dimension of the embedding model above.
+  # nomicai-modernbert-embed-base returns 768. Other common sizes:
+  #   - nomic-embed-text-v1.5       768
+  #   - text-embedding-3-small      1536
+  #   - text-embedding-3-large      3072
+  #   - bge-large-en-v1.5           1024
+  # Changing this requires deleting data/vectors/ and re-ingesting.
   embedding_dimension: 768
 
 server:
