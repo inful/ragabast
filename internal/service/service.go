@@ -33,7 +33,12 @@ func NewService(cfg *config.Config) (*Service, error) {
 	}
 
 	// Initialize embedding client
-	embeddings := vector.NewOllamaEmbeddingClientWithTimeout(cfg.Ollama.BaseURL, cfg.Ollama.EmbeddingModel, cfg.Ollama.Timeout)
+	embeddings := vector.NewOpenAIEmbeddingClientWithOptions(
+		cfg.Ollama.BaseURL,
+		cfg.Ollama.EmbeddingModel,
+		cfg.Ollama.APIKey,
+		cfg.Ollama.Timeout,
+	)
 
 	// Initialize vector operations
 	vectorOps := vector.NewVectorOperations(db, embeddings)

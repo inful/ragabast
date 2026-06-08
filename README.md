@@ -18,6 +18,15 @@ See [config.example.yml](config.example.yml) for a starting point.
 Notes:
 - Set `ollama.temperature` in YAML (or `OLLAMA_TEMPERATURE`) to control sampling.
 - `ragabast query --temperature ...` overrides config/env for that invocation.
+- The chat completions server (`ollama.chat_base_url` / `ollama.chat_model`) speaks
+  the OpenAI Chat Completions API. Works against Ollama 0.5+, vLLM, llama.cpp
+  `--server`, LM Studio, llama-stack, OpenRouter, and OpenAI itself.
+- The embeddings server (`ollama.base_url` / `ollama.embedding_model`) speaks
+  the OpenAI Embeddings API. Works against Ollama 0.5+ (with the
+  `nomic-embed-text` image), vLLM, llama.cpp `--embedding`, LM Studio, and OpenAI.
+- Changing `embedding_model` (or its `EmbeddingDimension` in `vectordb:`) requires
+  re-ingesting all documents: stop the server, `rm -rf data/vectors/`, and run
+  `ragabast ingest` again.
 
 ## Usage
 

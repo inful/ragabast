@@ -47,11 +47,16 @@ type Config struct {
 // at one server (e.g. Ollama running the nomic-embed-text image) and chat
 // at a different OpenAI-compatible server (vLLM, llama.cpp, LM Studio, etc.).
 type OllamaConfig struct {
-	// BaseURL is the embeddings server endpoint. Defaults to a local Ollama
-	// instance running the nomic-embed-text image.
+	// BaseURL is the embeddings server endpoint. Speaks the OpenAI
+	// /v1/embeddings protocol — supported by Ollama 0.5+, vLLM, llama.cpp
+	// --embedding, LM Studio, llama-stack, OpenAI, and any other
+	// OpenAI-compatible server. Defaults to a local Ollama instance running
+	// the nomic-embed-text image.
 	BaseURL string `env:"OLLAMA_BASE_URL" yaml:"base_url"`
 
 	// EmbeddingModel is the model used for embeddings on the embeddings server.
+	// Changing this requires updating VectorDB.EmbeddingDimension and
+	// re-ingesting all documents (delete data/vectors/ first).
 	EmbeddingModel string `env:"OLLAMA_EMBEDDING_MODEL" yaml:"embedding_model"`
 
 	// ChatBaseURL is the OpenAI-compatible chat completions server endpoint.

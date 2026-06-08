@@ -11,11 +11,11 @@ import (
 // VectorOperations handles high-level vector database operations.
 type VectorOperations struct {
 	db         *VectorDB
-	embeddings *OllamaEmbeddingClient
+	embeddings *OpenAIEmbeddingClient
 }
 
 // NewVectorOperations creates a new vector operations handler.
-func NewVectorOperations(db *VectorDB, embeddings *OllamaEmbeddingClient) *VectorOperations {
+func NewVectorOperations(db *VectorDB, embeddings *OpenAIEmbeddingClient) *VectorOperations {
 	return &VectorOperations{
 		db:         db,
 		embeddings: embeddings,
