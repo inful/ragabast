@@ -82,7 +82,7 @@ func NewOpenAILLMClientWithOptions(baseURL, model, apiKey string, timeout time.D
 	}
 
 	return &OpenAILLMClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: normalizeOpenAIBaseURL(baseURL),
 		model:   model,
 		apiKey:  apiKey,
 		httpClient: &http.Client{

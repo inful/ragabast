@@ -8,7 +8,6 @@ import (
 	"io"
 	"maps"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/ragabast/internal/models"
@@ -74,7 +73,7 @@ func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout 
 	}
 
 	return &OpenAIEmbeddingClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
+		baseURL: normalizeOpenAIBaseURL(baseURL),
 		model:   model,
 		apiKey:  apiKey,
 		httpClient: &http.Client{
