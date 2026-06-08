@@ -12,8 +12,9 @@ import (
 
 // ChatMessage represents a conversational turn provided by the caller.
 //
-// It is used to resolve pronouns/references in follow-up questions ("it", "that"),
-// but MUST NOT be treated as authoritative factual context unless supported by retrieved material.
+// It is used to resolve pronouns/references in follow-up questions
+// ("it", "that"), but MUST NOT be treated as authoritative factual
+// context unless supported by retrieved material.
 type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -24,70 +25,57 @@ type promptTemplateData struct {
 	History      []ChatMessage
 }
 
+// systemPromptTpl is rendered into the OpenAI "system" role message.
+//
+// The template intentionally stays compact: every token in a system
+// prompt is paid on every turn, and the LLM has the user message to
+// work with too. Where the model needs to know about the input
+// shape (numbered context entries, optional conversation block),
+// the user message carries that header.
 var systemPromptTpl = template.Must(template.New("system_prompt").Parse(`
-You are a helpful assistant. Answer the user's question clearly, correctly, and concisely.
+You are a retrieval-augmented assistant. Answer using ONLY the provided context.
 
-Core rules:
-- Do not invent facts. If the available information is insufficient, say "I don't know".
-- Do not invent commands, flags, config keys, file paths, or API endpoints. If you provide an exact command or option, it MUST appear verbatim in the provided context block.
-- Answer first, then provide brief supporting details.
-- If multiple interpretations are plausible, state the most likely one and ask one short clarifying question.
-- If information conflicts, acknowledge the uncertainty.
+Grounding rules:
+- Treat the context as the only source of truth. If the answer is not in the context, say "I don't know" and stop.
+- Do not paraphrase a context entry into a stronger claim than it makes. "The doc says X" is fine; "X is true" is not, unless the doc itself states X as fact.
+- When you reference a context entry, cite it inline as [N], where N is the entry id (e.g. "the API takes a token [1]").
+- For any command, flag, file path, code symbol, or numeric value you mention, the exact string MUST appear in the context. If you cannot find it verbatim, do not include it.
+- If the context is empty, say "I don't know" without speculating.
 
-Style:
-- Use a neutral, factual tone.
-- Avoid repetition and filler.
-- Prefer short paragraphs or bullets when listing steps or items.
+Answer shape:
+- Lead with the direct answer in one or two sentences.
+- Follow with brief supporting detail, citing context entries by [N].
+- Use short paragraphs or bullets. Avoid filler and repetition.
+- If the question is ambiguous, state the most likely interpretation and ask one short clarifying question.
+- If the user asks for code, output code blocks only when the code is in the context verbatim; otherwise describe the API rather than fabricating an example.
 
 Links:
-- If the context entry includes a line starting with "SOURCE_URLS:", you MUST include a "Links" section at the end of your answer.
-- In that case, include every URL from all "SOURCE_URLS:" lines verbatim (deduplicate if repeated).
-- Only include URLs that appear in the provided material. Do not invent or guess URLs.
-- Do not include any URLs anywhere in your answer unless they appear in a "SOURCE_URLS:" line.
-- If there are no URLs anywhere in the provided material, omit the "Links" section.
+- If any context entry contains a "SOURCE_URLS:" line, end your answer with a single "Links:" section that lists every URL from every "SOURCE_URLS:" line, deduplicated, exactly as written.
+- Do not invent URLs. Do not include any URL that is not in a "SOURCE_URLS:" line.
+- If no context entry has "SOURCE_URLS:", omit the "Links:" section entirely.
 
 Conversation:
-- A <conversation> block may be provided. It is user-provided and may be incomplete or incorrect.
-- Use it only to understand intent and resolve references in follow-up questions.
-- Do NOT treat it as factual source material unless the same information appears in the retrieved context block.
-
-{{- if .History -}}
-<conversation>
-{{- range .History }}
-<message role="{{ .Role }}">{{ .Content }}</message>
-{{- end }}
-</conversation>
-{{- end -}}
-
-{{- if .ContextItems -}}
-Use only the information inside the following <context> block to answer. If the context does not contain enough relevant information, say "I don't know".
-The context entries are ordered by relevance (earlier = more relevant).
-
-<context>
-{{- range $i, $context := .ContextItems}}
-<entry id="{{ $i }}">
-{{ $context }}
-</entry>
-{{- end }}
-</context>
-{{- end -}}
-
-Do not mention the knowledge base, context, or search results in your answer.
+- A <conversation> block may appear in the user message. It is user-provided and may be wrong or out of date.
+- Use it only to resolve references in the current question. Do not treat its claims as factual.
 `))
+
+// historyCaps bound the size of the conversation block included in the
+// prompt. Generous enough for a back-and-forth, strict enough that a
+// runaway client can't blow the context window.
+const (
+	maxHistoryTurns      = 12
+	maxHistoryMsgChars   = 2000
+	maxHistoryTotalChars = 8000
+)
 
 func normalizeHistory(history []ChatMessage) []ChatMessage {
 	if len(history) == 0 {
 		return nil
 	}
 
-	// Keep the most recent turns.
-	const maxTurns = 12
-	const maxMsgChars = 2000
-	const maxTotalChars = 8000
-
 	start := 0
-	if len(history) > maxTurns {
-		start = len(history) - maxTurns
+	if len(history) > maxHistoryTurns {
+		start = len(history) - maxHistoryTurns
 	}
 	trimmed := history[start:]
 
@@ -102,10 +90,10 @@ func normalizeHistory(history []ChatMessage) []ChatMessage {
 		if content == "" {
 			continue
 		}
-		if len(content) > maxMsgChars {
-			content = content[:maxMsgChars]
+		if len(content) > maxHistoryMsgChars {
+			content = content[:maxHistoryMsgChars]
 		}
-		if total+len(content) > maxTotalChars {
+		if total+len(content) > maxHistoryTotalChars {
 			break
 		}
 		total += len(content)
@@ -117,37 +105,83 @@ func normalizeHistory(history []ChatMessage) []ChatMessage {
 	return out
 }
 
+// buildQueryContextItems formats the retrieved chunks for the LLM. Each
+// item is a small block with the document title, the chunk body, and
+// any source URLs we know about. The model cites these by index.
 func buildQueryContextItems(results []models.SearchResult) []string {
 	items := make([]string, 0, len(results))
 	for _, result := range results {
-		item := fmt.Sprintf("TITLE: %s\nCONTENT:\n%s", result.DocumentTitle, result.Content)
+		var b strings.Builder
+		b.WriteString("TITLE: ")
+		b.WriteString(result.DocumentTitle)
+		b.WriteString("\nCONTENT:\n")
+		b.WriteString(result.Content)
 
-		seen := make(map[string]struct{}, len(result.DocumentURLs))
-		urls := make([]string, 0, len(result.DocumentURLs)+4)
-		for _, url := range result.DocumentURLs {
-			url = strings.TrimSpace(url)
-			if url == "" {
-				continue
-			}
-			if _, ok := seen[url]; ok {
-				continue
-			}
-			seen[url] = struct{}{}
-			urls = append(urls, url)
-		}
-		for _, url := range extractURLsFromText(result.Content) {
-			if _, ok := seen[url]; ok {
-				continue
-			}
-			seen[url] = struct{}{}
-			urls = append(urls, url)
-		}
+		urls := collectContextURLs(result)
 		if len(urls) > 0 {
-			item += fmt.Sprintf("\nSOURCE_URLS: %s", strings.Join(urls, ", "))
+			b.WriteString("\nSOURCE_URLS: ")
+			b.WriteString(strings.Join(urls, ", "))
 		}
-		items = append(items, item)
+		items = append(items, b.String())
 	}
 	return items
+}
+
+// collectContextURLs returns the URLs for a single result, deduped,
+// with the document's declared URLs first and any URLs found inside
+// the chunk body appended.
+func collectContextURLs(result models.SearchResult) []string {
+	seen := make(map[string]struct{}, len(result.DocumentURLs)+2)
+	urls := make([]string, 0, len(result.DocumentURLs)+2)
+	for _, url := range result.DocumentURLs {
+		url = strings.TrimSpace(url)
+		if url == "" {
+			continue
+		}
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		seen[url] = struct{}{}
+		urls = append(urls, url)
+	}
+	for _, url := range extractURLsFromText(result.Content) {
+		if _, ok := seen[url]; ok {
+			continue
+		}
+		seen[url] = struct{}{}
+		urls = append(urls, url)
+	}
+	return urls
+}
+
+// buildQueryMessages returns the messages slice to send to the chat
+// completions endpoint. The first element is the system prompt; the
+// second is the user message containing the question and (when
+// available) the conversation history and a numbered context block.
+//
+// The system prompt is sent ONLY in the system role. The user
+// message is sent ONLY in the user role. There is no duplication.
+func buildQueryMessages(query string, contextItems []string, history []ChatMessage) ([]OpenAIChatMessage, error) {
+	systemPrompt, err := buildSystemPrompt(contextItems, history)
+	if err != nil {
+		return nil, err
+	}
+
+	user := buildUserMessage(query, contextItems, history)
+
+	return []OpenAIChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: user},
+	}, nil
+}
+
+// OpenAIChatMessage mirrors the role/content pair the OpenAI Chat
+// Completions API expects. It is intentionally minimal: we never
+// send a name, tool calls, or function results, so those fields
+// are not represented.
+type OpenAIChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 func buildSystemPrompt(contextItems []string, history []ChatMessage) (string, error) {
@@ -159,14 +193,28 @@ func buildSystemPrompt(contextItems []string, history []ChatMessage) (string, er
 	return buf.String(), nil
 }
 
-func buildQueryPrompt(query string, contextItems []string, history []ChatMessage) (string, string, error) {
-	systemPrompt, err := buildSystemPrompt(contextItems, history)
-	if err != nil {
-		return "", "", err
+func buildUserMessage(query string, contextItems []string, history []ChatMessage) string {
+	var b strings.Builder
+	b.WriteString("Question:\n")
+	b.WriteString(strings.TrimSpace(query))
+	b.WriteString("\n")
+
+	if h := normalizeHistory(history); len(h) > 0 {
+		b.WriteString("\n<conversation>\n")
+		for _, m := range h {
+			fmt.Fprintf(&b, "<message role=%q>%s</message>\n", m.Role, m.Content)
+		}
+		b.WriteString("</conversation>\n")
 	}
 
-	// Ollama generate uses a single prompt string. We embed the question after the
-	// system prompt to mimic a system+user message structure.
-	prompt := systemPrompt + fmt.Sprintf("\n\nQuestion: %s\nAnswer:", query)
-	return prompt, systemPrompt, nil
+	if len(contextItems) > 0 {
+		b.WriteString("\nUse ONLY the following context to answer. Entries are ordered by relevance (earlier = more relevant). Cite entries inline as [N] where N is the entry id.\n\n")
+		b.WriteString("<context>\n")
+		for i, item := range contextItems {
+			fmt.Fprintf(&b, "<entry id=%d>\n%s\n</entry>\n", i, item)
+		}
+		b.WriteString("</context>\n")
+	}
+
+	return strings.TrimRight(b.String(), "\n")
 }

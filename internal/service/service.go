@@ -184,12 +184,18 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	}
 
 	contextItems := buildQueryContextItems(results)
-	prompt, systemPrompt, err := buildQueryPrompt(query, contextItems, opts.History)
+	messages, err := buildQueryMessages(query, contextItems, opts.History)
 	if err != nil {
 		return "", nil, fmt.Errorf("prompt build failed: %w", err)
 	}
 
-	response, err := llmClient.ChatWithSystem(ctx, systemPrompt, prompt, llmOptions)
+	// Convert to the vector-package message type for the client.
+	clientMessages := make([]vector.OpenAIMessage, len(messages))
+	for i, m := range messages {
+		clientMessages[i] = vector.OpenAIMessage{Role: m.Role, Content: m.Content}
+	}
+
+	response, err := llmClient.Chat(ctx, clientMessages, llmOptions)
 	if err != nil {
 		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}
@@ -200,8 +206,8 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		Model:   model,
 		Results: results,
 		Context: strings.Join(contextItems, "\n\n"),
-		System:  systemPrompt,
-		Prompt:  prompt,
+		System:  messages[0].Content,
+		Prompt:  messages[1].Content,
 	}, nil
 }
 
@@ -280,44 +286,6 @@ func (s *Service) DeleteChunk(ctx context.Context, chunkID string) error {
 	return s.vectorOps.DeleteChunk(ctx, chunkID)
 }
 
-// QueryWithContext generates a response with additional context.
-func (s *Service) QueryWithContext(ctx context.Context, query string, context string, limit int) (string, error) {
-	// Search for relevant chunks if context is not provided
-	if context == "" {
-		results, err := s.vectorOps.Search(ctx, query, limit, nil)
-		if err != nil {
-			return "", fmt.Errorf("search failed: %w", err)
-		}
-
-		if len(results) == 0 {
-			return "No relevant information found.", nil
-		}
-
-		// Build context from results
-		var contextBuilder strings.Builder
-		for i, result := range results {
-			contextBuilder.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
-		}
-		context = contextBuilder.String()
-	}
-
-	// Generate LLM response
-	llmClient := vector.NewOpenAILLMClientWithOptions(
-		s.config.Ollama.ChatBaseURL,
-		s.config.Ollama.ChatModel,
-		s.config.Ollama.EffectiveChatAPIKey(),
-		s.config.Ollama.Timeout,
-	)
-	prompt := fmt.Sprintf("Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
-
-	response, err := llmClient.ChatWithSystem(ctx, "", prompt, nil)
-	if err != nil {
-		return "", fmt.Errorf("LLM generation failed: %w", err)
-	}
-
-	return response, nil
-}
-
 // IngestText processes raw text content as a document.
 func (s *Service) IngestText(ctx context.Context, text string, uid string, tags []string, categories []string, urls []string) error {
 	// Create a document from text
@@ -383,70 +351,6 @@ func (s *Service) IngestDocument(ctx context.Context, content string) (*models.D
 	}
 
 	return doc, nil
-}
-
-// QueryWithLLM generates a response using the LLM with optional conversation history.
-func (s *Service) QueryWithLLM(ctx context.Context, query string, model string, history []struct {
-	Role    string
-	Content string
-}) (string, []struct {
-	ID      string
-	Content string
-	Score   float64
-}, error,
-) {
-	// Search for relevant chunks
-	results, err := s.vectorOps.Search(ctx, query, 5, nil)
-	if err != nil {
-		return "", nil, fmt.Errorf("search failed: %w", err)
-	}
-
-	if len(results) == 0 {
-		return "No relevant information found.", nil, nil
-	}
-
-	// Build context from results
-	var contextBuilder strings.Builder
-	sources := make([]struct {
-		ID      string
-		Content string
-		Score   float64
-	}, len(results))
-
-	for i, result := range results {
-		contextBuilder.WriteString(fmt.Sprintf("Result %d (from %s):\n%s\n\n", i+1, result.DocumentTitle, result.Content))
-		sources[i] = struct {
-			ID      string
-			Content string
-			Score   float64
-		}{
-			ID:      result.ChunkID,
-			Content: result.Content,
-			Score:   float64(result.Similarity),
-		}
-	}
-	context := contextBuilder.String()
-
-	// Build prompt with history
-	var promptBuilder strings.Builder
-	for _, h := range history {
-		promptBuilder.WriteString(fmt.Sprintf("%s: %s\n", h.Role, h.Content))
-	}
-	prompt := promptBuilder.String() + fmt.Sprintf("assistant: Based on the following context, answer the question: %s\n\nContext:\n%s", query, context)
-
-	// Generate LLM response
-	llmClient := vector.NewOpenAILLMClientWithOptions(
-		s.config.Ollama.ChatBaseURL,
-		model,
-		s.config.Ollama.EffectiveChatAPIKey(),
-		s.config.Ollama.Timeout,
-	)
-	response, err := llmClient.ChatWithSystem(ctx, "", prompt, nil)
-	if err != nil {
-		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
-	}
-
-	return response, sources, nil
 }
 
 // GetNormalizedTags retrieves all unique tags from the vector database, normalized to lowercase.

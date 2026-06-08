@@ -85,18 +85,6 @@ func (f *fakeHumaService) QueryDebugWithOptions(ctx context.Context, query strin
 	return f.answer, f.debug, nil
 }
 
-func (f *fakeHumaService) QueryWithLLM(ctx context.Context, query string, model string, history []struct {
-	Role    string
-	Content string
-}) (string, []struct {
-	ID      string
-	Content string
-	Score   float64
-}, error,
-) {
-	return "", nil, nil
-}
-
 func (f *fakeHumaService) SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error) {
 	if f.frontmatterErr != nil {
 		return service.FrontmatterSuggestion{}, f.frontmatterErr

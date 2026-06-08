@@ -51,18 +51,6 @@ func (f *fakeChatService) QueryDebugWithOptions(ctx context.Context, query strin
 	return f.answer, &service.QueryDebugInfo{Results: []models.SearchResult{}}, nil
 }
 
-func (f *fakeChatService) QueryWithLLM(ctx context.Context, query string, model string, history []struct {
-	Role    string
-	Content string
-}) (string, []struct {
-	ID      string
-	Content string
-	Score   float64
-}, error,
-) {
-	return "", nil, nil
-}
-
 func (f *fakeChatService) GetNormalizedTags(ctx context.Context) ([]string, error) {
 	return []string{"go", "rag", "api"}, nil
 }
