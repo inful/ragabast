@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,6 +87,68 @@ func TestOpenAILLMClient_Chat_SendsTemperature(t *testing.T) {
 		require.InDelta(t, 0.12, gotTemp, 1e-9)
 	default:
 		t.Fatal("did not observe temperature in request")
+	}
+}
+
+func TestOpenAILLMClient_Chat_TemperatureNotDuplicated(t *testing.T) {
+	t.Parallel()
+
+	// Server counts how many times "temperature" appears at the top level
+	// of the JSON body. With the typed-field lift in place, the client
+	// must send it exactly once even when temperature is in the
+	// options map.
+	var gotCount int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		// Naive count: occurrences of the key substring. Good enough
+		// to catch a double-send regression where the typed field
+		// and the options map both serialize.
+		gotCount = strings.Count(string(body), `"temperature"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "hi"}}, map[string]any{
+		"temperature": 0.5,
+		"top_p":       0.9,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 1, gotCount, "temperature must appear exactly once in the body")
+}
+
+func TestOpenAILLMClient_Chat_TemperatureCoercesFromInt(t *testing.T) {
+	t.Parallel()
+
+	// Defensive: callers that pass int instead of float64 should still
+	// get a valid temperature field.
+	var gotTempCh chan float64
+	gotTempCh = make(chan float64, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var got map[string]any
+		if err := json.Unmarshal(body, &got); err == nil {
+			if v, ok := got["temperature"].(float64); ok {
+				gotTempCh <- v
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "hi"}}, map[string]any{
+		"temperature": 1, // int, not float
+	})
+	require.NoError(t, err)
+
+	select {
+	case v := <-gotTempCh:
+		require.InDelta(t, 1.0, v, 1e-9)
+	default:
+		t.Fatal("did not observe temperature")
 	}
 }
 

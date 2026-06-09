@@ -157,15 +157,36 @@ func (c *OpenAILLMClient) ValidateConnection(ctx context.Context) error {
 }
 
 func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, options map[string]any) (string, error) {
+	// Lift a "temperature" entry from options into the typed field so it
+	// serializes as a JSON number at the top level (the OpenAI
+	// contract), and remove it from options so it isn't sent twice.
+	var typedTemp *float64
+	if v, ok := options["temperature"]; ok {
+		switch n := v.(type) {
+		case float64:
+			typedTemp = &n
+		case float32:
+			f := float64(n)
+			typedTemp = &f
+		case int:
+			f := float64(n)
+			typedTemp = &f
+		}
+		if typedTemp != nil {
+			delete(options, "temperature")
+		}
+	}
+
 	req := OpenAIChatRequest{
-		Model:    c.model,
-		Messages: messages,
-		Stream:   false,
-		Options:  options,
+		Model:       c.model,
+		Messages:    messages,
+		Stream:      false,
+		Temperature: typedTemp,
+		Options:     options,
 	}
 
 	// Marshal the request into a generic map so we can merge Options at the
-	// top level (for keys like `temperature`, `top_p`, etc.).
+	// top level (for keys like `top_p`, `top_k`, vendor extensions, etc.).
 	body, err := buildChatBody(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %w", err)

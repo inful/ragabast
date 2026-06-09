@@ -273,32 +273,28 @@ func constructJSONFromText(text string) string {
 			continue
 		}
 
-		// Check for description field
-		if strings.HasPrefix(strings.ToLower(line), "description:") {
-			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
-			continue
+		// Check for the four expected fields. All keys are matched
+		// case-insensitively; values are taken verbatim from the LLM
+		// output.
+		if key, val, ok := splitKeyColon(line); ok {
+			switch strings.ToLower(key) {
+			case "description":
+				description = strings.TrimSpace(val)
+				continue
+			case "categories":
+				categories = parseArrayValue(val)
+				continue
+			case "tags":
+				tags = parseArrayValue(val)
+				continue
+			}
 		}
-
-		// Check for categories field
-		if strings.HasPrefix(strings.ToLower(line), "categories:") {
-			val := strings.TrimSpace(strings.TrimPrefix(line, "categories:"))
-			categories = parseArrayValue(val)
-			continue
-		}
-
-		// Check for tags field
-		if strings.HasPrefix(strings.ToLower(line), "tags:") {
-			val := strings.TrimSpace(strings.TrimPrefix(line, "tags:"))
-			tags = parseArrayValue(val)
-			continue
-		}
-
-		// Check for custom_tags field
-		if strings.HasPrefix(strings.ToLower(line), "custom_tags:") || strings.HasPrefix(strings.ToLower(line), "customtags:") {
-			val := strings.TrimSpace(strings.TrimPrefix(line, "custom_tags:"))
-			val = strings.TrimSpace(strings.TrimPrefix(val, "customtags:"))
-			customTags = parseArrayValue(val)
-			continue
+		if key, val, ok := splitKeyColon(line); ok {
+			switch strings.ToLower(strings.ReplaceAll(key, " ", "")) {
+			case "custom_tags", "customtags":
+				customTags = parseArrayValue(val)
+				continue
+			}
 		}
 	}
 
@@ -321,6 +317,18 @@ func constructJSONFromText(text string) string {
 	}
 
 	return string(jsonBytes)
+}
+
+// splitKeyColon splits a line of the form "key: value" (or "key:value")
+// into its components. It returns ok=false when the line does not
+// contain a colon, so the caller can skip non-keyed lines. Whitespace
+// around the key and value is preserved; callers trim as needed.
+func splitKeyColon(line string) (key, val string, ok bool) {
+	before, after, ok := strings.Cut(line, ":")
+	if !ok {
+		return "", "", false
+	}
+	return before, after, true
 }
 
 // parseArrayValue extracts string values from common array formats.

@@ -3,8 +3,8 @@ package web
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"strings"
@@ -652,7 +652,12 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 
 		sug, err := svc.SuggestFrontmatter(ctx, markdown, existing, mergedAllowedCategories, mergedAllowedTags)
 		if err != nil {
-			return nil, huma.Error500InternalServerError("frontmatter suggestion failed: " + err.Error())
+			preview := input.Body.Content
+			if len(preview) > 80 {
+				preview = preview[:80]
+			}
+			log.Printf("huma: frontmatter-suggest %q: %v", preview, err)
+			return nil, huma.Error500InternalServerError("frontmatter suggestion failed")
 		}
 
 		applied := map[string]any{}
@@ -694,9 +699,6 @@ func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 		}
 		applied["tags_added"] = addedAllowedTags
 		applied["custom_tags_added"] = normalizeTagsLower(customTags)
-
-		// Ensure response JSON is stable (no yaml.Node etc).
-		_, _ = json.Marshal(merged)
 
 		return &struct {
 			Body frontmatterSuggestResponseBody

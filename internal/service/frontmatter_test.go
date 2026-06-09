@@ -167,3 +167,78 @@ func TestParseFrontmatterSuggestionJSON_GoSliceSyntax(t *testing.T) {
 	require.Equal(t, []string{"go", "rag"}, s2.Tags)
 	require.Equal(t, []string{"api", "cli"}, s2.CustomTags)
 }
+
+// Tests for the text-fallback path (constructJSONFromText), which is hit
+// when the LLM returns key:value lines instead of a JSON object.
+
+func TestParseFrontmatterSuggestionJSON_TextFormat_AllFields(t *testing.T) {
+	s, err := parseFrontmatterSuggestionJSON(`description: A short summary
+categories: [Guides, Reference]
+tags: [tutorial, go]
+custom_tags: [api]`)
+	require.NoError(t, err)
+	require.Equal(t, "A short summary", s.Description)
+	require.Equal(t, []string{"Guides", "Reference"}, s.Categories)
+	require.Equal(t, []string{"tutorial", "go"}, s.Tags)
+	require.Equal(t, []string{"api"}, s.CustomTags)
+}
+
+func TestParseFrontmatterSuggestionJSON_TextFormat_CaseInsensitiveCustomTags(t *testing.T) {
+	// Regression: the LLM may capitalize keys. The parser used to match
+	// case-insensitively but then strip with case-sensitive TrimPrefix,
+	// silently dropping the value.
+	s, err := parseFrontmatterSuggestionJSON(`description: x
+CustomTags: [api,cli]`)
+	require.NoError(t, err)
+	require.Equal(t, []string{"api", "cli"}, s.CustomTags)
+}
+
+func TestParseFrontmatterSuggestionJSON_TextFormat_CaseInsensitiveAllKeys(t *testing.T) {
+	s, err := parseFrontmatterSuggestionJSON(`DESCRIPTION: d
+CATEGORIES: [C1]
+TAGS: [t1,t2]
+CUSTOM_TAGS: [c1]`)
+	require.NoError(t, err)
+	require.Equal(t, "d", s.Description)
+	require.Equal(t, []string{"C1"}, s.Categories)
+	require.Equal(t, []string{"t1", "t2"}, s.Tags)
+	require.Equal(t, []string{"c1"}, s.CustomTags)
+}
+
+func TestParseFrontmatterSuggestionJSON_TextFormat_CommaSeparated(t *testing.T) {
+	s, err := parseFrontmatterSuggestionJSON(`description: x
+tags: tutorial, go, rag`)
+	require.NoError(t, err)
+	require.Equal(t, []string{"tutorial", "go", "rag"}, s.Tags)
+}
+
+func TestParseFrontmatterSuggestionJSON_TextFormat_NoFieldsFound(t *testing.T) {
+	_, err := parseFrontmatterSuggestionJSON(`this is just a paragraph with no keys`)
+	require.Error(t, err)
+}
+
+func TestSplitKeyColon_SplitsOnFirstColon(t *testing.T) {
+	cases := []struct {
+		in  string
+		key string
+		val string
+		ok  bool
+	}{
+		{"description: hello", "description", " hello", true},
+		{"description:hello", "description", "hello", true},
+		{"no colon here", "", "", false},
+		{"a:b:c", "a", "b:c", true},
+		{"empty:", "empty", "", true},
+		{":empty key", "", "empty key", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			k, v, ok := splitKeyColon(tc.in)
+			require.Equal(t, tc.ok, ok)
+			if ok {
+				require.Equal(t, tc.key, k)
+				require.Equal(t, tc.val, v)
+			}
+		})
+	}
+}
