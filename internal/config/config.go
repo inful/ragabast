@@ -177,7 +177,11 @@ type PathsConfig struct {
 	// DataDir is the base directory for all data.
 	DataDir string `env:"DATA_DIR" yaml:"data_dir"`
 
-	// TemplatesDir for web templates.
+	// TemplatesDir is an optional override. Empty (the default)
+	// tells the web server to use the templates embedded into
+	// the binary (see internal/web/templates.go). Set this to
+	// point at a directory of *.html files to ship a custom
+	// template set without rebuilding.
 	TemplatesDir string `env:"TEMPLATES_DIR" yaml:"templates_dir"`
 }
 
@@ -225,8 +229,13 @@ func DefaultConfig() *Config {
 			ChunkOverlap: 150,
 		},
 		Paths: PathsConfig{
-			DataDir:      filepath.Join(wd, "data"),
-			TemplatesDir: filepath.Join(wd, "templates"),
+			DataDir: filepath.Join(wd, "data"),
+			// TemplatesDir defaults to empty, which makes
+			// internal/web.NewServer load the templates that
+			// ship inside the binary (//go:embed). Set
+			// TEMPLATES_DIR=... or `paths.templates_dir:` to
+			// override with a custom on-disk set.
+			TemplatesDir: "",
 		},
 	}
 }
@@ -537,9 +546,10 @@ func (c *Config) Validate() error {
 	if c.Paths.DataDir == "" {
 		errs = append(errs, "paths.data_dir is required")
 	}
-	if c.Paths.TemplatesDir == "" {
-		errs = append(errs, "paths.templates_dir is required")
-	}
+	// TemplatesDir is intentionally optional: empty means "use
+	// the templates embedded into the binary" (see
+	// internal/web/templates.go). Operators can still set it
+	// to ship a custom template set without rebuilding.
 
 	if len(errs) > 0 {
 		return fmt.Errorf("configuration validation failed:\n  - %s", strings.Join(errs, "\n  - "))

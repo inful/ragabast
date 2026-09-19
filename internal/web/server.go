@@ -63,13 +63,31 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 		})
 	}
 
-	pattern := "templates/*.html"
-	if cfg.Paths.TemplatesDir != "" {
-		pattern = filepath.Join(cfg.Paths.TemplatesDir, "*.html")
+	// Load templates in this order of precedence:
+	//   1. cfg.Paths.TemplatesDir, if set (operator override via
+	//      yaml / env TEMPLATES_DIR; intended for shipping a custom
+	//      template set without rebuilding the binary)
+	//   2. The embedded templatesFS (compile-time embed; default
+	//      for the published Docker image, which has no templates/
+	//      on disk)
+	//
+	// Both branches parse into the same *template.Template, so
+	// the rest of the package doesn't care which path served the
+	// templates.
+	var templates *template.Template
+	var err error
+	switch {
+	case cfg.Paths.TemplatesDir != "":
+		templates, err = template.ParseGlob(filepath.Join(cfg.Paths.TemplatesDir, "*.html"))
+		if err != nil {
+			log.Printf("web: failed to load templates from %s: %v; falling back to embedded templates", cfg.Paths.TemplatesDir, err)
+			templates, err = template.ParseFS(templatesFS, "templates/*.html")
+		}
+	default:
+		templates, err = template.ParseFS(templatesFS, "templates/*.html")
 	}
-	templates, err := template.ParseGlob(pattern)
 	if err != nil {
-		// If templates don't exist, create a basic set
+		log.Printf("web: failed to load templates: %v", err)
 		templates = template.New("base")
 	}
 

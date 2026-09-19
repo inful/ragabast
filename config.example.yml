@@ -94,4 +94,8 @@ paths:
   data_dir: data
   documents_dir: data/documents
   temp_dir: data/temp
-  templates_dir: templates
+  # Empty uses the templates embedded into the binary
+  # (see internal/web/templates.go). Set to a directory of
+  # *.html files to ship a custom template set without
+  # rebuilding. The Docker image does not need this set.
+  templates_dir: ""

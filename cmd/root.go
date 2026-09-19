@@ -236,7 +236,14 @@ func (c *StatusCmd) Run(ctx *kong.Context) error {
 			log.Println("\nConfiguration:")
 			log.Printf("  Ollama URL: %s\n", cfg.Ollama.BaseURL)
 			log.Printf("  Vector DB: %s\n", cfg.VectorDB.PersistenceDir)
-			log.Printf("  Templates: %s\n", cfg.Paths.TemplatesDir)
+			// Empty templates_dir means the binary's embedded
+			// templates are in use. Spell that out so `status`
+			// doesn't look like a misconfig.
+			templatesLabel := cfg.Paths.TemplatesDir
+			if templatesLabel == "" {
+				templatesLabel = "(embedded)"
+			}
+			log.Printf("  Templates: %s\n", templatesLabel)
 		}
 
 		return nil
