@@ -94,13 +94,15 @@ func (c *OpenAIEmbeddingClient) GenerateEmbedding(ctx context.Context, text stri
 	return resp[0], nil
 }
 
-// GenerateEmbeddingsBatch generates embeddings for multiple texts in batch.
+// generateEmbeddingsBatch generates embeddings for multiple texts
+// in batch. Servers like vLLM and OpenAI accept an array `input`; we
+// send one batched request per call. Some servers (older Ollama)
+// only accept a single string; this client always sends a 1-element
+// array, which all conformant servers accept.
 //
-// Servers like vLLM and OpenAI accept an array `input`; we send one batched
-// request per call. Some servers (older Ollama) only accept a single string;
-// this client always sends a 1-element array, which all conformant servers
-// accept.
-func (c *OpenAIEmbeddingClient) GenerateEmbeddingsBatch(ctx context.Context, texts []string) ([][]float32, error) {
+// Package-private; callers outside the embedding pipeline should use
+// GenerateEmbedding (single) or GenerateChunkEmbeddings (chunk-shaped).
+func (c *OpenAIEmbeddingClient) generateEmbeddingsBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, models.ErrEmbeddingFailed
 	}
@@ -161,7 +163,7 @@ func (c *OpenAIEmbeddingClient) GenerateChunkEmbeddings(ctx context.Context, chu
 		texts[i] = chunk.GetFullPath()
 	}
 
-	return c.GenerateEmbeddingsBatch(ctx, texts)
+	return c.generateEmbeddingsBatch(ctx, texts)
 }
 
 // GenerateChunkEmbedding generates an embedding for a single chunk.

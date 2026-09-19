@@ -113,14 +113,6 @@ func (vo *VectorOperations) Search(ctx context.Context, query string, limit int,
 	return results, nil
 }
 
-// SearchByDocument searches within a specific document.
-func (vo *VectorOperations) SearchByDocument(ctx context.Context, query string, documentID string, limit int) ([]models.SearchResult, error) {
-	filters := map[string]string{
-		"document_id": documentID,
-	}
-	return vo.Search(ctx, query, limit, filters)
-}
-
 // GetDocumentChunks retrieves all chunks for a document.
 func (vo *VectorOperations) GetDocumentChunks(ctx context.Context, documentID string) ([]*models.Chunk, error) {
 	return vo.db.GetChunksByDocument(ctx, documentID)

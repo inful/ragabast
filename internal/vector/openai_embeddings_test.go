@@ -79,7 +79,7 @@ func TestOpenAIEmbeddingClient_GenerateEmbedding_SendsAuthHeader(t *testing.T) {
 	}
 }
 
-func TestOpenAIEmbeddingClient_GenerateEmbeddingsBatch_SendsAllInputs(t *testing.T) {
+func TestOpenAIEmbeddingClient_generateEmbeddingsBatch_SendsAllInputs(t *testing.T) {
 	t.Parallel()
 
 	var got struct {
@@ -110,7 +110,7 @@ func TestOpenAIEmbeddingClient_GenerateEmbeddingsBatch_SendsAllInputs(t *testing
 	t.Cleanup(srv.Close)
 
 	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
-	vecs, err := client.GenerateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
+	vecs, err := client.generateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
 	require.NoError(t, err)
 	require.Len(t, vecs, 3)
 	require.Equal(t, []string{"a", "b", "c"}, got.Input)
@@ -130,7 +130,7 @@ func TestOpenAIEmbeddingClient_EmptyBatchReturnsError(t *testing.T) {
 	t.Parallel()
 
 	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second)
-	_, err := client.GenerateEmbeddingsBatch(context.Background(), nil)
+	_, err := client.generateEmbeddingsBatch(context.Background(), nil)
 	require.ErrorIs(t, err, models.ErrEmbeddingFailed)
 }
 
@@ -175,7 +175,7 @@ func TestOpenAIEmbeddingClient_MismatchedInputCountReturnsError(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
-	_, err := client.GenerateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
+	_, err := client.generateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "1 vectors for 3 inputs")
 }
