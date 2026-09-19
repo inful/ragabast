@@ -77,6 +77,10 @@ func (db *VectorDB) AddChunk(ctx context.Context, chunk *models.Chunk, embedding
 		return models.ErrEmbeddingFailed
 	}
 
+	if err := db.checkEmbeddingDimension(len(embedding)); err != nil {
+		return err
+	}
+
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
@@ -103,6 +107,12 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 
 	if len(chunks) == 0 {
 		return nil
+	}
+
+	for i, embedding := range embeddings {
+		if err := db.checkEmbeddingDimension(len(embedding)); err != nil {
+			return fmt.Errorf("chunk %d: %w", i, err)
+		}
 	}
 
 	db.mu.Lock()
@@ -132,6 +142,39 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 	}
 
 	return nil
+}
+
+// checkEmbeddingDimension rejects an embedding whose length does
+// not match the collection's configured dimension. Without this
+// check, a chromem-go similarity calculation later panics with
+// "vectors must have the same length" when a query hits a chunk
+// whose shape differs from the rest of the collection.
+//
+// The realistic failure mode this prevents:
+//  1. User ingests with embedding_dimensions: 0 (full size, e.g.
+//     768 for nomic-embed-text-v1.5).
+//  2. User flips embedding_dimensions: 256 (Matryoshka) and
+//     re-ingests without wiping data/vectors/.
+//  3. New chunks land at 256 dims; old chunks stay at 768.
+//  4. Search compares a 768-dim vector against a 256-dim vector.
+//     chromem-go returns "vectors must have the same length"
+//     and the search request 500s.
+//
+// The error message names both numbers (configured vs. actual)
+// and points the user at the fix: stop the server,
+// `rm -rf data/vectors/`, re-ingest. No silent fallback, no
+// truncation-to-fit, no panic.
+func (db *VectorDB) checkEmbeddingDimension(actual int) error {
+	if actual == db.embeddingDimension {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: chunk embedding has length %d but the collection is configured for %d. "+
+			"This usually means the embedding model or ollama.embedding_dimensions "+
+			"changed since these vectors were stored. To recover, stop the server, "+
+			"`rm -rf data/vectors/`, and run `ragabast ingest` again.",
+		models.ErrEmbeddingDimensionMismatch, actual, db.embeddingDimension,
+	)
 }
 
 // Search performs a similarity search in the vector database.

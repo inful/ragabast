@@ -18,6 +18,13 @@ var (
 	ErrChunkNotFound    = errors.New("chunk not found")
 	ErrSearchFailed     = errors.New("search operation failed")
 	ErrNotFound         = errors.New("not found")
+	// ErrEmbeddingDimensionMismatch is returned by the vector DB
+	// when an incoming chunk's embedding length differs from the
+	// collection's configured dimension. The wrapped error includes
+	// the actual and configured lengths so the user can diagnose
+	// the mismatch (usually: changed embedding model or
+	// ollama.embedding_dimensions without wiping data/vectors/).
+	ErrEmbeddingDimensionMismatch = errors.New("embedding dimension mismatch")
 )
 
 // LLM errors.
