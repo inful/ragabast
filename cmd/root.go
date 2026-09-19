@@ -170,6 +170,10 @@ type ServeCmd struct {
 }
 
 func (c *ServeCmd) Run(ctx *kong.Context) error {
+	// ServeCmd does NOT go through withService: the --host and
+	// --port flags mutate cfg between Load and NewService, and
+	// withService's load-then-build ordering doesn't fit. Doing
+	// it inline keeps the override flow obvious in one place.
 	cfg, err := config.Load(c.Config)
 	if err != nil {
 		return err
