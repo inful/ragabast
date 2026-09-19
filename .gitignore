@@ -33,8 +33,15 @@ config.yaml
 
 # Editor/IDE
 # .idea/
-# .vscode/
+.vscode/
+.claude/
+.continue/
+.cursor/
+.gemini/
+.pi/
+.rules
 ragabast
 data/vectors
 .tokensave
 tmp/
+**/data/vectors/

@@ -142,3 +142,33 @@ Before committing changes, ensure:
 ## References
 
 - **Main Documentation**: `README.md`
+
+<!-- gortex:communities:start -->
+<!-- gortex:skills:start -->
+## Community Skills
+
+| Area | Description | Skill |
+|------|-------------|-------|
+| Service 9 Dirs | 469 symbols | `/gortex-service-9-dirs` |
+| Web 5 Dirs | 276 symbols | `/gortex-web-5-dirs` |
+| Vector 2 Dirs Background | 214 symbols | `/gortex-vector-2-dirs-background` |
+| Vector 7 Dirs | 199 symbols | `/gortex-vector-7-dirs` |
+| Models 3 Dirs | 164 symbols | `/gortex-models-3-dirs` |
+| Service 4 Dirs | 157 symbols | `/gortex-service-4-dirs` |
+| Service 7 Dirs | 152 symbols | `/gortex-service-7-dirs` |
+| Config 4 Dirs | 147 symbols | `/gortex-config-4-dirs` |
+| Web 6 Dirs Int | 124 symbols | `/gortex-web-6-dirs-int` |
+| Chunker 5 Dirs | 123 symbols | `/gortex-chunker-5-dirs` |
+| 2 Dirs Fprintf | 83 symbols | `/gortex-2-dirs-fprintf` |
+| Web 6 Dirs Trimspace | 77 symbols | `/gortex-web-6-dirs-trimspace` |
+| Config 2 Dirs | 67 symbols | `/gortex-config-2-dirs` |
+| 1 Dirs Constructjsonfromtext | 52 symbols | `/gortex-1-dirs-constructjsonfromtext` |
+| Vector Newopenaillmclientwithoptions | 48 symbols | `/gortex-vector-newopenaillmclientwithoptions` |
+| Vector 2 Dirs Applyenvoverrides | 47 symbols | `/gortex-vector-2-dirs-applyenvoverrides` |
+| Vector 2 Dirs Ingestdocument | 42 symbols | `/gortex-vector-2-dirs-ingestdocument` |
+| 3 Dirs | 35 symbols | `/gortex-3-dirs` |
+| Vector 3 Dirs | 33 symbols | `/gortex-vector-3-dirs` |
+| 1 Dirs Handlechatmessage | 32 symbols | `/gortex-1-dirs-handlechatmessage` |
+<!-- gortex:skills:end -->
+
+<!-- gortex:communities:end -->
