@@ -93,9 +93,6 @@ type OllamaConfig struct {
 
 	// Timeout for API calls.
 	Timeout time.Duration `env:"OLLAMA_TIMEOUT" yaml:"timeout"`
-
-	// KeepAlive determines if connections should be kept alive.
-	KeepAlive bool `env:"OLLAMA_KEEP_ALIVE" yaml:"keep_alive"`
 }
 
 // VectorDBConfig holds vector database configuration.
@@ -165,21 +162,12 @@ type ProcessingConfig struct {
 
 	// ChunkOverlap is the number of characters to overlap between chunks.
 	ChunkOverlap int `env:"PROCESSING_CHUNK_OVERLAP" yaml:"chunk_overlap"`
-
-	// MaxConcurrentProcessing is the maximum number of concurrent document processing operations.
-	MaxConcurrentProcessing int `env:"PROCESSING_MAX_CONCURRENT" yaml:"max_concurrent_processing"`
 }
 
 // PathsConfig holds file path configuration.
 type PathsConfig struct {
 	// DataDir is the base directory for all data.
 	DataDir string `env:"DATA_DIR" yaml:"data_dir"`
-
-	// DocumentsDir is where ingested documents are stored.
-	DocumentsDir string `env:"DOCUMENTS_DIR" yaml:"documents_dir"`
-
-	// TempDir for temporary files.
-	TempDir string `env:"TEMP_DIR" yaml:"temp_dir"`
 
 	// TemplatesDir for web templates.
 	TemplatesDir string `env:"TEMPLATES_DIR" yaml:"templates_dir"`
@@ -202,7 +190,6 @@ func DefaultConfig() *Config {
 			ChatModel:      "gemma:2b",
 			EmbeddingModel: "nomic-embed-text:v1.5",
 			Timeout:        30 * time.Second,
-			KeepAlive:      true,
 			// RAG-friendly defaults: low temperature + conservative sampling.
 			Temperature: &defaultTemp,
 			Options: map[string]any{
@@ -225,15 +212,12 @@ func DefaultConfig() *Config {
 			WriteTimeout: 15 * time.Second,
 		},
 		Processing: ProcessingConfig{
-			MaxChunkSize:            2000,
-			MinChunkSize:            300,
-			ChunkOverlap:            150,
-			MaxConcurrentProcessing: 5,
+			MaxChunkSize: 2000,
+			MinChunkSize: 300,
+			ChunkOverlap: 150,
 		},
 		Paths: PathsConfig{
 			DataDir:      filepath.Join(wd, "data"),
-			DocumentsDir: filepath.Join(wd, "data", "documents"),
-			TempDir:      filepath.Join(wd, "data", "temp"),
 			TemplatesDir: filepath.Join(wd, "templates"),
 		},
 	}
@@ -376,9 +360,6 @@ func (c *Config) ApplyEnvOverrides() {
 	// Paths config.
 	if dir := os.Getenv("DATA_DIR"); dir != "" {
 		c.Paths.DataDir = dir
-	}
-	if dir := os.Getenv("DOCUMENTS_DIR"); dir != "" {
-		c.Paths.DocumentsDir = dir
 	}
 	if dir := os.Getenv("TEMPLATES_DIR"); dir != "" {
 		c.Paths.TemplatesDir = dir
@@ -548,9 +529,6 @@ func (c *Config) Validate() error {
 	if c.Paths.DataDir == "" {
 		errs = append(errs, "paths.data_dir is required")
 	}
-	if c.Paths.DocumentsDir == "" {
-		errs = append(errs, "paths.documents_dir is required")
-	}
 	if c.Paths.TemplatesDir == "" {
 		errs = append(errs, "paths.templates_dir is required")
 	}
@@ -560,42 +538,4 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
-}
-
-// EnsureDirectories creates all necessary directories for the configuration.
-func (c *Config) EnsureDirectories() error {
-	dirs := []string{
-		c.Paths.DataDir,
-		c.Paths.DocumentsDir,
-		c.Paths.TempDir,
-		c.VectorDB.PersistenceDir,
-	}
-
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("failed to create directory %s: %w", dir, err)
-		}
-	}
-
-	return nil
-}
-
-// GetServerAddress returns the full server address.
-func (c *Config) GetServerAddress() string {
-	return c.Server.ListenAddr()
-}
-
-// GetOllamaEmbeddingURL returns the full URL for embedding requests.
-func (c *Config) GetOllamaEmbeddingURL() string {
-	return fmt.Sprintf("%s/api/embeddings", strings.TrimRight(c.Ollama.BaseURL, "/"))
-}
-
-// GetOllamaGenerateURL returns the full URL for generation requests.
-func (c *Config) GetOllamaGenerateURL() string {
-	return fmt.Sprintf("%s/api/generate", strings.TrimRight(c.Ollama.BaseURL, "/"))
-}
-
-// GetOllamaTagsURL returns the full URL for model listing.
-func (c *Config) GetOllamaTagsURL() string {
-	return fmt.Sprintf("%s/api/tags", strings.TrimRight(c.Ollama.BaseURL, "/"))
 }
