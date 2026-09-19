@@ -31,6 +31,27 @@ type ConfigOpts struct {
 	Config string `short:"c" name:"config" env:"RAGABAST_CONFIG" help:"Path to config file (YAML). If not set, tries config.yml then config.yaml."`
 }
 
+// withService loads the config and constructs the service, then
+// invokes fn with both. The callback returns its own error (or nil);
+// withService wraps any initialization failure with context.
+//
+// The CLI has seven commands that all need config + service. Putting
+// the preamble in one place keeps the per-command Run methods
+// focused on the work that distinguishes them.
+func withService(opts ConfigOpts, fn func(ctx context.Context, cfg *config.Config, svc *service.Service) error) error {
+	cfg, err := config.Load(opts.Config)
+	if err != nil {
+		return err
+	}
+
+	svc, err := service.NewService(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize service: %w", err)
+	}
+
+	return fn(context.Background(), cfg, svc)
+}
+
 // ConfigCmd represents the config command.
 type ConfigCmd struct {
 	Init ConfigInitCmd `cmd:"" help:"Write a starter config file"`
@@ -69,48 +90,38 @@ type IngestCmd struct {
 }
 
 func (c *IngestCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.Load(c.Config)
-	if err != nil {
-		return err
-	}
-
-	svc, err := service.NewService(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to initialize service: %w", err)
-	}
-
-	ctxApp := context.Background()
-
-	// Ingest files
-	if len(c.Files) > 0 {
-		for _, file := range c.Files {
-			log.Printf("Ingesting file: %s\n", file)
-			if err := svc.IngestFile(ctxApp, file); err != nil {
-				log.Printf("Error ingesting %s: %v\n", file, err)
-			} else {
-				log.Printf("✓ Successfully ingested: %s\n", file)
+	return withService(c.ConfigOpts, func(ctx context.Context, _ *config.Config, svc *service.Service) error {
+		// Ingest files
+		if len(c.Files) > 0 {
+			for _, file := range c.Files {
+				log.Printf("Ingesting file: %s\n", file)
+				if err := svc.IngestFile(ctx, file); err != nil {
+					log.Printf("Error ingesting %s: %v\n", file, err)
+				} else {
+					log.Printf("✓ Successfully ingested: %s\n", file)
+				}
 			}
 		}
-	}
 
-	// Ingest directory
-	if c.Path != "" {
-		log.Printf("Scanning directory: %s\n", c.Path)
-		result, err := svc.IngestDirectory(ctxApp, c.Path)
-		if err != nil {
-			return fmt.Errorf("failed to ingest directory: %w", err)
+		// Ingest directory
+		if c.Path != "" {
+			log.Printf("Scanning directory: %s\n", c.Path)
+			result, err := svc.IngestDirectory(ctx, c.Path)
+			if err != nil {
+				return fmt.Errorf("failed to ingest directory: %w", err)
+			}
+			for _, fe := range result.Errors {
+				log.Printf("Failed to ingest %s: %v", fe.Path, fe.Err)
+			}
+			log.Printf("Processed: %d, Failed: %d", result.Processed, result.Failed)
 		}
-		for _, fe := range result.Errors {
-			log.Printf("Failed to ingest %s: %v", fe.Path, fe.Err)
+
+		if len(c.Files) == 0 && c.Path == "" {
+			return errors.New("no files or directory specified. Use --help for usage")
 		}
-		log.Printf("Processed: %d, Failed: %d", result.Processed, result.Failed)
-	}
 
-	if len(c.Files) == 0 && c.Path == "" {
-		return errors.New("no files or directory specified. Use --help for usage")
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // QueryCmd represents the query command.
@@ -123,42 +134,32 @@ type QueryCmd struct {
 }
 
 func (c *QueryCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.Load(c.Config)
-	if err != nil {
-		return err
-	}
+	return withService(c.ConfigOpts, func(ctx context.Context, _ *config.Config, svc *service.Service) error {
+		log.Printf("Querying: %s\n", c.Query)
 
-	svc, err := service.NewService(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to initialize service: %w", err)
-	}
-
-	ctxApp := context.Background()
-
-	log.Printf("Querying: %s\n", c.Query)
-	var response string
-	var debug *service.QueryDebugInfo
-	if c.Verbose {
-		response, debug, err = svc.QueryDebugWithOptions(ctxApp, c.Query, c.TopK, service.LLMOptions{Temperature: c.Temperature})
-	} else {
-		if c.Temperature != nil {
-			response, _, err = svc.QueryDebugWithOptions(ctxApp, c.Query, c.TopK, service.LLMOptions{Temperature: c.Temperature})
+		var response string
+		var debug *service.QueryDebugInfo
+		var err error
+		if c.Verbose {
+			response, debug, err = svc.QueryDebugWithOptions(ctx, c.Query, c.TopK, service.LLMOptions{Temperature: c.Temperature})
+		} else if c.Temperature != nil {
+			response, _, err = svc.QueryDebugWithOptions(ctx, c.Query, c.TopK, service.LLMOptions{Temperature: c.Temperature})
 		} else {
-			response, err = svc.Query(ctxApp, c.Query, c.TopK)
+			response, err = svc.Query(ctx, c.Query, c.TopK)
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("query failed: %w", err)
-	}
+		if err != nil {
+			return fmt.Errorf("query failed: %w", err)
+		}
 
-	log.Printf("\nResponse:\n%s\n", response)
+		log.Printf("\nResponse:\n%s\n", response)
 
-	if c.Verbose && debug != nil {
-		log.Println("\n--- Prompt Sent To LLM ---")
-		log.Print(debug.Prompt)
-	}
+		if c.Verbose && debug != nil {
+			log.Println("\n--- Prompt Sent To LLM ---")
+			log.Print(debug.Prompt)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // ServeCmd represents the serve command.
@@ -198,47 +199,37 @@ type StatusCmd struct {
 }
 
 func (c *StatusCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.Load(c.Config)
-	if err != nil {
-		return err
-	}
+	return withService(c.ConfigOpts, func(ctx context.Context, cfg *config.Config, svc *service.Service) error {
+		log.Println("=== RAG System Status ===")
 
-	svc, err := service.NewService(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to initialize service: %w", err)
-	}
+		// Validate connections
+		if errValidate := svc.ValidateConnection(ctx); errValidate != nil {
+			log.Printf("❌ Connection Error: %v\n", errValidate)
+			return nil
+		}
+		log.Println("✓ All services connected")
 
-	ctxApp := context.Background()
+		// Get stats
+		stats, err := svc.GetStats(ctx)
+		if err != nil {
+			log.Printf("❌ Stats Error: %v\n", err)
+			return nil
+		}
 
-	log.Println("=== RAG System Status ===")
+		log.Printf("✓ Total chunks: %d\n", stats["total_chunks"])
+		log.Printf("✓ Embedding model: %s\n", stats["embedding_model"])
+		log.Printf("✓ Chat model: %s\n", stats["chat_model"])
+		log.Printf("✓ Collection: %s\n", stats["collection_name"])
 
-	// Validate connections
-	if errValidate := svc.ValidateConnection(ctxApp); errValidate != nil {
-		log.Printf("❌ Connection Error: %v\n", errValidate)
+		if c.Verbose {
+			log.Println("\nConfiguration:")
+			log.Printf("  Ollama URL: %s\n", cfg.Ollama.BaseURL)
+			log.Printf("  Vector DB: %s\n", cfg.VectorDB.PersistenceDir)
+			log.Printf("  Templates: %s\n", cfg.Paths.TemplatesDir)
+		}
+
 		return nil
-	}
-	log.Println("✓ All services connected")
-
-	// Get stats
-	stats, err := svc.GetStats(ctxApp)
-	if err != nil {
-		log.Printf("❌ Stats Error: %v\n", err)
-		return nil
-	}
-
-	log.Printf("✓ Total chunks: %d\n", stats["total_chunks"])
-	log.Printf("✓ Embedding model: %s\n", stats["embedding_model"])
-	log.Printf("✓ Chat model: %s\n", stats["chat_model"])
-	log.Printf("✓ Collection: %s\n", stats["collection_name"])
-
-	if c.Verbose {
-		log.Println("\nConfiguration:")
-		log.Printf("  Ollama URL: %s\n", cfg.Ollama.BaseURL)
-		log.Printf("  Vector DB: %s\n", cfg.VectorDB.PersistenceDir)
-		log.Printf("  Templates: %s\n", cfg.Paths.TemplatesDir)
-	}
-
-	return nil
+	})
 }
 
 // ListCmd represents the list command.
@@ -248,44 +239,34 @@ type ListCmd struct {
 }
 
 func (c *ListCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.Load(c.Config)
-	if err != nil {
-		return err
-	}
-
-	svc, err := service.NewService(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to initialize service: %w", err)
-	}
-
-	ctxApp := context.Background()
-
-	docs, err := svc.ListDocuments(ctxApp)
-	if err != nil {
-		return fmt.Errorf("failed to list documents: %w", err)
-	}
-
-	if len(docs) == 0 {
-		log.Println("No documents found in the database.")
-		return nil
-	}
-
-	log.Printf("Found %d document(s):\n\n", len(docs))
-	for i, doc := range docs {
-		log.Printf("%d. %s\n", i+1, doc.Title)
-		log.Printf("   UID: %s\n", doc.UID)
-		log.Printf("   Fingerprint: %s\n", doc.Fingerprint)
-		if c.Verbose {
-			log.Printf("   Tags: %s\n", strings.Join(doc.Tags, ", "))
-			log.Printf("   Categories: %s\n", strings.Join(doc.Categories, ", "))
-			log.Printf("   URLs: %s\n", strings.Join(doc.URLs, ", "))
-			log.Printf("   Chunks: %d\n", doc.ChunkCount)
-			log.Printf("   Created: %s\n", doc.CreatedAt.Format("2006-01-02 15:04:05"))
+	return withService(c.ConfigOpts, func(ctx context.Context, _ *config.Config, svc *service.Service) error {
+		docs, err := svc.ListDocuments(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to list documents: %w", err)
 		}
-		log.Println()
-	}
 
-	return nil
+		if len(docs) == 0 {
+			log.Println("No documents found in the database.")
+			return nil
+		}
+
+		log.Printf("Found %d document(s):\n\n", len(docs))
+		for i, doc := range docs {
+			log.Printf("%d. %s\n", i+1, doc.Title)
+			log.Printf("   UID: %s\n", doc.UID)
+			log.Printf("   Fingerprint: %s\n", doc.Fingerprint)
+			if c.Verbose {
+				log.Printf("   Tags: %s\n", strings.Join(doc.Tags, ", "))
+				log.Printf("   Categories: %s\n", strings.Join(doc.Categories, ", "))
+				log.Printf("   URLs: %s\n", strings.Join(doc.URLs, ", "))
+				log.Printf("   Chunks: %d\n", doc.ChunkCount)
+				log.Printf("   Created: %s\n", doc.CreatedAt.Format("2006-01-02 15:04:05"))
+			}
+			log.Println()
+		}
+
+		return nil
+	})
 }
 
 // SearchCmd represents the search command.
@@ -298,43 +279,33 @@ type SearchCmd struct {
 }
 
 func (c *SearchCmd) Run(ctx *kong.Context) error {
-	cfg, err := config.Load(c.Config)
-	if err != nil {
-		return err
-	}
-
-	svc, err := service.NewService(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to initialize service: %w", err)
-	}
-
-	ctxApp := context.Background()
-
-	// Perform search
-	var results []models.SearchResult
-	if c.DocID != "" {
-		results, err = svc.SearchByDocument(ctxApp, c.Query, c.DocID, c.TopK)
-	} else {
-		results, err = svc.Search(ctxApp, c.Query, c.TopK, nil)
-	}
-	if err != nil {
-		return fmt.Errorf("search failed: %w", err)
-	}
-
-	if len(results) == 0 {
-		log.Println("No results found.")
-		return nil
-	}
-
-	log.Printf("Search results for: %s\n\n", c.Query)
-	for i, result := range results {
-		log.Printf("[%d] %s (Similarity: %.3f)\n", i+1, result.DocumentTitle, result.Similarity)
-		log.Printf("    Chunk ID: %s\n", result.ChunkID)
-		if c.Verbose {
-			log.Printf("    Content: %s\n", result.Content)
+	return withService(c.ConfigOpts, func(ctx context.Context, _ *config.Config, svc *service.Service) error {
+		var results []models.SearchResult
+		var err error
+		if c.DocID != "" {
+			results, err = svc.SearchByDocument(ctx, c.Query, c.DocID, c.TopK)
+		} else {
+			results, err = svc.Search(ctx, c.Query, c.TopK, nil)
 		}
-		log.Println()
-	}
+		if err != nil {
+			return fmt.Errorf("search failed: %w", err)
+		}
 
-	return nil
+		if len(results) == 0 {
+			log.Println("No results found.")
+			return nil
+		}
+
+		log.Printf("Search results for: %s\n\n", c.Query)
+		for i, result := range results {
+			log.Printf("[%d] %s (Similarity: %.3f)\n", i+1, result.DocumentTitle, result.Similarity)
+			log.Printf("    Chunk ID: %s\n", result.ChunkID)
+			if c.Verbose {
+				log.Printf("    Content: %s\n", result.Content)
+			}
+			log.Println()
+		}
+
+		return nil
+	})
 }
