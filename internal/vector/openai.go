@@ -111,16 +111,6 @@ func (c *OpenAILLMClient) ChatWithSystem(ctx context.Context, systemPrompt, user
 	return c.do(ctx, messages, options)
 }
 
-// GetModel returns the model name configured on the client.
-func (c *OpenAILLMClient) GetModel() string {
-	return c.model
-}
-
-// GetBaseURL returns the chat-completions base URL.
-func (c *OpenAILLMClient) GetBaseURL() string {
-	return c.baseURL
-}
-
 // ValidateConnection checks the server is reachable.
 //
 // OpenAI-compatible servers expose GET /v1/models (most) or GET /models.

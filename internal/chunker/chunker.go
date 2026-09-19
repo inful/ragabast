@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -321,24 +320,7 @@ func (c *Chunker) ChunkWithHierarchy(doc *models.Document) ([]*models.Chunk, err
 	return chunks, nil
 }
 
-// ValidateChunk checks if a chunk meets size and content requirements.
-func (c *Chunker) ValidateChunk(chunk *models.Chunk) error {
-	if chunk == nil {
-		return errors.New("chunk is nil")
-	}
-
-	contentLen := len(chunk.Content)
-	if contentLen < c.minSize {
-		return fmt.Errorf("chunk content too small: %d < %d", contentLen, c.minSize)
-	}
-
-	if contentLen > c.maxSize {
-		return fmt.Errorf("chunk content too large: %d > %d", contentLen, c.maxSize)
-	}
-
-	if chunk.Content == "" {
-		return errors.New("chunk content is empty")
-	}
-
-	return nil
-}
+// ValidateChunk was previously a method on *Chunker; the actual
+// chunk validation lives in validator.go (free functions:
+// ValidateChunk, ValidateChunkBatch, etc.). The method here was
+// dead code and has been removed.

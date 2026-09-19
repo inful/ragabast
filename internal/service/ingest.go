@@ -98,25 +98,6 @@ func (s *Service) IngestDirectory(ctx context.Context, dirPath string) (IngestRe
 	})
 }
 
-// IngestText processes raw text content as a document.
-func (s *Service) IngestText(ctx context.Context, text string, uid string, tags []string, categories []string, urls []string) error {
-	doc := models.NewDocument()
-	doc.UID = uid
-	doc.Tags = tags
-	doc.Categories = categories
-	doc.URLs = urls
-	doc.Content = text
-	doc.Title = "Text Document"
-	doc.Fingerprint = s.parser.GenerateFingerprint(text)
-	doc.ID = doc.UID
-
-	if err := doc.Validate(); err != nil {
-		return fmt.Errorf("document validation failed: %w", err)
-	}
-
-	return chunkAndIngest(ctx, s.chunker, s.vectorOps, doc)
-}
-
 // IngestDocument processes a docbuilder document from raw content.
 func (s *Service) IngestDocument(ctx context.Context, content string) (*models.Document, error) {
 	doc, err := s.parser.ParseDocument([]byte(content), "web_upload")

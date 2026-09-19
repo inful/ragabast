@@ -2,7 +2,6 @@ package vector
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/ragabast/internal/models"
@@ -20,27 +19,6 @@ func NewVectorOperations(db *VectorDB, embeddings *OpenAIEmbeddingClient) *Vecto
 		db:         db,
 		embeddings: embeddings,
 	}
-}
-
-// IngestChunk processes a single chunk: generates embedding and stores it.
-func (vo *VectorOperations) IngestChunk(ctx context.Context, chunk *models.Chunk) error {
-	if chunk == nil {
-		return models.ErrInvalidInput
-	}
-
-	// Generate embedding
-	embedding, err := vo.embeddings.GenerateChunkEmbedding(ctx, chunk)
-	if err != nil {
-		return fmt.Errorf("failed to generate embedding: %w", err)
-	}
-
-	// Store in vector DB
-	err = vo.db.AddChunk(ctx, chunk, embedding)
-	if err != nil {
-		return fmt.Errorf("failed to store chunk: %w", err)
-	}
-
-	return nil
 }
 
 // IngestDocument processes all chunks of a document.
@@ -187,11 +165,4 @@ func (vo *VectorOperations) ValidateConnection(ctx context.Context) error {
 // GetUniqueDocuments returns a list of unique documents.
 func (vo *VectorOperations) GetUniqueDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
 	return vo.db.GetUniqueDocuments(ctx)
-}
-
-// RebuildEmbeddings regenerates embeddings for all chunks (useful for model changes).
-func (vo *VectorOperations) RebuildEmbeddings(ctx context.Context) error {
-	// Get all document IDs first (this would require additional methods)
-	// For now, this is a placeholder for future implementation
-	return errors.New("rebuild embeddings not yet implemented")
 }
