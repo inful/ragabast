@@ -310,6 +310,6 @@ func TestOpenAIEmbeddingClient_DefaultsAreLocal(t *testing.T) {
 
 	// No API key, no base URL, no model -> defaults are local-friendly.
 	client := NewOpenAIEmbeddingClientWithOptions("", "", "", 0)
-	require.Equal(t, "http://localhost:11434", client.GetBaseURL())
-	require.NotEmpty(t, client.GetModel())
+	require.Equal(t, "http://localhost:11434", client.baseURLString())
+	require.NotEmpty(t, client.modelName())
 }

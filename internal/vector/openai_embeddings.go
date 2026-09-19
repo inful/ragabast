@@ -107,13 +107,17 @@ func (c *OpenAIEmbeddingClient) GenerateEmbeddingsBatch(ctx context.Context, tex
 	return c.embed(ctx, texts, nil)
 }
 
-// GetModel returns the model name configured on the client.
-func (c *OpenAIEmbeddingClient) GetModel() string {
+// modelName returns the model name configured on the client.
+// Package-private; used only by tests and a few internal
+// helpers. Use field access directly where possible.
+func (c *OpenAIEmbeddingClient) modelName() string {
 	return c.model
 }
 
-// GetBaseURL returns the embeddings base URL.
-func (c *OpenAIEmbeddingClient) GetBaseURL() string {
+// baseURLString returns the embeddings base URL as a string.
+// Package-private; used only by tests. Use c.baseURL directly
+// where possible.
+func (c *OpenAIEmbeddingClient) baseURLString() string {
 	return c.baseURL
 }
 
