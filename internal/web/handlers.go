@@ -4,10 +4,37 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/ragabast/internal/service"
 )
+
+// defaultChatTopK is the number of retrieved chunks the chat form uses when
+// the client does not pass an explicit top_k. Each chunk is augmented with
+// its parent section header, so 5 results is a comfortable default.
+const defaultChatTopK = 5
+
+// maxChatTopK caps the chat form's top_k to prevent a runaway client from
+// pulling the entire vector DB into the LLM context.
+const maxChatTopK = 50
+
+// chatTopK reads an optional 'top_k' form value, falling back to
+// defaultChatTopK. Out-of-range or unparseable values are clamped.
+func chatTopK(r *http.Request) int {
+	raw := strings.TrimSpace(r.FormValue("top_k"))
+	if raw == "" {
+		return defaultChatTopK
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return defaultChatTopK
+	}
+	if v > maxChatTopK {
+		return maxChatTopK
+	}
+	return v
+}
 
 // renderTemplate renders a template with the given data.
 func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data any) {

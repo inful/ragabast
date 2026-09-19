@@ -1,0 +1,26 @@
+package web
+
+import (
+	"context"
+
+	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/service"
+)
+
+// serviceAPI is the slice of *service.Service that the web layer
+// depends on. Lives in its own file so the contract between web
+// and service is visible without scrolling through server.go's
+// lifecycle code. Tests substitute a fake; production gets the
+// real *service.Service via web.NewServer.
+type serviceAPI interface {
+	CheckHealth(ctx context.Context) (bool, error)
+	IngestDocument(ctx context.Context, content string) (*models.Document, error)
+	Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error)
+	ListDocuments(ctx context.Context) ([]models.DocumentInfo, error)
+	DeleteDocument(ctx context.Context, documentID string) error
+	SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error)
+	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
+	GetNormalizedTags(ctx context.Context) ([]string, error)
+	GetNormalizedCategories(ctx context.Context) ([]string, error)
+	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)
+}

@@ -9,33 +9,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ragabast/internal/config"
-	"github.com/ragabast/internal/models"
-	"github.com/ragabast/internal/service"
 )
-
-// serviceAPI is the slice of *service.Service that the web layer
-// depends on. Keeping it private to this package lets tests
-// substitute a fake without touching the service package.
-type serviceAPI interface {
-	CheckHealth(ctx context.Context) (bool, error)
-	IngestDocument(ctx context.Context, content string) (*models.Document, error)
-	Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error)
-	ListDocuments(ctx context.Context) ([]models.DocumentInfo, error)
-	DeleteDocument(ctx context.Context, documentID string) error
-	SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error)
-	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
-	GetNormalizedTags(ctx context.Context) ([]string, error)
-	GetNormalizedCategories(ctx context.Context) ([]string, error)
-	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)
-}
 
 // Server represents the web server. HTTP handlers and template
 // rendering live in handlers.go; this file only owns the type,
@@ -57,32 +37,6 @@ func internalError(w http.ResponseWriter, r *http.Request, op string, err error)
 		log.Printf("server: %s %s: %v", op, r.URL.Path, err)
 	}
 	http.Error(w, "Internal server error", http.StatusInternalServerError)
-}
-
-// defaultChatTopK is the number of retrieved chunks the chat form uses when
-// the client does not pass an explicit top_k. Each chunk is augmented with
-// its parent section header, so 5 results is a comfortable default.
-const defaultChatTopK = 5
-
-// maxChatTopK caps the chat form's top_k to prevent a runaway client from
-// pulling the entire vector DB into the LLM context.
-const maxChatTopK = 50
-
-// chatTopK reads an optional 'top_k' form value, falling back to
-// defaultChatTopK. Out-of-range or unparseable values are clamped.
-func chatTopK(r *http.Request) int {
-	raw := strings.TrimSpace(r.FormValue("top_k"))
-	if raw == "" {
-		return defaultChatTopK
-	}
-	v, err := strconv.Atoi(raw)
-	if err != nil || v <= 0 {
-		return defaultChatTopK
-	}
-	if v > maxChatTopK {
-		return maxChatTopK
-	}
-	return v
 }
 
 // NewServer creates a new web server.
