@@ -54,3 +54,16 @@ func TestIngestLimiter_RetryAfterHeader_SetsRetryAfter(t *testing.T) {
 	h := l.RetryAfterHeader()
 	require.Equal(t, "5", h.Get("Retry-After"))
 }
+
+// TestIngestLimiter_RetryAfterHeader_NilReceiverReturnsEmptyHeader
+// pins the nil-safe behavior. The other methods (TryAcquire,
+// Release, RetryAfterSeconds) all check for a nil receiver so a
+// nil *IngestLimiter is a usable "no rate limiting" sentinel.
+// RetryAfterHeader must match so the Huma error path is safe to
+// call without first proving the limiter is non-nil.
+func TestIngestLimiter_RetryAfterHeader_NilReceiverReturnsEmptyHeader(t *testing.T) {
+	var l *IngestLimiter
+	h := l.RetryAfterHeader()
+	require.NotNil(t, h, "must return a non-nil header so the caller can set it on the response")
+	require.Empty(t, h.Get("Retry-After"), "nil limiter must not advertise a Retry-After")
+}

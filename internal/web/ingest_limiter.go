@@ -66,6 +66,9 @@ func (l *IngestLimiter) RetryAfterSeconds() int {
 
 func (l *IngestLimiter) RetryAfterHeader() http.Header {
 	h := make(http.Header)
+	if l == nil {
+		return h
+	}
 	h.Set("Retry-After", strconv.Itoa(l.RetryAfterSeconds()))
 	return h
 }
