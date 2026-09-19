@@ -53,14 +53,11 @@ type OpenAIEmbeddingClient struct {
 	httpClient *http.Client
 }
 
-// NewOpenAIEmbeddingClient creates a client with sensible defaults that
-// match a local Ollama setup (http://localhost:11434, no auth).
-func NewOpenAIEmbeddingClient(baseURL, model string) *OpenAIEmbeddingClient {
-	return NewOpenAIEmbeddingClientWithOptions(baseURL, model, "", 30*time.Second)
-}
-
 // NewOpenAIEmbeddingClientWithOptions is the fully-configurable constructor.
 // apiKey is sent as `Authorization: Bearer <key>` when non-empty.
+// Empty baseURL defaults to http://localhost:11434; empty model
+// defaults to nomic-ai/nomic-embed-text-v1.5; a non-positive timeout
+// defaults to 30s.
 func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout time.Duration) *OpenAIEmbeddingClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"

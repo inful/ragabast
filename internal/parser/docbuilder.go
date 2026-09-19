@@ -169,70 +169,6 @@ func (p *DocbuilderParser) extractTitle(content string) string {
 	return ""
 }
 
-// ParseChunk parses a chunk of content (used for chunking operations).
-func (p *DocbuilderParser) ParseChunk(content string, headerPath string, level int, startLine, endLine int) *models.Chunk {
-	chunk := models.NewChunk()
-	chunk.Content = content
-	chunk.HeaderPath = headerPath
-	chunk.Level = level
-	chunk.StartLine = startLine
-	chunk.EndLine = endLine
-	return chunk
-}
-
-// ValidateFrontmatter checks if the frontmatter contains all required fields.
-func (p *DocbuilderParser) ValidateFrontmatter(raw []byte) error {
-	frontmatterBytes, _, err := p.extractFrontmatter(raw)
-	if err != nil {
-		return err
-	}
-	if len(frontmatterBytes) == 0 {
-		return models.ErrInvalidFrontmatter
-	}
-
-	var fm map[string]any
-	if err := yaml.Unmarshal(frontmatterBytes, &fm); err != nil {
-		return err
-	}
-
-	// Check for required fields
-	required := []string{"uid"}
-	for _, field := range required {
-		if _, ok := fm[field]; !ok {
-			return fmt.Errorf("missing required field: %s", field)
-		}
-	}
-
-	// Validate URLs is an array when present
-	if rawURLs, ok := fm["urls"]; ok {
-		if _, ok := rawURLs.([]any); !ok {
-			return errors.New("urls must be an array")
-		}
-	}
-
-	return nil
-}
-
-// FormatFrontmatter formats a document's metadata back into YAML frontmatter.
-func (p *DocbuilderParser) FormatFrontmatter(doc *models.Document) ([]byte, error) {
-	frontmatter := map[string]any{
-		"fingerprint": doc.Fingerprint,
-		"uid":         doc.UID,
-		"tags":        doc.Tags,
-		"categories":  doc.Categories,
-		"urls":        doc.URLs,
-		"created_at":  doc.CreatedAt.Format(time.RFC3339),
-		"updated_at":  doc.UpdatedAt.Format(time.RFC3339),
-	}
-
-	data, err := yaml.Marshal(frontmatter)
-	if err != nil {
-		return nil, err
-	}
-
-	return append([]byte("---\n"), append(data, []byte("---\n")...)...), nil
-}
-
 // ExtractHeaders extracts all H1 and H2 headers with their positions.
 func (p *DocbuilderParser) ExtractHeaders(content string) []models.HeaderInfo {
 	var headers []models.HeaderInfo
@@ -256,9 +192,4 @@ func (p *DocbuilderParser) ExtractHeaders(content string) []models.HeaderInfo {
 	}
 
 	return headers
-}
-
-// GenerateFingerprint creates a SHA256 hash of the content (public version).
-func (p *DocbuilderParser) GenerateFingerprint(content string) string {
-	return p.generateFingerprint(content)
 }

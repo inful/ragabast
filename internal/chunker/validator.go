@@ -60,25 +60,6 @@ func ValidateDocument(doc *models.Document) error {
 	return nil
 }
 
-// ValidateFrontmatter validates the frontmatter fields.
-func ValidateFrontmatter(fingerprint, uid string, tags, categories []string, urls []string) error {
-	if strings.TrimSpace(fingerprint) == "" {
-		return fmt.Errorf("%w: fingerprint is required", models.ErrMissingFingerprint)
-	}
-
-	if strings.TrimSpace(uid) == "" {
-		return fmt.Errorf("%w: UID is required", models.ErrMissingUID)
-	}
-
-	for _, urlStr := range urls {
-		if _, err := url.ParseRequestURI(urlStr); err != nil {
-			return fmt.Errorf("%w: invalid URL '%s': %w", models.ErrInvalidFormat, urlStr, err)
-		}
-	}
-
-	return nil
-}
-
 // ValidateChunkBatch validates a batch of chunks.
 func ValidateChunkBatch(chunks []*models.Chunk) error {
 	if len(chunks) == 0 {
