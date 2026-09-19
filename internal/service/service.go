@@ -385,21 +385,3 @@ func sortStrings(strs []string) []string {
 	sort.Strings(strs)
 	return strs
 }
-
-// vectorChunkFetcher adapts the prompt layer's ChunkFetcher interface
-// to the Service's own GetChunk method, so the prompt builder can
-// pull parent context without depending on the vector package.
-type vectorChunkFetcher struct {
-	s *Service
-}
-
-func (v vectorChunkFetcher) FetchChunk(ctx context.Context, id string) (*models.Chunk, bool, error) {
-	chunk, err := v.s.GetChunk(ctx, id)
-	if err != nil {
-		return nil, false, err
-	}
-	if chunk == nil {
-		return nil, false, nil
-	}
-	return chunk, true, nil
-}

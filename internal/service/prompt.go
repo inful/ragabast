@@ -110,9 +110,29 @@ func normalizeHistory(history []ChatMessage) []ChatMessage {
 // ChunkFetcher returns a parent chunk's body given its ID, or
 // (nil, false) if the chunk is not available. It is the seam
 // between the prompt builder and the vector store: tests pass a
-// stub; production passes a closure over vectorOps.GetChunk.
+// stub; production passes vectorChunkFetcher below.
 type ChunkFetcher interface {
 	FetchChunk(ctx context.Context, id string) (*models.Chunk, bool, error)
+}
+
+// vectorChunkFetcher adapts the Service's GetChunk method to the
+// ChunkFetcher interface above, so the prompt builder can pull
+// parent context without depending on the vector package directly.
+// Lives here (not in service.go) because it's only consumed by
+// the prompt-building code path.
+type vectorChunkFetcher struct {
+	s *Service
+}
+
+func (v vectorChunkFetcher) FetchChunk(ctx context.Context, id string) (*models.Chunk, bool, error) {
+	chunk, err := v.s.GetChunk(ctx, id)
+	if err != nil {
+		return nil, false, err
+	}
+	if chunk == nil {
+		return nil, false, nil
+	}
+	return chunk, true, nil
 }
 
 // buildQueryContextItems formats the retrieved chunks for the LLM.
