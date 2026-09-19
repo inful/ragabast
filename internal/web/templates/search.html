@@ -18,7 +18,12 @@
     <h1 class="title">Search Documents</h1>
     <p class="subtitle">Semantic search across the ingested corpus. Filters narrow the search without changing the query.</p>
 
-    <form method="post" action="/search">
+    <form method="post" action="/search"
+          hx-post="/search"
+          hx-trigger="submit"
+          hx-target="#search-results"
+          hx-swap="innerHTML"
+          hx-push-url="true">
         <div class="field">
             <label class="label" for="query">Query</label>
             <div class="control">
@@ -86,5 +91,13 @@
             </div>
         </div>
     </form>
+
+    <!--
+        htmx swap target. GET /search returns this div empty; POST
+        /search returns the results fragment and htmx swaps it in
+        via innerHTML. hx-push-url="true" on the form keeps the URL
+        bar in sync so browser back navigates between searches.
+    -->
+    <div id="search-results"></div>
 </body>
 </html>

@@ -1,69 +1,71 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-</head>
-<body class="container mt-4">
-    <nav class="breadcrumb" aria-label="breadcrumbs">
-        <ul>
-            <li><a href="/">Home</a></li>
-            <li><a href="/search">Search</a></li>
-            <li class="is-active"><a href="#" aria-current="page">Results</a></li>
-        </ul>
-    </nav>
+<!--
+    search_results.html is a pure HTML fragment. It is swapped into
+    the #search-results div on /search via htmx (hx-swap="innerHTML")
+    when the form is submitted, so it must NOT carry its own <html>,
+    <head>, <body>, or htmx <script> tag — those would render inside
+    the target div and break the page.
 
-    <h1 class="title">Search Results</h1>
-    <p class="subtitle">Query: <code>{{ .Query }}</code></p>
+    Direct (non-htmx) POSTers see only this fragment without the
+    surrounding chrome; they can use the "New Search" link to
+    navigate back to the form. The primary UX is the htmx-driven
+    GET -> POST -> swap flow.
+-->
 
-    {{ if or .Filters.Tag .Filters.Category .Filters.DocumentID }}
-    <div class="tags">
-        {{ if .Filters.Tag }}<span class="tag is-info">tag: {{ .Filters.Tag }}</span>{{ end }}
-        {{ if .Filters.Category }}<span class="tag is-info">category: {{ .Filters.Category }}</span>{{ end }}
-        {{ if .Filters.DocumentID }}<span class="tag is-info">doc: {{ .Filters.DocumentID }}</span>{{ end }}
-    </div>
-    {{ end }}
+{{ if .Filters }}
+{{ if or .Filters.Tag .Filters.Category .Filters.DocumentID }}
+<div class="tags mb-3">
+    {{ if .Filters.Tag }}<span class="tag is-info">tag: {{ .Filters.Tag }}</span>{{ end }}
+    {{ if .Filters.Category }}<span class="tag is-info">category: {{ .Filters.Category }}</span>{{ end }}
+    {{ if .Filters.DocumentID }}<span class="tag is-info">doc: {{ .Filters.DocumentID }}</span>{{ end }}
+</div>
+{{ end }}
+{{ end }}
 
-    <p class="mb-4">
-        <a href="/search" class="button is-light is-small">New Search</a>
-    </p>
-
-    {{ if .Results }}
-    <div class="columns is-multiline">
-        {{ range .Results }}
-        <div class="column is-full">
-            <div class="box">
-                <h4 class="title is-5">
-                    {{ if .DocumentTitle }}{{ .DocumentTitle }}{{ else }}{{ .DocumentID }}{{ end }}
-                </h4>
-                <p class="subtitle is-6">
-                    Document:
-                    <code>{{ .DocumentID }}</code>
-                    &middot; Similarity: <strong>{{ printf "%.3f" .Similarity }}</strong>
-                </p>
-                <div class="content">
-                    <p>{{ .Content }}</p>
-                </div>
-                <p class="is-size-7">
-                    Path: <code>{{ .HeaderPath }}</code> (Level {{ .Level }})
-                    {{ if .DocumentURLs }}
-                    &middot; Links:
-                    {{ range .DocumentURLs }}
-                    <a href="{{ . }}" target="_blank" rel="noopener">{{ . }}</a>
-                    {{ end }}
-                    {{ end }}
-                </p>
-            </div>
+<div class="level mb-4">
+    <div class="level-left">
+        <div class="level-item">
+            <span class="has-text-weight-semibold">Query:</span>
+            <code class="ml-2">{{ .Query }}</code>
         </div>
-        {{ end }}
     </div>
-    {{ else }}
-    <div class="notification is-warning is-light">
-        No results found for this query.
+    <div class="level-right">
+        <div class="level-item">
+            <a href="/search" class="button is-light is-small">New Search</a>
+        </div>
+    </div>
+</div>
+
+{{ if .Results }}
+<div class="columns is-multiline">
+    {{ range .Results }}
+    <div class="column is-full">
+        <div class="box">
+            <h4 class="title is-5">
+                {{ if .DocumentTitle }}{{ .DocumentTitle }}{{ else }}{{ .DocumentID }}{{ end }}
+            </h4>
+            <p class="subtitle is-6">
+                Document:
+                <code>{{ .DocumentID }}</code>
+                &middot; Similarity: <strong>{{ printf "%.3f" .Similarity }}</strong>
+            </p>
+            <div class="content">
+                <p>{{ .Content }}</p>
+            </div>
+            <p class="is-size-7">
+                Path: <code>{{ .HeaderPath }}</code> (Level {{ .Level }})
+                {{ if .DocumentURLs }}
+                &middot; Links:
+                {{ range .DocumentURLs }}
+                <a href="{{ . }}" target="_blank" rel="noopener">{{ . }}</a>
+                {{ end }}
+                {{ end }}
+            </p>
+        </div>
     </div>
     {{ end }}
-</body>
-</html>
+</div>
+{{ else }}
+<div class="notification is-warning is-light">
+    No results found for this query.
+</div>
+{{ end }}

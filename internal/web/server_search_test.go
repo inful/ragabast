@@ -137,10 +137,12 @@ func TestHandleSearchSubmit_PassesFilters(t *testing.T) {
 	require.Equal(t, "doc-42", svc.lastSearchFilters.DocumentID)
 }
 
-// TestHandleSearchSubmit_EmptyQuery_Returns400 pins the input
-// contract: an empty query is a client error, not a search. The
-// handler returns 400 before calling the service.
-func TestHandleSearchSubmit_EmptyQuery_Returns400(t *testing.T) {
+// TestHandleSearchSubmit_EmptyQuery_RendersNotification pins the
+// input contract: an empty query is a client-visible error, not a
+// search. The handler returns 200 with a Bulma notification fragment
+// so htmx can swap it into #search-results; the service is never
+// called.
+func TestHandleSearchSubmit_EmptyQuery_RendersNotification(t *testing.T) {
 	cfg := config.DefaultConfig()
 	svc := &fakeService{}
 	s := NewServer(cfg, svc)
@@ -154,6 +156,10 @@ func TestHandleSearchSubmit_EmptyQuery_Returns400(t *testing.T) {
 
 	s.router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.Equal(t, http.StatusOK, w.Code,
+		"empty-query POST must return 200 so htmx can swap the notification into the target")
+	body := w.Body.String()
+	require.Contains(t, body, "Query is required",
+		"empty-query response must contain a user-readable error")
 	require.Empty(t, svc.lastSearchQuery, "an empty query must not reach the service")
 }

@@ -345,7 +345,18 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 
 	query := r.FormValue("query")
 	if query == "" {
-		http.Error(w, "Query is required", http.StatusBadRequest)
+		// Return 200 with a notification fragment rather than
+		// 400 + plain text: htmx by default does not swap 4xx
+		// responses, so a 400 here would leave the form looking
+		// unchanged after a programmatic submit (curl, tests).
+		// A 200 with a Bulma notification gives htmx something
+		// to swap into #search-results and gives the user a
+		// visible reason nothing happened. The form's HTML
+		// `required` attribute on the query input still blocks
+		// empty submits client-side in real browsers.
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprint(w, `<div class="notification is-warning is-light">Query is required.</div>`)
 		return
 	}
 
