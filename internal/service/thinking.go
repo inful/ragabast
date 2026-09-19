@@ -17,7 +17,12 @@ import "strings"
 //     answering it.
 //   - "From the context": a meta section header the model
 //     uses to introduce a list of sources.
-//   - "Looking at / First, let me": meta section starters.
+//   - "Looking at / Looking at the / First, let me": meta
+//     section starters.
+//   - "Per the": the model quoting its own grounding rules
+//     back at itself ("Per the grounding rules: ...").
+//   - "I should answer": the model narrating its intended
+//     action ("I should answer with what I have.").
 //
 // We avoid "Based on the context," and "In summary," because
 // those are legitimate real-answer openers — stripping them
@@ -37,9 +42,12 @@ var thinkingStarters = []string{
 	"I need to ",
 	"First, let me ",
 	"Looking at ",
+	"Looking at the ",
 	"The user is asking",
 	"From the context",
 	"The question is about",
+	"Per the ",
+	"I should answer",
 }
 
 // StripLeadingThinking removes leading "the model is thinking"

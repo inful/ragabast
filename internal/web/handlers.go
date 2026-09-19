@@ -332,6 +332,13 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 	// preserved.
 	answer = service.StripLeadingThinking(answer)
 
+	// Strip a trailing "Links:" section the model emits despite
+	// the prompt telling it not to. Inline [src:N] citations
+	// cover the legitimate cases; the trailing section often
+	// contains placeholder URLs ("https://docs.example.com")
+	// that the model invented.
+	answer = service.StripTrailingLinksSection(answer)
+
 	// Inline [src:N] markers → markdown links to source N's URL.
 	// Must run BEFORE the markdown renderer so the resulting
 	// [title](url) syntax gets converted to <a> tags by the
