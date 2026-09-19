@@ -160,20 +160,30 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 //     chromem-go returns "vectors must have the same length"
 //     and the search request 500s.
 //
-// The error message names both numbers (configured vs. actual)
-// and points the user at the fix: stop the server,
-// `rm -rf data/vectors/`, re-ingest. No silent fallback, no
-// truncation-to-fit, no panic.
+// The error message has to diagnose two distinct causes with the
+// same symptom:
+//
+//	A. Config is wrong (vectordb.embedding_dimension does not
+//	   match what the current embedding model returns). Wiping
+//	   data/vectors/ does NOT help; only the config does.
+//	B. Stored data is stale (config unchanged but a previous
+//	   ingest wrote vectors of a different length). Wiping
+//	   data/vectors/ + re-ingest does help.
+//
+// We can't tell A from B at the check site (the on-disk store
+// may be empty after a wipe), so the message names both paths
+// and points at `ragabast doctor` for a quick diagnosis.
 func (db *VectorDB) checkEmbeddingDimension(actual int) error {
 	if actual == db.embeddingDimension {
 		return nil
 	}
 	return fmt.Errorf(
 		"%w: chunk embedding has length %d but the collection is configured for %d. "+
-			"This usually means the embedding model or ollama.embedding_dimensions "+
-			"changed since these vectors were stored. To recover, stop the server, "+
-			"`rm -rf data/vectors/`, and run `ragabast ingest` again.",
-		models.ErrEmbeddingDimensionMismatch, actual, db.embeddingDimension,
+			"Two possible causes: (A) your config is wrong — set vectordb.embedding_dimension "+
+			"to %d, or change ollama.embedding_model to one that returns %d-dim vectors; "+
+			"(B) your stored data is stale from a previous model — run `ragabast vector reset --force` "+
+			"and re-ingest. Run `ragabast doctor` for a diagnosis.",
+		models.ErrEmbeddingDimensionMismatch, actual, db.embeddingDimension, actual, db.embeddingDimension,
 	)
 }
 

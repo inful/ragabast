@@ -53,8 +53,12 @@ func TestAddChunksBatch_RejectsMismatchedDimension(t *testing.T) {
 		"error must mention the configured dimension so the user can diagnose")
 	require.Contains(t, err.Error(), "256",
 		"error must mention the actual offending length")
-	require.Contains(t, err.Error(), "rm -rf",
-		"error must point at the fix: wipe data/vectors/ after changing models")
+	require.Contains(t, err.Error(), "vector reset --force",
+		"error must point at one of the recovery paths (stale data -> reset + reingest)")
+	require.Contains(t, err.Error(), "vectordb.embedding_dimension",
+		"error must point at the other recovery path (config mismatch -> update vectordb.embedding_dimension)")
+	require.Contains(t, err.Error(), "ragabast doctor",
+		"error must point at the doctor command for diagnosis")
 }
 
 // TestAddChunksBatch_AcceptsMatchingDimension is a control test:
