@@ -2,9 +2,13 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -244,8 +248,8 @@ func TestDoctor_StoreStateMatchOk(t *testing.T) {
 // TestDoctor_EmptyStorePasses pins that an empty (or missing)
 // store does not produce a warning — there's nothing to verify
 // against, and the next ingest will fill the store at the
-// configured dim (which the prior model/dim table check already
-// covers).
+// configured dim (which the prior model/dim table check
+// already covers).
 func TestDoctor_EmptyStorePasses(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)
@@ -263,6 +267,150 @@ func TestDoctor_EmptyStorePasses(t *testing.T) {
 
 	require.Contains(t, out, "empty",
 		"doctor must explicitly note the empty-store state; got: %s", out)
+}
+
+// TestDoctor_CheckServerDetectsActualDimMismatch pins the
+// failure mode that bit the user: the config says 768 and the
+// configured model is in the known-dim table as 768, but the
+// embedding server actually returns 3072-dim vectors for the
+// configured model. The config-level model/dim table check
+// cannot catch this — only a real server probe can.
+//
+// The test stands up an httptest server that mimics the
+// OpenAI-compat /v1/embeddings endpoint but returns 3072 floats
+// per vector regardless of the dimensions request. With
+// --check-server, doctor must call the server, observe the
+// 3072-dim response, and warn that the actual dim differs from
+// the configured 768.
+func TestDoctor_CheckServerDetectsActualDimMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	// Stand up an embeddings server that always returns
+	// 3072 floats. base_url will be its URL. We handle /v1/models
+	// too so ValidateConnection's reachability probe passes.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models", "/models":
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+		case "/v1/embeddings":
+			vec := make([]float32, 3072)
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`{"object":"list","data":[{"object":"embedding","index":0,"embedding":%s}]}`,
+				encodeF32Slice(vec),
+			)))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	persistDir := filepath.Join(tmp, "data", "vectors")
+	dataDir := filepath.Join(tmp, "data")
+	cfg := doctorConfigServer(srv.URL, "nomic-embed-text:v1.5", 768, persistDir, dataDir)
+	cfgPath := writeDoctorConfig(t, cfg)
+
+	out := captureLogs(t, func() {
+		cmd := DoctorCmd{
+			ConfigOpts:  ConfigOpts{Config: cfgPath},
+			CheckServer: true,
+		}
+		require.NoError(t, cmd.Run(nil),
+			"a server-side dim mismatch is a warning, not a hard error")
+	})
+
+	require.Contains(t, out, "3072",
+		"doctor must mention the actual dim the server returned")
+	require.Contains(t, out, "768",
+		"doctor must mention the configured dim")
+	require.Contains(t, out, "vectordb.embedding_dimension",
+		"doctor output must name the configured field by name so the user can find it")
+}
+
+// TestDoctor_CheckServerDimMatches pins the happy path: when
+// the server returns the dim the config says, the
+// server-probe check passes.
+func TestDoctor_CheckServerDimMatches(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/models", "/models":
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+		case "/v1/embeddings":
+			vec := make([]float32, 768)
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`{"object":"list","data":[{"object":"embedding","index":0,"embedding":%s}]}`,
+				encodeF32Slice(vec),
+			)))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	persistDir := filepath.Join(tmp, "data", "vectors")
+	dataDir := filepath.Join(tmp, "data")
+	cfg := doctorConfigServer(srv.URL, "nomic-embed-text:v1.5", 768, persistDir, dataDir)
+	cfgPath := writeDoctorConfig(t, cfg)
+
+	out := captureLogs(t, func() {
+		cmd := DoctorCmd{
+			ConfigOpts:  ConfigOpts{Config: cfgPath},
+			CheckServer: true,
+		}
+		require.NoError(t, cmd.Run(nil))
+	})
+
+	require.Contains(t, out, "matches the configured",
+		"doctor must affirm the server-probe dim match; got: %s", out)
+}
+
+// doctorConfigServer is like doctorConfig but takes an explicit
+// embeddings base URL (so tests can point at httptest servers)
+// and an explicit embedding_dim (so tests can express the
+// "config says 768 but server returns 3072" mismatch).
+func doctorConfigServer(baseURL, embeddingModel string, embeddingDim int, persistenceDir, dataDir string) string {
+	return fmt.Sprintf(`ollama:
+  base_url: %s
+  embedding_model: %s
+  chat_base_url: http://127.0.0.1:8000/v1
+  chat_model: x
+  timeout: 30s
+vectordb:
+  persistence_dir: %s
+  collection_name: test
+  embedding_dimension: %d
+server:
+  address: 0.0.0.0
+  port: 8080
+processing:
+  max_chunk_size: 2000
+  min_chunk_size: 300
+  chunk_overlap: 150
+paths:
+  data_dir: %s
+  templates_dir: ""
+`, baseURL, embeddingModel, persistenceDir, embeddingDim, dataDir)
+}
+
+// encodeF32Slice formats a []float32 as a JSON array literal
+// (e.g. "[0.5,0.25,0]") suitable for embedding in a fake
+// /v1/embeddings response body.
+func encodeF32Slice(v []float32) string {
+	var buf strings.Builder
+	buf.WriteByte('[')
+	for i, x := range v {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		buf.WriteString(strconv.FormatFloat(float64(x), 'f', -1, 32))
+	}
+	buf.WriteByte(']')
+	return buf.String()
 }
 
 // doctorConfig builds a minimal valid YAML config string with the

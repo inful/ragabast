@@ -263,21 +263,26 @@ func (c *DoctorCmd) checkPersistenceDirReachable(cfg *config.Config) {
 	log.Printf("✓ persistence dir %s exists and is writable\n", dir)
 }
 
-// checkEmbeddingsServer pings the embeddings server with a
-// tiny request. If --check-server is set and the server is
-// unreachable, this is reported as a WARNING so doctor can
-// still exit 0 (the user may be diagnosing a config before
-// starting the server).
+// checkEmbeddingsServer pings the embeddings server, embeds a
+// tiny probe text, and compares the returned vector length
+// against vectordb.embedding_dimension. If --check-server is
+// set and the server is unreachable, this is reported as a
+// WARNING so doctor can still exit 0 (the user may be
+// diagnosing a config before starting the server).
+//
+// The dimension probe is the actual failure-mode catch for
+// "config says X but the server returns Y": the model/dim
+// table in cmd/doctor_models.go only catches obvious typos;
+// the server probe catches everything else (server-side
+// model aliasing, custom finetunes, OpenAI-compat layers
+// that silently substitute models).
 func (c *DoctorCmd) checkEmbeddingsServer(cfg *config.Config) {
-	// Build a tiny client just for the check; this mirrors the
-	// dimensions arg wiring used by Service.NewService without
-	// going through the full service construction.
 	client := vector.NewOpenAIEmbeddingClientWithOptions(
 		cfg.Ollama.BaseURL,
 		cfg.Ollama.EmbeddingModel,
 		cfg.Ollama.EffectiveEmbeddingAPIKey(),
 		cfg.Ollama.Timeout,
-		0,
+		0, // probe at the model's full dim — we want to see what the server actually returns
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -287,6 +292,25 @@ func (c *DoctorCmd) checkEmbeddingsServer(cfg *config.Config) {
 		return
 	}
 	log.Printf("✓ embedding server reachable at %s\n", cfg.Ollama.BaseURL)
+
+	// Probe the actual dim. A one-token request keeps cost and
+	// noise to zero on real providers.
+	vec, err := client.GenerateEmbedding(ctx, "test")
+	if err != nil {
+		log.Printf("⚠ embedding probe failed: %v\n", err)
+		return
+	}
+	actual := len(vec)
+	if actual == cfg.VectorDB.EmbeddingDimension {
+		log.Printf("✓ server returns %d-dim vectors, matches the configured dim\n", actual)
+		return
+	}
+	log.Printf("⚠ server returns %d-dim vectors but vectordb.embedding_dimension is %d. "+
+		"The configured model (%q) does not match what the server is actually emitting. "+
+		"This is the same mismatch that would crash at first ingest with 'vectors must have the same length'. "+
+		"Fix by either updating vectordb.embedding_dimension: %d in your config, or "+
+		"changing ollama.embedding_model to one that returns %d-dim vectors.\n",
+		actual, cfg.VectorDB.EmbeddingDimension, cfg.Ollama.EmbeddingModel, actual, actual)
 }
 
 // VectorResetCmd wipes the on-disk vector store. This is the
