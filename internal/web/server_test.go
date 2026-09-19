@@ -2,7 +2,6 @@ package web
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,64 +12,6 @@ import (
 	"github.com/ragabast/internal/service"
 	"github.com/stretchr/testify/require"
 )
-
-type fakeService struct {
-	searchResults []models.SearchResult
-
-	queryAnswer string
-	queryDebug  *service.QueryDebugInfo
-}
-
-func (f *fakeService) CheckHealth(ctx context.Context) (bool, error) {
-	return true, nil
-}
-
-func (f *fakeService) IngestDocument(ctx context.Context, content string) (*models.Document, error) {
-	return &models.Document{ID: "doc-1"}, nil
-}
-
-func (f *fakeService) Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error) {
-	return f.searchResults, nil
-}
-
-func (f *fakeService) ListDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
-	return []models.DocumentInfo{}, nil
-}
-
-func (f *fakeService) DeleteDocument(ctx context.Context, documentID string) error {
-	return nil
-}
-
-func (f *fakeService) SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error) {
-	return service.FrontmatterSuggestion{}, nil
-}
-
-func (f *fakeService) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
-	if f.queryDebug == nil {
-		f.queryDebug = &service.QueryDebugInfo{Results: []models.SearchResult{}}
-	}
-	return f.queryAnswer, f.queryDebug, nil
-}
-
-func (f *fakeService) GetNormalizedTags(ctx context.Context) ([]string, error) {
-	return []string{"go", "rag", "api"}, nil
-}
-
-func (f *fakeService) GetNormalizedCategories(ctx context.Context) ([]string, error) {
-	return []string{"Guides", "Reference", "Tutorials"}, nil
-}
-
-func (f *fakeService) GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error) {
-	tags, err = f.GetNormalizedTags(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	categories, err = f.GetNormalizedCategories(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	return tags, categories, nil
-}
 
 func TestHandleSearchAPI_FiltersByMinScore(t *testing.T) {
 	cfg := config.DefaultConfig()
