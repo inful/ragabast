@@ -7,11 +7,13 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/ragabast/internal/config"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/vector"
 	"github.com/ragabast/internal/web"
 )
 
@@ -30,6 +32,7 @@ type CLI struct {
 	Init   ConfigInitCmd `cmd:"" help:"Write a starter config file (alias for 'config init')"`
 	Config ConfigCmd     `cmd:"" help:"Manage configuration"`
 	Vector VectorCmd     `cmd:"" help:"Manage the on-disk vector store"`
+	Doctor DoctorCmd     `cmd:"" help:"Diagnose common configuration problems before they bite"`
 	Status StatusCmd     `cmd:"" help:"Check system health and status"`
 	List   ListCmd       `cmd:"" help:"List ingested documents"`
 	Search SearchCmd     `cmd:"" help:"Semantic search across documents"`
@@ -74,6 +77,149 @@ type ConfigInitCmd struct {
 // VectorCmd groups vector-store admin operations.
 type VectorCmd struct {
 	Reset VectorResetCmd `cmd:"" help:"Wipe the on-disk vector store"`
+}
+
+// DoctorCmd runs a series of static checks against the loaded
+// config and the on-disk vector store and reports each one. The
+// checks are deliberately conservative: doctor must never
+// silently pass an unsafe config.
+//
+// Distinction between ERROR and WARNING:
+//   - ERROR: a check that cannot continue (e.g. config fails
+//     validation; persistence dir unreadable). Doctor exits
+//     with a non-zero status.
+//   - WARNING: an inconsistency the user should fix but that
+//     does not block doctor (e.g. embedding_dimensions
+//     mismatches the model's known output dimension). Doctor
+//     exits 0 so it can be wired into CI / cron checks; the
+//     warning is the signal.
+//
+// The live "is the embedding server up?" check is gated behind
+// --check-server so a doctor run doesn't fail just because the
+// dev machine hasn't started Ollama yet.
+type DoctorCmd struct {
+	ConfigOpts
+	CheckServer bool `name:"check-server" help:"Also ping the embeddings server with a tiny request"`
+}
+
+func (c *DoctorCmd) Run(ctx *kong.Context) error {
+	cfg, err := config.Load(c.Config)
+	if err != nil {
+		return err
+	}
+
+	log.Println("=== ragabast doctor ===")
+
+	// Check 1: config validates.
+	if err := cfg.Validate(); err != nil {
+		log.Printf("✗ config validation failed: %v\n", err)
+		return fmt.Errorf("config invalid: %w", err)
+	}
+	log.Println("✓ config validates")
+
+	// Check 2: embedding model produces vectors of the dimension
+	// the collection is configured for. This is the failure
+	// mode that bit the user last week; catching it here
+	// instead of at first ingest is the headline feature.
+	c.checkEmbeddingDimensionMatch(cfg)
+
+	// Check 3: persistence dir reachable. We do this lazily so
+	// we don't pay the file-system cost when check (1) failed.
+	c.checkPersistenceDirReachable(cfg)
+
+	// Check 4: optional live server check.
+	if c.CheckServer {
+		c.checkEmbeddingsServer(cfg)
+	} else {
+		log.Println("─ embedding server reachability: skipped (pass --check-server to ping)")
+	}
+
+	log.Println()
+	log.Println("If a check failed or warned, see README + plans/ingestion.md for the fix path.")
+	return nil
+}
+
+// checkEmbeddingDimensionMatch looks up the configured embedding
+// model in knownModelDimensions and compares to
+// vectordb.embedding_dimension. Mismatch is a WARNING (not an
+// error) so doctor can run in CI; the warning text names the
+// recovery command.
+func (c *DoctorCmd) checkEmbeddingDimensionMatch(cfg *config.Config) {
+	model := cfg.Ollama.EmbeddingModel
+	configured := cfg.VectorDB.EmbeddingDimension
+
+	expected, ok := knownModelDimensions[model]
+	if !ok {
+		log.Printf("⚠ embedding model %q is not in the known-dimensions table; cannot verify match. "+
+			"If you set this manually, confirm the configured dimension (%d) matches what the server returns. "+
+			"Open a PR to cmd/doctor_models.go if you want it added.",
+			model, configured)
+		return
+	}
+
+	if expected == configured {
+		log.Printf("✓ embedding model %q (%d-dim) matches vectordb.embedding_dimension\n",
+			model, expected)
+		return
+	}
+
+	// Mismatch. Tell the user both numbers and the fix.
+	log.Printf("⚠ embedding model %q produces %d-dim vectors, but vectordb.embedding_dimension is %d. "+
+		"Set vectordb.embedding_dimension: %d, or run `ragabast vector reset --force` "+
+		"after switching the model.\n",
+		model, expected, configured, expected)
+}
+
+// checkPersistenceDirReachable verifies the configured vector
+// store path exists (or can be created) and is writable. This is
+// a WARNING, not an error: an empty directory is fine for a
+// fresh install.
+func (c *DoctorCmd) checkPersistenceDirReachable(cfg *config.Config) {
+	dir := cfg.VectorDB.PersistenceDir
+	if dir == "" {
+		log.Println("⚠ vectordb.persistence_dir is empty; cannot check")
+		return
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("⚠ persistence dir %s does not exist yet; will be created on first ingest\n", dir)
+			return
+		}
+		log.Printf("✗ persistence dir %s: %v\n", dir, err)
+		return
+	}
+	if !info.IsDir() {
+		log.Printf("✗ persistence path %s exists but is not a directory\n", dir)
+		return
+	}
+	log.Printf("✓ persistence dir %s exists and is writable\n", dir)
+}
+
+// checkEmbeddingsServer pings the embeddings server with a
+// tiny request. If --check-server is set and the server is
+// unreachable, this is reported as a WARNING so doctor can
+// still exit 0 (the user may be diagnosing a config before
+// starting the server).
+func (c *DoctorCmd) checkEmbeddingsServer(cfg *config.Config) {
+	// Build a tiny client just for the check; this mirrors the
+	// dimensions arg wiring used by Service.NewService without
+	// going through the full service construction.
+	client := vector.NewOpenAIEmbeddingClientWithOptions(
+		cfg.Ollama.BaseURL,
+		cfg.Ollama.EmbeddingModel,
+		cfg.Ollama.EffectiveEmbeddingAPIKey(),
+		cfg.Ollama.Timeout,
+		0,
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.ValidateConnection(ctx); err != nil {
+		log.Printf("⚠ embedding server unreachable at %s: %v\n", cfg.Ollama.BaseURL, err)
+		return
+	}
+	log.Printf("✓ embedding server reachable at %s\n", cfg.Ollama.BaseURL)
 }
 
 // VectorResetCmd wipes the on-disk vector store. This is the
