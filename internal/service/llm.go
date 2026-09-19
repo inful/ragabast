@@ -14,6 +14,7 @@ import (
 // up a real HTTP chat-completions client.
 type llmChatClient interface {
 	Chat(ctx context.Context, messages []vector.OpenAIMessage, options map[string]any) (string, error)
+	ChatWithSystem(ctx context.Context, systemPrompt, userPrompt string, options map[string]any) (string, error)
 }
 
 // newLLMChatClient is the single place where the chat-completions
