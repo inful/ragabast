@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -38,7 +39,7 @@ func NewVectorDB(name string, embeddingDimension int, persistenceDir string) (*V
 		}
 	} else {
 		// Create in-memory DB
-		fmt.Println("creating in-memory DB")
+		log.Printf("vector: in-memory database (no persistence_dir configured)")
 		db = chromem.NewDB()
 	}
 
