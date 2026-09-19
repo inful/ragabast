@@ -8,7 +8,11 @@ import (
 
 // ListDocuments returns all ingested documents.
 func (s *Service) ListDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
-	return s.vectorOps.GetUniqueDocuments(ctx)
+	docs, err := s.vectorOps.GetUniqueDocuments(ctx)
+	if err != nil {
+		return nil, wrapCorruptionError(err)
+	}
+	return docs, nil
 }
 
 // GetDocument retrieves a specific document.

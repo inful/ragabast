@@ -29,6 +29,7 @@ type CLI struct {
 	Serve  ServeCmd      `cmd:"" help:"Start the web server"`
 	Init   ConfigInitCmd `cmd:"" help:"Write a starter config file (alias for 'config init')"`
 	Config ConfigCmd     `cmd:"" help:"Manage configuration"`
+	Vector VectorCmd     `cmd:"" help:"Manage the on-disk vector store"`
 	Status StatusCmd     `cmd:"" help:"Check system health and status"`
 	List   ListCmd       `cmd:"" help:"List ingested documents"`
 	Search SearchCmd     `cmd:"" help:"Semantic search across documents"`
@@ -68,6 +69,66 @@ type ConfigCmd struct {
 type ConfigInitCmd struct {
 	Path  string `default:"config.yml" help:"Output path" arg:"" optional:""`
 	Force bool   `short:"f" help:"Overwrite if the file already exists"`
+}
+
+// VectorCmd groups vector-store admin operations.
+type VectorCmd struct {
+	Reset VectorResetCmd `cmd:"" help:"Wipe the on-disk vector store"`
+}
+
+// VectorResetCmd wipes the on-disk vector store. This is the
+// recovery path when the store ends up in an inconsistent state
+// (e.g. mixing two embedding models, or vector lengths that no
+// longer match vectordb.embedding_dimension after a config
+// change). The reset is destructive — the operator must pass
+// --force to confirm; without it the command refuses to run.
+type VectorResetCmd struct {
+	ConfigOpts
+	Force bool `short:"f" help:"Skip the confirmation prompt"`
+}
+
+func (c *VectorResetCmd) Run(ctx *kong.Context) error {
+	cfg, err := config.Load(c.Config)
+	if err != nil {
+		return err
+	}
+
+	dir := cfg.VectorDB.PersistenceDir
+	if dir == "" {
+		return errors.New("vectordb.persistence_dir is empty; refusing to wipe a misconfigured path")
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("persistence dir %s does not exist; nothing to reset", dir)
+		}
+		return fmt.Errorf("failed to stat persistence dir %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("persistence path %s is not a directory", dir)
+	}
+
+	if !c.Force {
+		return fmt.Errorf(
+			"refusing to wipe %s without --force. "+
+				"This will delete every ingested vector; re-run with -f to confirm.",
+			dir,
+		)
+	}
+
+	log.Printf("vector reset: removing %s\n", dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("failed to wipe %s: %w", dir, err)
+	}
+	// Recreate the empty dir so the next ingest can write
+	// into the same path without the chromem-go "no such
+	// directory" error.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("failed to recreate %s: %w", dir, err)
+	}
+	log.Printf("vector reset: %s wiped. Run `ragabast ingest` to rebuild from source documents.\n", dir)
+	return nil
 }
 
 func (c *ConfigInitCmd) Run(ctx *kong.Context) error {

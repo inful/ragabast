@@ -67,7 +67,11 @@ type LLMOptions struct {
 // Search performs a semantic search, optionally narrowed by
 // document-level filters.
 func (s *Service) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
-	return s.vectorOps.Search(ctx, query, limit, filters.toWhere())
+	results, err := s.vectorOps.Search(ctx, query, limit, filters.toWhere())
+	if err != nil {
+		return nil, wrapCorruptionError(err)
+	}
+	return results, nil
 }
 
 // SearchByDocument searches within a specific document.
