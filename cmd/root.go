@@ -96,9 +96,14 @@ func (c *IngestCmd) Run(ctx *kong.Context) error {
 	// Ingest directory
 	if c.Path != "" {
 		log.Printf("Scanning directory: %s\n", c.Path)
-		if err := svc.IngestDirectory(ctxApp, c.Path); err != nil {
+		result, err := svc.IngestDirectory(ctxApp, c.Path)
+		if err != nil {
 			return fmt.Errorf("failed to ingest directory: %w", err)
 		}
+		for _, fe := range result.Errors {
+			log.Printf("Failed to ingest %s: %v", fe.Path, fe.Err)
+		}
+		log.Printf("Processed: %d, Failed: %d", result.Processed, result.Failed)
 	}
 
 	if len(c.Files) == 0 && c.Path == "" {

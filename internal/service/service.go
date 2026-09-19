@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -76,38 +75,15 @@ func (s *Service) IngestFile(ctx context.Context, filePath string) error {
 }
 
 // IngestDirectory processes all docbuilder files in a directory.
-func (s *Service) IngestDirectory(ctx context.Context, dirPath string) error {
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return fmt.Errorf("failed to read directory %s: %w", dirPath, err)
-	}
-
-	var processed int
-	var failed int
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		// Check if file has .md extension
-		if filepath.Ext(entry.Name()) != ".md" {
-			continue
-		}
-
-		filePath := filepath.Join(dirPath, entry.Name())
-		if err := s.IngestFile(ctx, filePath); err != nil {
-			// Log error to stderr instead of using fmt.Fprintf
-			_, _ = fmt.Fprintf(os.Stderr, "Failed to ingest %s: %v\n", filePath, err)
-			failed++
-		} else {
-			processed++
-		}
-	}
-
-	// Log results to stdout instead of using fmt.Printf
-	_, _ = fmt.Printf("Processed: %d, Failed: %d\n", processed, failed)
-	return nil
+//
+// The returned IngestResult counts successes and failures and lists
+// per-file errors. Presentation (logging, printing, surfacing to a
+// web client) is the caller's responsibility; this method does not
+// write to stdout or stderr.
+func (s *Service) IngestDirectory(ctx context.Context, dirPath string) (IngestResult, error) {
+	return walkMarkdownFiles(dirPath, func(path string) error {
+		return s.IngestFile(ctx, path)
+	})
 }
 
 // Search performs a semantic search.
