@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/vector"
 )
 
 // ChatMessage represents a conversational turn provided by the caller.
@@ -268,7 +269,7 @@ func collectContextURLs(result models.SearchResult) []string {
 //
 // The system prompt is sent ONLY in the system role. The user
 // message is sent ONLY in the user role. There is no duplication.
-func buildQueryMessages(query string, contextItems []string, history []ChatMessage) ([]OpenAIChatMessage, error) {
+func buildQueryMessages(query string, contextItems []string, history []ChatMessage) ([]vector.OpenAIMessage, error) {
 	systemPrompt, err := buildSystemPrompt(contextItems, history)
 	if err != nil {
 		return nil, err
@@ -276,19 +277,10 @@ func buildQueryMessages(query string, contextItems []string, history []ChatMessa
 
 	user := buildUserMessage(query, contextItems, history)
 
-	return []OpenAIChatMessage{
+	return []vector.OpenAIMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: user},
 	}, nil
-}
-
-// OpenAIChatMessage mirrors the role/content pair the OpenAI Chat
-// Completions API expects. It is intentionally minimal: we never
-// send a name, tool calls, or function results, so those fields
-// are not represented.
-type OpenAIChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
 }
 
 func buildSystemPrompt(contextItems []string, history []ChatMessage) (string, error) {

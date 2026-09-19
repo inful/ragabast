@@ -60,16 +60,10 @@ type OpenAILLMClient struct {
 	httpClient *http.Client
 }
 
-// NewOpenAILLMClient creates a client with sensible defaults.
-//
-// Defaults match the local Ollama setup so existing users can keep working
-// without changing config: base URL http://localhost:11434 and timeout 60s.
-func NewOpenAILLMClient(baseURL, model string) *OpenAILLMClient {
-	return NewOpenAILLMClientWithOptions(baseURL, model, "", 60*time.Second)
-}
-
 // NewOpenAILLMClientWithOptions is the fully-configurable constructor.
 // apiKey is sent as `Authorization: Bearer <key>` when non-empty.
+// Empty baseURL defaults to http://localhost:11434; empty model
+// defaults to gemma:2b; a non-positive timeout defaults to 60s.
 func NewOpenAILLMClientWithOptions(baseURL, model, apiKey string, timeout time.Duration) *OpenAILLMClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"

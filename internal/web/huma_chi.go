@@ -23,6 +23,6 @@ func registerHumaAPI(router chi.Router, appCfg *config.Config, svc serviceAPI) h
 	}
 	limiter := NewIngestLimiter(maxConcurrent, 1*time.Second)
 
-	RegisterHumaOperations(api, svc, limiter)
+	registerHumaOperations(api, svc, limiter)
 	return api
 }

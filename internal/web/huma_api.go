@@ -20,7 +20,7 @@ import "github.com/danielgtaylor/huma/v2"
 //
 // The signature MUST stay stable — huma_api_test.go and the chi
 // adapter in huma_chi.go both call this exact function.
-func RegisterHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter) {
+func registerHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter) {
 	registerCatalogOperations(api, svc)
 	registerQueryOperation(api, svc)
 	registerSearchOperation(api, svc)

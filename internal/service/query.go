@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ragabast/internal/models"
-	"github.com/ragabast/internal/vector"
 )
 
 // QueryDebugInfo describes what was retrieved and sent to the LLM.
@@ -74,13 +73,7 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		return "", nil, fmt.Errorf("prompt build failed: %w", err)
 	}
 
-	// Convert to the vector-package message type for the client.
-	clientMessages := make([]vector.OpenAIMessage, len(messages))
-	for i, m := range messages {
-		clientMessages[i] = vector.OpenAIMessage{Role: m.Role, Content: m.Content}
-	}
-
-	response, err := s.llmClient.Chat(ctx, clientMessages, llmOptions)
+	response, err := s.llmClient.Chat(ctx, messages, llmOptions)
 	if err != nil {
 		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}
