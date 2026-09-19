@@ -315,6 +315,16 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		sources = info.Results
 	}
 
+	// Strip leading "Let me check…" / "Wait, actually…" /
+	// "I need to look at…" / "Hmm, that's interesting…"
+	// paragraphs that some models emit BEFORE the actual answer.
+	// The prompt instruction in prompt.go is the primary defense;
+	// this is the backstop for the cases where the model slips
+	// anyway. Stops as soon as it finds a paragraph whose first
+	// line doesn't look like thinking, so a real answer that
+	// happens to begin with one of these markers is preserved.
+	answer = service.StripLeadingThinking(answer)
+
 	// Inline [src:N] markers → markdown links to source N's URL.
 	// Must run BEFORE the markdown renderer so the resulting
 	// [title](url) syntax gets converted to <a> tags by the
