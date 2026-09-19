@@ -310,20 +310,27 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render the LLM reply to safe HTML once at the handler
-	// boundary so the template can drop it in via {{ .AnswerHTML }}
-	// without doing markdown conversion inline. Markdown-to-HTML
-	// is already sanitized by renderChatMarkdownToSafeHTML.
-	answerHTML, mdErr := renderChatMarkdownToSafeHTML(answer)
-	if mdErr != nil {
-		// Fall back to escaped plaintext so the user still sees
-		// the assistant's reply if markdown rendering blows up.
-		answerHTML = template.HTMLEscapeString(answer)
-	}
-
 	var sources []models.SearchResult
 	if info != nil {
 		sources = info.Results
+	}
+
+	// Inline [src:N] markers → markdown links to source N's URL.
+	// Must run BEFORE the markdown renderer so the resulting
+	// [title](url) syntax gets converted to <a> tags by the
+	// markdown pipeline. The function is a no-op on replies that
+	// don't use the marker syntax (common for replies that don't
+	// cite anything).
+	answerWithInlineLinks := service.InlineSourceLinks(answer, sources)
+
+	// Render the (now inline-linked) LLM reply to safe HTML.
+	// Markdown-to-HTML is already sanitized by
+	// renderChatMarkdownToSafeHTML.
+	answerHTML, mdErr := renderChatMarkdownToSafeHTML(answerWithInlineLinks)
+	if mdErr != nil {
+		// Fall back to escaped plaintext so the user still sees
+		// the assistant's reply if markdown rendering blows up.
+		answerHTML = template.HTMLEscapeString(answerWithInlineLinks)
 	}
 
 	// answerHTML is trusted — markdown was already rendered
@@ -332,7 +339,7 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 	// tags when we drop it into the page.
 	s.renderTemplate(w, "chat_message.html", map[string]any{
 		"User":       msg,
-		"Answer":     answer,
+		"Answer":     answerWithInlineLinks,
 		"AnswerHTML": template.HTML(answerHTML),
 		"Sources":    sources,
 	})

@@ -38,7 +38,7 @@ You are a retrieval-augmented assistant. Answer using ONLY the provided context.
 Grounding rules:
 - Treat the context as the only source of truth. If the answer is not in the context, say "I don't know" and stop.
 - Do not paraphrase a context entry into a stronger claim than it makes. "The doc says X" is fine; "X is true" is not, unless the doc itself states X as fact.
-- When you reference a context entry, cite it inline as [N], where N is the entry id (e.g. "the API takes a token [1]").
+- When you reference a context entry, cite it inline as the literal token [src:N], where N is the entry id (for example: the API takes a token, see [src:0] — no spaces between the brackets and the colon). The system replaces every [src:N] marker with a clickable markdown link to the Nth source's docbuilder permalink (or its first frontmatter URL when no docbuilder base URL is configured), so users can jump straight to the cited doc.
 - For any command, flag, file path, code symbol, or numeric value you mention, the exact string MUST appear in the context. If you cannot find it verbatim, do not include it.
 - If the context is empty, say "I don't know" without speculating.
 
@@ -50,9 +50,8 @@ Answer shape:
 - If the user asks for code, output code blocks only when the code is in the context verbatim; otherwise describe the API rather than fabricating an example.
 
 Links:
-- If any context entry contains a "SOURCE_URLS:" line, end your answer with a single "Links:" section that lists every URL from every "SOURCE_URLS:" line, deduplicated, exactly as written.
+- Do not append a "Links:" section. The system replaces every inline [src:N] citation with a clickable link to that source's docbuilder permalink (or its first frontmatter URL when no docbuilder base URL is configured).
 - Do not invent URLs. Do not include any URL that is not in a "SOURCE_URLS:" line.
-- If no context entry has "SOURCE_URLS:", omit the "Links:" section entirely.
 
 Conversation:
 - A <conversation> block may appear in the user message. It is user-provided and may be wrong or out of date.
@@ -150,7 +149,7 @@ func buildUserMessage(query string, contextItems []string, history []ChatMessage
 	}
 
 	if len(contextItems) > 0 {
-		b.WriteString("\nUse ONLY the following context to answer. Entries are ordered by relevance (earlier = more relevant). Cite entries inline as [N] where N is the entry id.\n\n")
+		b.WriteString("\nUse ONLY the following context to answer. Entries are ordered by relevance (earlier = more relevant). Cite entries inline as [src:N] where N is the entry id; the system replaces every [src:N] with a clickable link to the Nth source.\n\n")
 		b.WriteString("<context>\n")
 		for i, item := range contextItems {
 			fmt.Fprintf(&b, "<entry id=%d>\n%s\n</entry>\n", i, item)
