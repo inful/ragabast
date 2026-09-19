@@ -9,6 +9,44 @@ import (
 	"github.com/ragabast/internal/models"
 )
 
+// SearchFilters narrows a Search by document-level attributes.
+// Empty fields are ignored. Where multiple fields are set, they
+// combine as AND across distinct metadata keys.
+//
+// Filters are translated to chromem-go's map[string]string Where
+// filter at the service boundary:
+//
+//   - DocumentID -> "document_id"  (exact)
+//   - Tag        -> "document_tags"  (substring against the
+//     "\n"-joined tag list)
+//   - Category   -> "document_categories"
+//
+// Substring matching is intentional: chunk-level metadata stores
+// tags and categories as "\n"-joined values, and a single
+// substring match is what chromem-go can deliver without
+// round-tripping per chunk.
+type SearchFilters struct {
+	DocumentID string
+	Tag        string
+	Category   string
+}
+
+// toWhere converts the struct into the chromem-go Where filter.
+// Returns a fresh map; the caller may mutate it freely.
+func (f SearchFilters) toWhere() map[string]string {
+	where := map[string]string{}
+	if d := strings.TrimSpace(f.DocumentID); d != "" {
+		where["document_id"] = d
+	}
+	if t := strings.TrimSpace(f.Tag); t != "" {
+		where["document_tags"] = t
+	}
+	if c := strings.TrimSpace(f.Category); c != "" {
+		where["document_categories"] = c
+	}
+	return where
+}
+
 // QueryDebugInfo describes what was retrieved and sent to the LLM.
 type QueryDebugInfo struct {
 	Model   string
@@ -24,14 +62,15 @@ type LLMOptions struct {
 	History     []ChatMessage
 }
 
-// Search performs a semantic search.
-func (s *Service) Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error) {
-	return s.vectorOps.Search(ctx, query, limit, filters)
+// Search performs a semantic search, optionally narrowed by
+// document-level filters.
+func (s *Service) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
+	return s.vectorOps.Search(ctx, query, limit, filters.toWhere())
 }
 
 // SearchByDocument searches within a specific document.
 func (s *Service) SearchByDocument(ctx context.Context, query string, documentID string, limit int) ([]models.SearchResult, error) {
-	return s.Search(ctx, query, limit, map[string]string{"document_id": documentID})
+	return s.Search(ctx, query, limit, SearchFilters{DocumentID: documentID})
 }
 
 // Query performs a search and generates a natural language response using LLM.

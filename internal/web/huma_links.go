@@ -7,6 +7,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/service"
 )
 
 type linkSuggestionsRequestBody struct {
@@ -57,7 +58,7 @@ func registerLinkSuggestionsOperation(api huma.API, svc serviceAPI) {
 			minScore = 0.5
 		}
 
-		results, err := svc.Search(ctx, text, topK, nil)
+		results, err := svc.Search(ctx, text, topK, service.SearchFilters{})
 		if err != nil {
 			return nil, huma.Error500InternalServerError("link suggestions search failed")
 		}

@@ -50,7 +50,7 @@ func (f *fakeHumaService) IngestDocument(_ context.Context, content string) (*mo
 	return &models.Document{ID: "doc-1", Chunks: []models.Chunk{{}, {}}}, nil
 }
 
-func (f *fakeHumaService) Search(_ context.Context, _ string, _ int, _ map[string]string) ([]models.SearchResult, error) {
+func (f *fakeHumaService) Search(_ context.Context, _ string, _ int, _ service.SearchFilters) ([]models.SearchResult, error) {
 	if f.searchErr != nil {
 		return nil, f.searchErr
 	}
@@ -159,7 +159,7 @@ func (f *fakeService) IngestDocument(_ context.Context, _ string) (*models.Docum
 	return &models.Document{ID: "doc-1"}, nil
 }
 
-func (f *fakeService) Search(_ context.Context, _ string, _ int, _ map[string]string) ([]models.SearchResult, error) {
+func (f *fakeService) Search(_ context.Context, _ string, _ int, _ service.SearchFilters) ([]models.SearchResult, error) {
 	return f.searchResults, nil
 }
 

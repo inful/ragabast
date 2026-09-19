@@ -15,7 +15,7 @@ import (
 type serviceAPI interface {
 	CheckHealth(ctx context.Context) (bool, error)
 	IngestDocument(ctx context.Context, content string) (*models.Document, error)
-	Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error)
+	Search(ctx context.Context, query string, limit int, filters service.SearchFilters) ([]models.SearchResult, error)
 	ListDocuments(ctx context.Context) ([]models.DocumentInfo, error)
 	DeleteDocument(ctx context.Context, documentID string) error
 	SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error)

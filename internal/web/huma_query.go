@@ -128,7 +128,7 @@ func registerSearchOperation(api huma.API, svc serviceAPI) {
 			minScore = 0.5
 		}
 
-		results, err := svc.Search(ctx, q, limit, nil)
+		results, err := svc.Search(ctx, q, limit, service.SearchFilters{})
 		if err != nil {
 			return nil, huma.Error500InternalServerError("search failed")
 		}

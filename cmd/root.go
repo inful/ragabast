@@ -289,7 +289,7 @@ func (c *SearchCmd) Run(ctx *kong.Context) error {
 		if c.DocID != "" {
 			results, err = svc.SearchByDocument(ctx, c.Query, c.DocID, c.TopK)
 		} else {
-			results, err = svc.Search(ctx, c.Query, c.TopK, nil)
+			results, err = svc.Search(ctx, c.Query, c.TopK, service.SearchFilters{})
 		}
 		if err != nil {
 			return fmt.Errorf("search failed: %w", err)

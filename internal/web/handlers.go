@@ -405,7 +405,7 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Perform search
-	results, err := s.service.Search(r.Context(), query, 5, nil)
+	results, err := s.service.Search(r.Context(), query, 5, service.SearchFilters{})
 	if err != nil {
 		internalError(w, r, "search", err)
 		return
