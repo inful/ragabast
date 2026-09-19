@@ -105,9 +105,14 @@ ragabast:
   # Base URL of the docbuilder instance that renders the
   # ingested documents. When set, every search result and
   # document info gets a synthetic `docbuilder_url` field
-  # computed as `<docbuilder_base_url>/<uid>` and surfaced via
-  # the search API, the documents API, the link-suggestions
-  # endpoint, the chat prompt, and the web UI's search results
-  # page. Empty (the default) keeps behavior unchanged — only
-  # the doc's own frontmatter `urls:` surface as links.
+  # computed as `<docbuilder_base_url>/_uid/<uid>/`. The
+  # `/_uid/<uid>/` form is docbuilder's stable permalink
+  # alias — derived from the frontmatter UID rather than the
+  # file path, so indexers, bookmarks, and external links
+  # stay valid even after a doc moves on disk. The synthetic
+  # URL is surfaced via the search API, the documents API,
+  # the link-suggestions endpoint, the chat prompt, and the
+  # web UI's search results page. Empty (the default) keeps
+  # behavior unchanged — only the doc's own frontmatter
+  # `urls:` surface as links.
   docbuilder_base_url: ""

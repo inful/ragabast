@@ -31,17 +31,17 @@ func TestBuildDocbuilderURL_EmptyUIDReturnsEmpty(t *testing.T) {
 
 func TestBuildDocbuilderURL_ConcatenatesWithSingleSlash(t *testing.T) {
 	svc := &Service{config: withRagabastCfg("https://docs.example.com")}
-	require.Equal(t, "https://docs.example.com/adr-001", svc.buildDocbuilderURL("adr-001"))
+	require.Equal(t, "https://docs.example.com/_uid/adr-001/", svc.buildDocbuilderURL("adr-001"))
 }
 
 func TestBuildDocbuilderURL_ToleratesTrailingSlashOnBase(t *testing.T) {
 	svc := &Service{config: withRagabastCfg("https://docs.example.com/")}
-	require.Equal(t, "https://docs.example.com/adr-001", svc.buildDocbuilderURL("adr-001"))
+	require.Equal(t, "https://docs.example.com/_uid/adr-001/", svc.buildDocbuilderURL("adr-001"))
 }
 
 func TestBuildDocbuilderURL_ToleratesLeadingSlashOnUID(t *testing.T) {
 	svc := &Service{config: withRagabastCfg("https://docs.example.com")}
-	require.Equal(t, "https://docs.example.com/adr-001", svc.buildDocbuilderURL("/adr-001"))
+	require.Equal(t, "https://docs.example.com/_uid/adr-001/", svc.buildDocbuilderURL("/adr-001"))
 }
 
 func TestEnrichWithDocbuilderURLs_PopulatesEachResultWithUID(t *testing.T) {
@@ -51,8 +51,8 @@ func TestEnrichWithDocbuilderURLs_PopulatesEachResultWithUID(t *testing.T) {
 		{ChunkID: "c2", DocumentID: "d2", UID: "adr-002"},
 	}
 	svc.enrichWithDocbuilderURLs(results)
-	require.Equal(t, "https://docs.example.com/adr-001", results[0].DocbuilderURL)
-	require.Equal(t, "https://docs.example.com/adr-002", results[1].DocbuilderURL)
+	require.Equal(t, "https://docs.example.com/_uid/adr-001/", results[0].DocbuilderURL)
+	require.Equal(t, "https://docs.example.com/_uid/adr-002/", results[1].DocbuilderURL)
 }
 
 func TestEnrichWithDocbuilderURLs_SkipsResultsWithoutUID(t *testing.T) {
@@ -64,7 +64,7 @@ func TestEnrichWithDocbuilderURLs_SkipsResultsWithoutUID(t *testing.T) {
 	svc.enrichWithDocbuilderURLs(results)
 	require.Empty(t, results[0].DocbuilderURL,
 		"results without a UID must not get a docbuilder URL even when base is set")
-	require.Equal(t, "https://docs.example.com/adr-002", results[1].DocbuilderURL)
+	require.Equal(t, "https://docs.example.com/_uid/adr-002/", results[1].DocbuilderURL)
 }
 
 func TestEnrichWithDocbuilderURLs_NoBaseNoOp(t *testing.T) {
@@ -84,8 +84,8 @@ func TestEnrichDocInfos_PopulatesEachInfoWithUID(t *testing.T) {
 		{ID: "d2", UID: "adr-002"},
 	}
 	svc.enrichDocInfos(infos)
-	require.Equal(t, "https://docs.example.com/adr-001", infos[0].DocbuilderURL)
-	require.Equal(t, "https://docs.example.com/adr-002", infos[1].DocbuilderURL)
+	require.Equal(t, "https://docs.example.com/_uid/adr-001/", infos[0].DocbuilderURL)
+	require.Equal(t, "https://docs.example.com/_uid/adr-002/", infos[1].DocbuilderURL)
 }
 
 func TestEnrichDocInfos_NoBaseNoOp(t *testing.T) {
@@ -108,11 +108,11 @@ func TestExtractURLs_IncludesDocbuilderURL(t *testing.T) {
 		{
 			ChunkID: "c1", DocumentID: "d1", UID: "adr-001",
 			DocumentURLs:  []string{"https://example.com/legacy-link"},
-			DocbuilderURL: "https://docs.example.com/adr-001",
+			DocbuilderURL: "https://docs.example.com/_uid/adr-001/",
 		},
 	}
 	got := extractURLs(results)
-	require.Contains(t, got, "https://docs.example.com/adr-001",
+	require.Contains(t, got, "https://docs.example.com/_uid/adr-001/",
 		"extractURLs must include the synthetic docbuilder permalink")
 	require.Contains(t, got, "https://example.com/legacy-link",
 		"extractURLs must continue to include the doc's own frontmatter URLs")
@@ -128,13 +128,13 @@ func TestCollectContextURLs_OrdersDocbuilderBeforeBody(t *testing.T) {
 	result := models.SearchResult{
 		ChunkID: "c1", DocumentID: "d1", UID: "adr-001",
 		DocumentURLs:  []string{"https://example.com/frontmatter"},
-		DocbuilderURL: "https://docs.example.com/adr-001",
+		DocbuilderURL: "https://docs.example.com/_uid/adr-001/",
 		Content:       "see https://example.com/in-body-url for details",
 	}
 	got := collectContextURLs(result)
 	require.Equal(t, []string{
 		"https://example.com/frontmatter",
-		"https://docs.example.com/adr-001",
+		"https://docs.example.com/_uid/adr-001/",
 		"https://example.com/in-body-url",
 	}, got)
 }

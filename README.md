@@ -41,12 +41,15 @@ Notes:
   `RAGABAST_DOCBUILDER_BASE_URL`, e.g.
   `https://docs.example.com`) to surface a synthetic
   permalink for every search result. ragabast computes
-  `<base>/<uid>` from each document's UID frontmatter and
-  exposes it as `docbuilder_url` in API responses, the
+  `<base>/_uid/<uid>/` from each document's UID frontmatter
+  and exposes it as `docbuilder_url` in API responses, the
   link-suggestions endpoint, the web UI, and the chat prompt
-  so the LLM can cite a stable direct link. Empty by default,
-  which means only the doc's own frontmatter `urls:` surface as
-  links.
+  so the LLM can cite a stable direct link. The `/_uid/` alias
+  is docbuilder's stable permalink convention: derived from
+  the frontmatter UID rather than the file path, so downstream
+  indexers, bookmarks, and external links stay valid even
+  after the doc moves on disk. Empty by default, which means
+  only the doc's own frontmatter `urls:` surface as links.
 - Set `ollama.embedding_dimensions` in YAML (or `OLLAMA_EMBEDDING_DIMENSIONS`)
   to request Matryoshka truncation from the embeddings server. Useful for
   `jina-embeddings-v5-text-small` (supported: 32, 64, 128, 256, 512, 768,

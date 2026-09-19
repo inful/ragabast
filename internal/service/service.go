@@ -25,21 +25,29 @@ type Service struct {
 }
 
 // buildDocbuilderURL returns the synthetic permalink for a
-// document with the given UID, of the form `<base>/<uid>`.
+// document with the given UID, of the form `<base>/_uid/<uid>/`.
 // Returns "" when ragabast.docbuilder_base_url is not configured
 // or when the document has no UID — either case means there is
 // nothing sensible to link to.
 //
+// docbuilder's /_uid/<uid>/ alias is derived from the
+// frontmatter UID (which never changes) rather than the file
+// path. Downstream systems, indexers, bookmarks, and external
+// links can rely on this URL staying stable even when the doc's
+// file moves on disk. Using the bare UID (e.g.
+// `<base>/<uid>`) would collide with file-path-based URLs and
+// break on rename — so the /_uid/ segment is mandatory.
+//
 // Slash handling: the base URL is assumed to be well-formed;
 // trailing slashes on the base and leading slashes on the UID
 // are tolerated. The result always has exactly one slash
-// between base and UID.
+// between segments.
 func (s *Service) buildDocbuilderURL(uid string) string {
 	base := strings.TrimRight(s.config.Ragabast.DocbuilderBaseURL, "/")
 	if base == "" || uid == "" {
 		return ""
 	}
-	return base + "/" + strings.TrimLeft(uid, "/")
+	return base + "/_uid/" + strings.TrimLeft(uid, "/") + "/"
 }
 
 // NewService creates a new service instance.
