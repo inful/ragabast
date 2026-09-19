@@ -315,14 +315,21 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		sources = info.Results
 	}
 
-	// Strip leading "Let me check…" / "Wait, actually…" /
-	// "I need to look at…" / "Hmm, that's interesting…"
-	// paragraphs that some models emit BEFORE the actual answer.
-	// The prompt instruction in prompt.go is the primary defense;
-	// this is the backstop for the cases where the model slips
-	// anyway. Stops as soon as it finds a paragraph whose first
-	// line doesn't look like thinking, so a real answer that
-	// happens to begin with one of these markers is preserved.
+	// Strip the <scratchpad>...</scratchpad> block the prompt
+	// asks the LLM to wrap its reasoning in. Deterministic — no
+	// heuristic matching of "Let me check…" style starters. If
+	// the model forgot the format, this is a no-op and the next
+	// step (StripLeadingThinking) acts as the heuristic backstop.
+	answer = service.StripScratchpad(answer)
+
+	// Heuristic backstop for models that didn't follow the
+	// scratchpad format: strip leading "Let me check…" /
+	// "Wait, actually…" / "I need to look at…" / "Hmm, that's
+	// interesting…" paragraphs that some models emit BEFORE the
+	// actual answer. Stops as soon as it finds a paragraph whose
+	// first line doesn't look like thinking, so a real answer
+	// that happens to begin with one of these markers is
+	// preserved.
 	answer = service.StripLeadingThinking(answer)
 
 	// Inline [src:N] markers → markdown links to source N's URL.
