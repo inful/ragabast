@@ -86,6 +86,29 @@ Actually, no, X is correct.`
 		"thinking after a real opening sentence must not be stripped")
 }
 
+// TestStripLeadingThinking_HandlesParaphraseOpeners pins the
+// fix for the second-generation failure mode: the model starts
+// with a paraphrase of the user's question ("The user is asking
+// about X"), then thinking, then a real answer. The starters
+// must catch the paraphrase openers too.
+func TestStripLeadingThinking_HandlesParaphraseOpeners(t *testing.T) {
+	cases := map[string]string{
+		"The user is asking":    "The user is asking about blind-spots in docbuilder.\n\nBased on the context, the answer is: there aren't any listed.",
+		"From the context":      "From the context:\n\n- ADR-005\n- Configuration Reference\n\nBased on the context, docbuilder handles linting.",
+		"The question is about": "The question is about main use cases.\n\nBased on the context, the use cases are: multi-repo sites, pipeline viz, linting.",
+	}
+	for opener, in := range cases {
+		t.Run(opener, func(t *testing.T) {
+			out := StripLeadingThinking(in)
+			require.NotContains(t, out, opener,
+				"the '%s' opener must be stripped", opener)
+			// The "Based on the context" tail is the real answer
+			// marker in each case — it must survive.
+			require.Contains(t, out, "Based on the context")
+		})
+	}
+}
+
 // TestStripLeadingThinking_StripsBlankLineSeparatedThinking pins
 // the contract that multiple thinking paragraphs separated by
 // blank lines are all stripped.

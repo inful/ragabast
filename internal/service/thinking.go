@@ -7,17 +7,28 @@ import "strings"
 // actual answer". LLMs trained with chain-of-thought often leak
 // these paragraphs into the user-visible output.
 //
-// The list is intentionally small. Adding more starters risks
-// false positives (a real answer that happens to start with
-// one of these). If a real answer happens to start with one
-// of these markers, the user's first-paragraph will not be
-// stripped — they'll see the "Let me X" preamble. That's worse
-// than missing some thinking paragraphs. Err on the side of
-// fewer false positives.
+// The list is small but each entry was chosen because the
+// pattern is almost always meta-commentary when it appears at
+// the start of a paragraph:
+//   - "Let me / Wait, / Actually, / Hmm, / I need to": the
+//     model narrating its own thinking process.
+//   - "The user is asking / The question is about": the
+//     model paraphrasing the user's question rather than
+//     answering it.
+//   - "From the context": a meta section header the model
+//     uses to introduce a list of sources.
+//   - "Looking at / First, let me": meta section starters.
 //
-// The leading-space form ("Let me ") matches when the next
-// character is part of a sentence. The comma form ("Wait,") is
-// unambiguous because it requires a comma right after the word.
+// We avoid "Based on the context," and "In summary," because
+// those are legitimate real-answer openers — stripping them
+// would hide the actual answer.
+//
+// False-positive risk: a real answer that happens to begin
+// with one of these markers will not be stripped. That's worse
+// than missing some thinking paragraphs, so we err on the
+// side of fewer false positives. If a real answer happens to
+// begin with one of these markers, the user sees the preamble
+// anyway.
 var thinkingStarters = []string{
 	"Let me ",
 	"Wait,",
@@ -26,6 +37,9 @@ var thinkingStarters = []string{
 	"I need to ",
 	"First, let me ",
 	"Looking at ",
+	"The user is asking",
+	"From the context",
+	"The question is about",
 }
 
 // StripLeadingThinking removes leading "the model is thinking"
