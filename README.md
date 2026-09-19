@@ -25,8 +25,9 @@ Notes:
   the OpenAI Embeddings API. Works against Ollama 0.5+ (with the
   `nomic-embed-text` image), vLLM, llama.cpp `--embedding`, LM Studio, OpenAI,
   and Google's Generative AI API via its OpenAI-compat layer
-  (`https://generativelanguage.googleapis.com/v1beta/openai`, models
-  `text-embedding-005` / `gemini-embedding-001` / `embedding-001`). The
+  (`https://generativelanguage.googleapis.com/v1beta/openai`). Use the actual
+  Google embedding model names: `gemini-embedding-001` (text, 768 dims) or
+  `gemini-embedding-2` (multimodal, 3072 dims by default; the latest). The
   bearer-token auth flow is identical to OpenAI's, so `ollama.embedding_api_key`
   just takes your `GEMINI_API_KEY`.
 - Use `ollama.api_key` as the default bearer token for both servers. Set
@@ -46,7 +47,11 @@ Notes:
   length than configured. **Not supported by Google Gemini** — the
   OpenAI-compat layer silently ignores the field; if you set
   `embedding_dimensions: N > 0` against Google you'll get a
-  `DIMENSION MISMATCH` warning on every request. Leave at 0.
+  `DIMENSION MISMATCH` warning on every request. Leave at 0. To get a
+  different dimension out of Google's `gemini-embedding-2` model, use the
+  native endpoint (`/v1beta/models/gemini-embedding-2:embedContent`) with
+  the `outputDimensionality` request field — not currently wired through
+  ragabast.
 
 ## Usage
 
