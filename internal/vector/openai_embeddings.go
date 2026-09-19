@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"maps"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ragabast/internal/models"
@@ -47,10 +49,13 @@ type openAIEmbeddingResponse struct {
 // Embeddings API (Ollama 0.5+, vLLM, llama.cpp --embedding, LM Studio,
 // llama-stack, OpenAI, etc.).
 type OpenAIEmbeddingClient struct {
-	baseURL    string
-	model      string
-	apiKey     string
-	httpClient *http.Client
+	baseURL           string
+	model             string
+	apiKey            string
+	httpClient        *http.Client
+	expectedDimension int // 0 = unset; when >0, request body includes `dimensions: N` and the response is length-checked
+
+	dimWarnOnce sync.Once
 }
 
 // NewOpenAIEmbeddingClientWithOptions is the fully-configurable constructor.
@@ -58,7 +63,14 @@ type OpenAIEmbeddingClient struct {
 // Empty baseURL defaults to http://localhost:11434; empty model
 // defaults to nomic-ai/nomic-embed-text-v1.5; a non-positive timeout
 // defaults to 30s.
-func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout time.Duration) *OpenAIEmbeddingClient {
+//
+// dimensions controls the Matryoshka path: when >0, every request
+// body carries `dimensions: <N>` so a Matryoshka-capable server
+// (jina v5, OpenAI text-embedding-3-*) truncates the returned
+// vector to N. The client also checks the actual response length
+// and logs a one-shot DIMENSION MISMATCH warning if the server
+// ignored the request.
+func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout time.Duration, dimensions int) *OpenAIEmbeddingClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -70,13 +82,28 @@ func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout 
 	}
 
 	return &OpenAIEmbeddingClient{
-		baseURL: normalizeOpenAIBaseURL(baseURL),
-		model:   model,
-		apiKey:  apiKey,
+		baseURL:           normalizeOpenAIBaseURL(baseURL),
+		model:             model,
+		apiKey:            apiKey,
+		expectedDimension: dimensions,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
 	}
+}
+
+// checkDimension fires a one-shot DIMENSION MISMATCH warning
+// when expectedDimension is set and the actual response length
+// differs. Safe to call on every embedding response; the
+// sync.Once guarantees the warning fires at most once per
+// client instance.
+func (c *OpenAIEmbeddingClient) checkDimension(actual int) {
+	if c.expectedDimension <= 0 || actual == c.expectedDimension {
+		return
+	}
+	c.dimWarnOnce.Do(func() {
+		log.Printf("vector: DIMENSION MISMATCH: configured EmbeddingDimensions=%d but embeddings server returned vectors of length %d. The server may be ignoring the dimensions request, or the model does not support truncation to that size. Search results will be incorrect until this is fixed.", c.expectedDimension, actual)
+	})
 }
 
 // GenerateEmbedding generates an embedding for the given text.
@@ -176,6 +203,16 @@ func (c *OpenAIEmbeddingClient) GenerateChunkEmbedding(ctx context.Context, chun
 }
 
 func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, options map[string]any) ([][]float32, error) {
+	// Inject `dimensions: N` when Matryoshka truncation is requested.
+	// The Options map is merged into the top-level JSON body, so this
+	// sits next to model and input.
+	if c.expectedDimension > 0 {
+		if options == nil {
+			options = map[string]any{}
+		}
+		options["dimensions"] = c.expectedDimension
+	}
+
 	req := OpenAIEmbeddingRequest{
 		Model:   c.model,
 		Input:   texts,
@@ -233,6 +270,14 @@ func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, optio
 		}
 		out[i] = d.Embedding
 	}
+
+	// One-shot dimension-mismatch check: only the first vector's
+	// length matters, since the server returns the same dim for
+	// every input in a batch.
+	if len(out) > 0 {
+		c.checkDimension(len(out[0]))
+	}
+
 	return out, nil
 }
 

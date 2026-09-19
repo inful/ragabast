@@ -1,11 +1,16 @@
 package vector
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +50,7 @@ func TestOpenAIEmbeddingClient_GenerateEmbedding_PostsToV1Embeddings(t *testing.
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "nomic-embed-text:v1.5", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "nomic-embed-text:v1.5", "", 5*time.Second, 0)
 
 	vec, err := client.GenerateEmbedding(context.Background(), "hello world")
 	require.NoError(t, err)
@@ -67,7 +72,7 @@ func TestOpenAIEmbeddingClient_GenerateEmbedding_SendsAuthHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "secret-key", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "secret-key", 5*time.Second, 0)
 	_, err := client.GenerateEmbedding(context.Background(), "hi")
 	require.NoError(t, err)
 
@@ -109,7 +114,7 @@ func TestOpenAIEmbeddingClient_generateEmbeddingsBatch_SendsAllInputs(t *testing
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	vecs, err := client.generateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
 	require.NoError(t, err)
 	require.Len(t, vecs, 3)
@@ -121,7 +126,7 @@ func TestOpenAIEmbeddingClient_generateEmbeddingsBatch_SendsAllInputs(t *testing
 func TestOpenAIEmbeddingClient_EmptyTextReturnsError(t *testing.T) {
 	t.Parallel()
 
-	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second, 0)
 	_, err := client.GenerateEmbedding(context.Background(), "")
 	require.ErrorIs(t, err, models.ErrEmbeddingFailed)
 }
@@ -129,7 +134,7 @@ func TestOpenAIEmbeddingClient_EmptyTextReturnsError(t *testing.T) {
 func TestOpenAIEmbeddingClient_EmptyBatchReturnsError(t *testing.T) {
 	t.Parallel()
 
-	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second, 0)
 	_, err := client.generateEmbeddingsBatch(context.Background(), nil)
 	require.ErrorIs(t, err, models.ErrEmbeddingFailed)
 }
@@ -143,7 +148,7 @@ func TestOpenAIEmbeddingClient_ServerError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	_, err := client.GenerateEmbedding(context.Background(), "x")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "boom")
@@ -158,7 +163,7 @@ func TestOpenAIEmbeddingClient_ApiErrorInBody(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	_, err := client.GenerateEmbedding(context.Background(), "x")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "context length exceeded")
@@ -174,7 +179,7 @@ func TestOpenAIEmbeddingClient_MismatchedInputCountReturnsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	_, err := client.generateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "1 vectors for 3 inputs")
@@ -189,7 +194,7 @@ func TestOpenAIEmbeddingClient_EmptyVectorReturnsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	_, err := client.GenerateEmbedding(context.Background(), "x")
 	require.ErrorIs(t, err, models.ErrEmbeddingFailed)
 }
@@ -212,7 +217,7 @@ func TestOpenAIEmbeddingClient_GenerateChunkEmbedding_UsesFullPath(t *testing.T)
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	chunk := models.NewChunk()
 	chunk.Content = "body"
 	chunk.HeaderPath = "H1/H2"
@@ -234,7 +239,7 @@ func TestOpenAIEmbeddingClient_ValidateConnection_Success(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	require.NoError(t, client.ValidateConnection(context.Background()))
 }
 
@@ -260,7 +265,7 @@ func TestOpenAIEmbeddingClient_ValidateConnection_FallsBackToUnversionedPath(t *
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	require.NoError(t, client.ValidateConnection(context.Background()))
 
 	mu.Lock()
@@ -277,7 +282,7 @@ func TestOpenAIEmbeddingClient_ValidateConnection_BothPathsFail(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	err := client.ValidateConnection(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "did not respond")
@@ -298,7 +303,7 @@ func TestOpenAIEmbeddingClient_SingleInputBatch_SendsArrayOfOne(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
 	_, err := client.GenerateEmbedding(context.Background(), "only one")
 	require.NoError(t, err)
 	require.Len(t, got.Input, 1)
@@ -309,7 +314,150 @@ func TestOpenAIEmbeddingClient_DefaultsAreLocal(t *testing.T) {
 	t.Parallel()
 
 	// No API key, no base URL, no model -> defaults are local-friendly.
-	client := NewOpenAIEmbeddingClientWithOptions("", "", "", 0)
+	client := NewOpenAIEmbeddingClientWithOptions("", "", "", 0, 0)
 	require.Equal(t, "http://localhost:11434", client.baseURLString())
 	require.NotEmpty(t, client.modelName())
+}
+
+// TestOpenAIEmbeddingClient_SendsDimensionsInRequestBody pins the
+// Matryoshka path: when the constructor's dimensions argument is
+// positive, every /v1/embeddings request must carry
+// `dimensions: <N>` at the top level of the JSON body. Matryoshka-
+// capable servers (jina v5, OpenAI text-embedding-3-*) use this
+// field to truncate the returned vector to <N> dimensions.
+func TestOpenAIEmbeddingClient_SendsDimensionsInRequestBody(t *testing.T) {
+	t.Parallel()
+
+	var got map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1]}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256)
+	_, err := client.GenerateEmbedding(context.Background(), "hi")
+	require.NoError(t, err)
+
+	require.EqualValues(t, 256, got["dimensions"],
+		"matryoshka: dimensions must be at the top level of the request body")
+	require.Equal(t, "jina-embeddings-v5-text-small", got["model"])
+}
+
+// TestOpenAIEmbeddingClient_OmitsDimensionsWhenZero pins the
+// unset case: dimensions=0 must NOT appear in the request body.
+// Some servers (older Ollama) reject unknown fields, so we
+// only emit dimensions when the caller actually asked for them.
+func TestOpenAIEmbeddingClient_OmitsDimensionsWhenZero(t *testing.T) {
+	t.Parallel()
+
+	var got map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0)
+	_, err := client.GenerateEmbedding(context.Background(), "hi")
+	require.NoError(t, err)
+
+	_, present := got["dimensions"]
+	require.False(t, present, "dimensions=0 must not emit a dimensions field")
+}
+
+// TestOpenAIEmbeddingClient_WarnsOnDimensionMismatch pins the
+// safety check: if the server returns a vector of length != the
+// configured dimensions, log a one-shot warning. This catches
+// misconfigurations where the user set EmbeddingDimensions=256
+// but the server ignored the request and returned 768.
+//
+// Note: deliberately not t.Parallel() — these tests redirect the
+// package-global log output via log.SetOutput, which is unsafe
+// under parallel execution.
+func TestOpenAIEmbeddingClient_WarnsOnDimensionMismatch(t *testing.T) {
+	// Redirect log output to a buffer to capture the warning.
+	buf := &bytes.Buffer{}
+	oldOut := log.Writer()
+	oldFlags := log.Flags()
+	log.SetOutput(buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(oldOut)
+		log.SetFlags(oldFlags)
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Server ignored dimensions=256, returned full 768-dim vector.
+		vec := make([]float32, 768)
+		body := fmt.Sprintf(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":%v}]}`, f32SliceToJSON(vec))
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256)
+	vec, err := client.GenerateEmbedding(context.Background(), "hi")
+	require.NoError(t, err)
+	require.Len(t, vec, 768, "we store whatever the server returns; the warning is the user signal")
+
+	out := buf.String()
+	require.Contains(t, out, "DIMENSION MISMATCH",
+		"dimension mismatch must log a DIMENSION MISMATCH warning; got: %q", out)
+	require.Contains(t, out, "256",
+		"warning should mention the configured dimension")
+	require.Contains(t, out, "768",
+		"warning should mention the actual dimension")
+}
+
+// TestOpenAIEmbeddingClient_NoWarningOnMatch pins the happy
+// path: when the server returns a vector of the configured
+// dimension, no warning fires.
+func TestOpenAIEmbeddingClient_NoWarningOnMatch(t *testing.T) {
+	buf := &bytes.Buffer{}
+	oldOut := log.Writer()
+	oldFlags := log.Flags()
+	log.SetOutput(buf)
+	log.SetFlags(0)
+	t.Cleanup(func() {
+		log.SetOutput(oldOut)
+		log.SetFlags(oldFlags)
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		vec := make([]float32, 256)
+		body := fmt.Sprintf(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":%v}]}`, f32SliceToJSON(vec))
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256)
+	_, err := client.GenerateEmbedding(context.Background(), "hi")
+	require.NoError(t, err)
+
+	require.NotContains(t, buf.String(), "DIMENSION MISMATCH",
+		"no warning should fire when the server returns the configured dimension")
+}
+
+// f32SliceToJSON encodes a []float32 as a JSON array literal.
+// Used to build response bodies in the dimension-mismatch tests
+// above without pulling in a JSON encoder.
+func f32SliceToJSON(v []float32) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, x := range v {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.FormatFloat(float64(x), 'f', -1, 32))
+	}
+	b.WriteByte(']')
+	return b.String()
 }

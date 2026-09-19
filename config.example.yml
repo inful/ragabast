@@ -22,6 +22,17 @@ ollama:
   base_url: http://127.0.0.1:8000/v1
   embedding_model: nomicai-modernbert-embed-base-bf16
 
+  # Optional Matryoshka truncation. When > 0, every /v1/embeddings
+  # request carries `dimensions: N` so a Matryoshka-capable server
+  # (jina-embeddings-v5-text-small, OpenAI text-embedding-3-*) truncates
+  # the returned vector. The client also checks the response length
+  # and logs a one-shot DIMENSION MISMATCH warning if the server
+  # ignored the request. Leave at 0 to disable truncation.
+  #
+  # jina-embeddings-v5 supports 32, 64, 128, 256, 512, 768, 1024.
+  # text-embedding-3-small accepts any positive integer.
+  embedding_dimensions: 0
+
   # Chat completions server (OpenAI /v1/chat/completions)
   chat_base_url: http://127.0.0.1:8000/v1
   chat_model: OmniCoder-9B-abliterated-MLX-4bit
@@ -53,11 +64,15 @@ vectordb:
   persistence_dir: data/vectors
   collection_name: ragabast
 
-  # MUST match the dimension of the embedding model above.
-  # nomicai-modernbert-embed-base returns 768. Other common sizes:
-  #   - nomic-embed-text-v1.5       768
-  #   - text-embedding-3-small      1536
-  #   - text-embedding-3-large      3072
+  # MUST match the dimension of the embeddings that land in the
+  # collection. If you set `embedding_dimensions` above, this must
+  # be the truncated dimension, not the model's full dimension.
+  # Common sizes:
+  #   - nomicai-modernbert-embed-base      768
+  #   - nomic-embed-text-v1.5             768
+  #   - text-embedding-3-small (full)    1536
+  #   - text-embedding-3-large (full)    3072
+  #   - jina v5 at dimensions=256         256
   #   - bge-large-en-v1.5           1024
   # Changing this requires deleting data/vectors/ and re-ingesting.
   embedding_dimension: 768

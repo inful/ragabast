@@ -59,6 +59,14 @@ type OllamaConfig struct {
 	// re-ingesting all documents (delete data/vectors/ first).
 	EmbeddingModel string `env:"OLLAMA_EMBEDDING_MODEL" yaml:"embedding_model"`
 
+	// EmbeddingDimensions is the Matryoshka truncation size. When
+	// >0, the embeddings client sends `dimensions: N` with every
+	// /v1/embeddings request and warns if the server returns a
+	// vector of a different length. Supported by jina v5
+	// (32/64/128/256/512/768/1024) and OpenAI text-embedding-3-*
+	// (any positive integer). Leave at 0 to disable truncation.
+	EmbeddingDimensions int `env:"OLLAMA_EMBEDDING_DIMENSIONS" yaml:"embedding_dimensions"`
+
 	// ChatBaseURL is the OpenAI-compatible chat completions server endpoint.
 	// Defaults to the same local Ollama instance (which exposes
 	// /v1/chat/completions from 0.5+), but can point at vLLM, llama.cpp

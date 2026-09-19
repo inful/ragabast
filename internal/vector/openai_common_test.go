@@ -74,7 +74,7 @@ func TestOpenAIEmbeddingClient_AcceptsBaseURLWithV1Suffix(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL+"/v1", "m", "", 5*time.Second)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL+"/v1", "m", "", 5*time.Second, 0)
 	vec, err := client.GenerateEmbedding(context.Background(), "x")
 	require.NoError(t, err)
 	require.Equal(t, []float32{0.1}, vec)
