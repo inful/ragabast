@@ -57,34 +57,19 @@ func NewService(cfg *config.Config) (*Service, error) {
 
 // IngestFile processes a single docbuilder file.
 func (s *Service) IngestFile(ctx context.Context, filePath string) error {
-	// Read file content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return fmt.Errorf("failed to read file %s: %w", filePath, err)
 	}
 
-	// Parse document
 	doc, err := s.parser.ParseDocument(content, filePath)
 	if err != nil {
 		return fmt.Errorf("failed to parse document %s: %w", filePath, err)
 	}
 
-	// Chunk document
-	chunks, err := s.chunker.ChunkWithHierarchy(doc)
-	if err != nil {
-		return fmt.Errorf("failed to chunk document %s: %w", filePath, err)
+	if err := chunkAndIngest(ctx, s.chunker, s.vectorOps, doc); err != nil {
+		return fmt.Errorf("ingest %s: %w", filePath, err)
 	}
-	doc.Chunks = make([]models.Chunk, len(chunks))
-	for i, chunk := range chunks {
-		doc.Chunks[i] = *chunk
-	}
-
-	// Ingest into vector database
-	err = s.vectorOps.IngestDocument(ctx, doc)
-	if err != nil {
-		return fmt.Errorf("failed to ingest document %s: %w", filePath, err)
-	}
-
 	return nil
 }
 
@@ -288,7 +273,6 @@ func (s *Service) DeleteChunk(ctx context.Context, chunkID string) error {
 
 // IngestText processes raw text content as a document.
 func (s *Service) IngestText(ctx context.Context, text string, uid string, tags []string, categories []string, urls []string) error {
-	// Create a document from text
 	doc := models.NewDocument()
 	doc.UID = uid
 	doc.Tags = tags
@@ -296,60 +280,26 @@ func (s *Service) IngestText(ctx context.Context, text string, uid string, tags 
 	doc.URLs = urls
 	doc.Content = text
 	doc.Title = "Text Document"
-
-	// Generate fingerprint
 	doc.Fingerprint = s.parser.GenerateFingerprint(text)
-	// Use UID as the stable document ID; fingerprint remains content-based.
 	doc.ID = doc.UID
 
-	// Validate
 	if err := doc.Validate(); err != nil {
 		return fmt.Errorf("document validation failed: %w", err)
 	}
 
-	// Chunk document
-	chunks, err := s.chunker.ChunkWithHierarchy(doc)
-	if err != nil {
-		return fmt.Errorf("failed to chunk document: %w", err)
-	}
-	doc.Chunks = make([]models.Chunk, len(chunks))
-	for i, chunk := range chunks {
-		doc.Chunks[i] = *chunk
-	}
-
-	// Ingest into vector database
-	err = s.vectorOps.IngestDocument(ctx, doc)
-	if err != nil {
-		return fmt.Errorf("failed to ingest document: %w", err)
-	}
-
-	return nil
+	return chunkAndIngest(ctx, s.chunker, s.vectorOps, doc)
 }
 
 // IngestDocument processes a docbuilder document from raw content.
 func (s *Service) IngestDocument(ctx context.Context, content string) (*models.Document, error) {
-	// Parse document
 	doc, err := s.parser.ParseDocument([]byte(content), "web_upload")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse document: %w", err)
 	}
 
-	// Chunk document
-	chunks, err := s.chunker.ChunkWithHierarchy(doc)
-	if err != nil {
-		return nil, fmt.Errorf("failed to chunk document: %w", err)
+	if err := chunkAndIngest(ctx, s.chunker, s.vectorOps, doc); err != nil {
+		return nil, err
 	}
-	doc.Chunks = make([]models.Chunk, len(chunks))
-	for i, chunk := range chunks {
-		doc.Chunks[i] = *chunk
-	}
-
-	// Ingest into vector database
-	err = s.vectorOps.IngestDocument(ctx, doc)
-	if err != nil {
-		return nil, fmt.Errorf("failed to ingest document: %w", err)
-	}
-
 	return doc, nil
 }
 
