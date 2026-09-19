@@ -31,6 +31,14 @@ Notes:
 - Changing `embedding_model` (or its `EmbeddingDimension` in `vectordb:`) requires
   re-ingesting all documents: stop the server, `rm -rf data/vectors/`, and run
   `ragabast ingest` again.
+- Set `ollama.embedding_dimensions` in YAML (or `OLLAMA_EMBEDDING_DIMENSIONS`)
+  to request Matryoshka truncation from the embeddings server. Useful for
+  `jina-embeddings-v5-text-small` (supported: 32, 64, 128, 256, 512, 768,
+  1024) and OpenAI `text-embedding-3-*` (any positive integer). Leave at 0 to
+  disable truncation; the field is omitted from the request body when unset so
+  older Ollama versions don't reject it. When set, the client logs a one-shot
+  `DIMENSION MISMATCH` warning if the server returns vectors of a different
+  length than configured.
 
 ## Usage
 
