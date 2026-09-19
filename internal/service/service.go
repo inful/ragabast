@@ -22,6 +22,7 @@ type Service struct {
 	parser    *parser.DocbuilderParser
 	chunker   *chunker.Chunker
 	vectorOps *vector.VectorOperations
+	llmClient llmChatClient
 }
 
 // NewService creates a new service instance.
@@ -52,6 +53,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 		parser:    docParser,
 		chunker:   chunker,
 		vectorOps: vectorOps,
+		llmClient: newLLMChatClient(cfg),
 	}, nil
 }
 
@@ -153,12 +155,6 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	}
 
 	model := s.config.Ollama.ChatModel
-	llmClient := vector.NewOpenAILLMClientWithOptions(
-		s.config.Ollama.ChatBaseURL,
-		model,
-		s.config.Ollama.EffectiveChatAPIKey(),
-		s.config.Ollama.Timeout,
-	)
 
 	llmOptions := map[string]any{}
 	maps.Copy(llmOptions, s.config.Ollama.Options)
@@ -180,7 +176,7 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		clientMessages[i] = vector.OpenAIMessage{Role: m.Role, Content: m.Content}
 	}
 
-	response, err := llmClient.Chat(ctx, clientMessages, llmOptions)
+	response, err := s.llmClient.Chat(ctx, clientMessages, llmOptions)
 	if err != nil {
 		return "", nil, fmt.Errorf("LLM generation failed: %w", err)
 	}
