@@ -130,16 +130,18 @@ func (f *fakeHumaService) GetTagsAndCategories(ctx context.Context) (tags []stri
 //   - tags/categories:  returned by the catalog lookups; defaults
 //     match the legacy fakes so existing tests pass
 type fakeService struct {
-	searchResults  []models.SearchResult
-	queryAnswer    string
-	queryDebug     *service.QueryDebugInfo
-	queryErr       error
-	checkHealthOK  bool
-	ingestDocument *models.Document
-	ingestErr      error
-
-	tags       []string
-	categories []string
+	searchResults     []models.SearchResult
+	searchErr         error
+	lastSearchQuery   string
+	lastSearchFilters service.SearchFilters
+	queryAnswer       string
+	queryDebug        *service.QueryDebugInfo
+	queryErr          error
+	checkHealthOK     bool
+	ingestDocument    *models.Document
+	ingestErr         error
+	tags              []string
+	categories        []string
 }
 
 func (f *fakeService) CheckHealth(context.Context) (bool, error) {
@@ -159,7 +161,15 @@ func (f *fakeService) IngestDocument(_ context.Context, _ string) (*models.Docum
 	return &models.Document{ID: "doc-1"}, nil
 }
 
-func (f *fakeService) Search(_ context.Context, _ string, _ int, _ service.SearchFilters) ([]models.SearchResult, error) {
+// Search records the most-recent (query, limit, filters) call so the
+// web form-submit tests can assert that filter form fields actually
+// reach the service. Returns searchResults unless searchErr is set.
+func (f *fakeService) Search(_ context.Context, query string, _ int, filters service.SearchFilters) ([]models.SearchResult, error) {
+	f.lastSearchQuery = query
+	f.lastSearchFilters = filters
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
 	return f.searchResults, nil
 }
 

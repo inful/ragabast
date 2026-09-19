@@ -59,6 +59,14 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 }
 
 // serveBasicHTML serves basic HTML when templates are not available.
+// search.html and search_results.html are intentionally NOT served
+// here: the in-tree templates/search.html + search_results.html are
+// the canonical forms (added in the same commit that wired up the
+// tag/category/document_id filter passthrough). Earlier Go-string
+// fallbacks for those two pages had a `[]models.SearchResult` type
+// assertion that panicked on every search request; routing them
+// back through a fallback would just bring the panic back, so they
+// are absent here on purpose.
 func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
@@ -68,10 +76,6 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 		s.serveChatHTML(w, data)
 	case "chat_message.html":
 		s.serveChatMessageHTML(w, data)
-	case "search.html":
-		s.serveSearchHTML(w, data)
-	case "search_results.html":
-		s.serveSearchResultsHTML(w, data)
 	case "ingest.html":
 		s.serveIngestHTML(w, data)
 	case "ingest_success.html":
@@ -198,75 +202,6 @@ func (s *Server) serveChatMessageHTML(w http.ResponseWriter, data any) {
 </div>`, user, answer)
 }
 
-func (s *Server) serveSearchHTML(w http.ResponseWriter, data any) {
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>%s</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-</head>
-<body class="container mt-4">
-    <h1 class="title">Search Documents</h1>
-    <form method="post" action="/search">
-        <div class="field">
-            <label class="label">Query</label>
-            <div class="control">
-                <input class="input" type="text" name="query" placeholder="Enter your search query..." required>
-            </div>
-        </div>
-        <div class="field">
-            <div class="control">
-                <button class="button is-info" type="submit">Search</button>
-                <a href="/" class="button is-light">Back</a>
-            </div>
-        </div>
-    </form>
-</body>
-</html>`, data.(map[string]any)["Title"])
-}
-
-func (s *Server) serveSearchResultsHTML(w http.ResponseWriter, data any) {
-	results := data.(map[string]any)["Results"]
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>%s</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-</head>
-<body class="container mt-4">
-    <h1 class="title">Search Results</h1>
-    <p class="subtitle">Query: %s</p>
-    <a href="/search" class="button is-light mb-4">New Search</a>
-`, data.(map[string]any)["Title"], data.(map[string]any)["Query"])
-
-	if results != nil {
-		_, _ = fmt.Fprintf(w, `<div class="columns is-multiline">`)
-		for _, r := range results.([]any) {
-			result := r.(map[string]any)
-			_, _ = fmt.Fprintf(w, `<div class="column is-full">
-                <div class="box">
-                    <h4 class="title is-4">%s</h4>
-                    <p class="subtitle is-6">Document: %s | Similarity: %.3f</p>
-                    <div class="content"><p>%s</p></div>
-                    <p class="is-size-7">Path: %s (Level %d)</p>
-                </div>
-            </div>`,
-				result["DocumentTitle"],
-				result["DocumentID"],
-				result["Similarity"],
-				result["Content"],
-				result["HeaderPath"],
-				result["Level"])
-		}
-		_, _ = fmt.Fprintf(w, `</div>`)
-	} else {
-		_, _ = fmt.Fprintf(w, `<p>No results found.</p>`)
-	}
-
-	_, _ = fmt.Fprintf(w, `</body></html>`)
-}
-
 func (s *Server) serveIngestHTML(w http.ResponseWriter, data any) {
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html>
@@ -357,8 +292,18 @@ func (s *Server) serveDocumentsHTML(w http.ResponseWriter, data any) {
 }
 
 func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
+	tags, categories, err := s.service.GetTagsAndCategories(r.Context())
+	if err != nil {
+		// Tag/category picker is best-effort UX. A failure here
+		// shouldn't block the form from rendering — the user can
+		// still type a query.
+		tags = nil
+		categories = nil
+	}
 	s.renderTemplate(w, "search.html", map[string]any{
-		"Title": "RAGabast - Search",
+		"Title":      "Search",
+		"Tags":       tags,
+		"Categories": categories,
 	})
 }
 
@@ -404,8 +349,20 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Perform search
-	results, err := s.service.Search(r.Context(), query, 5, service.SearchFilters{})
+	limit := 5
+	if raw := r.FormValue("top_k"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	filters := service.SearchFilters{
+		Tag:        r.FormValue("tag"),
+		Category:   r.FormValue("category"),
+		DocumentID: r.FormValue("document_id"),
+	}
+
+	results, err := s.service.Search(r.Context(), query, limit, filters)
 	if err != nil {
 		internalError(w, r, "search", err)
 		return
@@ -414,6 +371,7 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "search_results.html", map[string]any{
 		"Title":   "Search Results",
 		"Query":   query,
+		"Filters": filters,
 		"Results": results,
 	})
 }
