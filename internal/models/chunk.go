@@ -98,29 +98,6 @@ func (c *Chunk) GetFullPath() string {
 	return c.HeaderPath + " > " + c.Content
 }
 
-// HierarchicalInfo represents the hierarchical structure of document chunks.
-type HierarchicalInfo struct {
-	RootChunks  []string            `json:"root_chunks"`
-	ChildMap    map[string][]string `json:"child_map"`
-	LevelMap    map[int][]string    `json:"level_map"`
-	HeaderPaths map[string]string   `json:"header_paths"`
-}
-
-// TreeNode represents a node in the document tree structure.
-type TreeNode struct {
-	ChunkID  string      `json:"chunk_id"`
-	Content  string      `json:"content"`
-	Level    int         `json:"level"`
-	Children []*TreeNode `json:"children"`
-}
-
-// DocumentTree represents the complete tree structure of a document.
-type DocumentTree struct {
-	Root  *TreeNode            `json:"root"`
-	Nodes map[string]*TreeNode `json:"nodes"`
-	Level int                  `json:"level"`
-}
-
 // SearchResult represents a result from vector similarity search.
 type SearchResult struct {
 	ChunkID            string   `json:"chunk_id"`
