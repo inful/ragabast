@@ -23,7 +23,12 @@ Notes:
   `--server`, LM Studio, llama-stack, OpenRouter, and OpenAI itself.
 - The embeddings server (`ollama.base_url` / `ollama.embedding_model`) speaks
   the OpenAI Embeddings API. Works against Ollama 0.5+ (with the
-  `nomic-embed-text` image), vLLM, llama.cpp `--embedding`, LM Studio, and OpenAI.
+  `nomic-embed-text` image), vLLM, llama.cpp `--embedding`, LM Studio, OpenAI,
+  and Google's Generative AI API via its OpenAI-compat layer
+  (`https://generativelanguage.googleapis.com/v1beta/openai`, models
+  `text-embedding-005` / `gemini-embedding-001` / `embedding-001`). The
+  bearer-token auth flow is identical to OpenAI's, so `ollama.embedding_api_key`
+  just takes your `GEMINI_API_KEY`.
 - Use `ollama.api_key` as the default bearer token for both servers. Set
   `ollama.chat_api_key` and/or `ollama.embedding_api_key` (env:
   `OLLAMA_CHAT_API_KEY`, `OLLAMA_EMBEDDING_API_KEY`) when the chat and
@@ -38,7 +43,10 @@ Notes:
   disable truncation; the field is omitted from the request body when unset so
   older Ollama versions don't reject it. When set, the client logs a one-shot
   `DIMENSION MISMATCH` warning if the server returns vectors of a different
-  length than configured.
+  length than configured. **Not supported by Google Gemini** — the
+  OpenAI-compat layer silently ignores the field; if you set
+  `embedding_dimensions: N > 0` against Google you'll get a
+  `DIMENSION MISMATCH` warning on every request. Leave at 0.
 
 ## Usage
 
