@@ -99,3 +99,15 @@ paths:
   # *.html files to ship a custom template set without
   # rebuilding. The Docker image does not need this set.
   templates_dir: ""
+
+# Ragabast-specific presentation / linking knobs.
+ragabast:
+  # Base URL of the docbuilder instance that renders the
+  # ingested documents. When set, every search result and
+  # document info gets a synthetic `docbuilder_url` field
+  # computed as `<docbuilder_base_url>/<uid>` and surfaced via
+  # the search API, the documents API, the link-suggestions
+  # endpoint, the chat prompt, and the web UI's search results
+  # page. Empty (the default) keeps behavior unchanged — only
+  # the doc's own frontmatter `urls:` surface as links.
+  docbuilder_base_url: ""

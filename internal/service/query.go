@@ -71,7 +71,21 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters S
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}
+	s.enrichWithDocbuilderURLs(results)
 	return results, nil
+}
+
+// enrichWithDocbuilderURLs populates the DocbuilderURL field on
+// every result that has a non-empty UID. Results without a UID
+// (or with an empty configured base URL) are left untouched.
+// Safe to call multiple times — idempotent.
+func (s *Service) enrichWithDocbuilderURLs(results []models.SearchResult) {
+	if s.config.Ragabast.DocbuilderBaseURL == "" {
+		return
+	}
+	for i := range results {
+		results[i].DocbuilderURL = s.buildDocbuilderURL(results[i].UID)
+	}
 }
 
 // SearchByDocument searches within a specific document.

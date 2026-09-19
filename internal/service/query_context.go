@@ -128,8 +128,9 @@ func formatContextEntry(ctx context.Context, result models.SearchResult, present
 }
 
 // collectContextURLs returns the URLs for a single result, deduped,
-// with the document's declared URLs first and any URLs found inside
-// the chunk body appended.
+// with the document's declared URLs first, the synthetic
+// docbuilder permalink second, and any URLs found inside the
+// chunk body appended.
 func collectContextURLs(result models.SearchResult) []string {
 	seen := make(map[string]struct{}, len(result.DocumentURLs)+2)
 	urls := make([]string, 0, len(result.DocumentURLs)+2)
@@ -143,6 +144,17 @@ func collectContextURLs(result models.SearchResult) []string {
 		}
 		seen[url] = struct{}{}
 		urls = append(urls, url)
+	}
+	// The docbuilder permalink comes from system config
+	// (ragabast.docbuilder_base_url), not from the doc's
+	// frontmatter, so we put it after the user-declared URLs but
+	// before the chunk-body extras: it is reliable and stable
+	// in a way the body's bare URLs are not.
+	if result.DocbuilderURL != "" {
+		if _, ok := seen[result.DocbuilderURL]; !ok {
+			seen[result.DocbuilderURL] = struct{}{}
+			urls = append(urls, result.DocbuilderURL)
+		}
 	}
 	for _, url := range extractURLsFromText(result.Content) {
 		if _, ok := seen[url]; ok {

@@ -111,14 +111,18 @@ type HeaderInfo struct {
 
 // DocumentInfo represents basic information about a document.
 type DocumentInfo struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Fingerprint string    `json:"fingerprint"`
-	UID         string    `json:"uid"`
-	Tags        []string  `json:"tags"`
-	Categories  []string  `json:"categories"`
-	URLs        []string  `json:"urls"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	ChunkCount  int       `json:"chunk_count"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Fingerprint string   `json:"fingerprint"`
+	UID         string   `json:"uid"`
+	Tags        []string `json:"tags"`
+	Categories  []string `json:"categories"`
+	URLs        []string `json:"urls"`
+	// DocbuilderURL is the synthetic permalink derived from
+	// ragabast.docbuilder_base_url + UID, populated by the
+	// service layer. Empty when the base URL is not configured.
+	DocbuilderURL string    `json:"docbuilder_url,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	ChunkCount    int       `json:"chunk_count"`
 }

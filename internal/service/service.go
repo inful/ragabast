@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ragabast/internal/chunker"
 	"github.com/ragabast/internal/config"
@@ -21,6 +22,24 @@ type Service struct {
 	chunker   *chunker.Chunker
 	vectorOps *vector.VectorOperations
 	llmClient llmChatClient
+}
+
+// buildDocbuilderURL returns the synthetic permalink for a
+// document with the given UID, of the form `<base>/<uid>`.
+// Returns "" when ragabast.docbuilder_base_url is not configured
+// or when the document has no UID — either case means there is
+// nothing sensible to link to.
+//
+// Slash handling: the base URL is assumed to be well-formed;
+// trailing slashes on the base and leading slashes on the UID
+// are tolerated. The result always has exactly one slash
+// between base and UID.
+func (s *Service) buildDocbuilderURL(uid string) string {
+	base := strings.TrimRight(s.config.Ragabast.DocbuilderBaseURL, "/")
+	if base == "" || uid == "" {
+		return ""
+	}
+	return base + "/" + strings.TrimLeft(uid, "/")
 }
 
 // NewService creates a new service instance.

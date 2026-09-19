@@ -37,6 +37,16 @@ Notes:
 - Changing `embedding_model` (or its `EmbeddingDimension` in `vectordb:`) requires
   re-ingesting all documents: stop the server, `rm -rf data/vectors/`, and run
   `ragabast ingest` again.
+- Set `ragabast.docbuilder_base_url` in YAML (or
+  `RAGABAST_DOCBUILDER_BASE_URL`, e.g.
+  `https://docs.example.com`) to surface a synthetic
+  permalink for every search result. ragabast computes
+  `<base>/<uid>` from each document's UID frontmatter and
+  exposes it as `docbuilder_url` in API responses, the
+  link-suggestions endpoint, the web UI, and the chat prompt
+  so the LLM can cite a stable direct link. Empty by default,
+  which means only the doc's own frontmatter `urls:` surface as
+  links.
 - Set `ollama.embedding_dimensions` in YAML (or `OLLAMA_EMBEDDING_DIMENSIONS`)
   to request Matryoshka truncation from the embeddings server. Useful for
   `jina-embeddings-v5-text-small` (supported: 32, 64, 128, 256, 512, 768,

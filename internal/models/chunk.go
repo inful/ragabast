@@ -100,15 +100,22 @@ func (c *Chunk) GetFullPath() string {
 
 // SearchResult represents a result from vector similarity search.
 type SearchResult struct {
-	ChunkID            string   `json:"chunk_id"`
-	DocumentID         string   `json:"document_id"`
-	Content            string   `json:"content"`
-	HeaderPath         string   `json:"header_path,omitempty"`
-	Level              int      `json:"level"`
-	StartLine          int      `json:"start_line"`
-	EndLine            int      `json:"end_line"`
-	DocumentTitle      string   `json:"document_title"`
-	DocumentURLs       []string `json:"document_urls,omitempty"`
+	ChunkID       string   `json:"chunk_id"`
+	DocumentID    string   `json:"document_id"`
+	Content       string   `json:"content"`
+	HeaderPath    string   `json:"header_path,omitempty"`
+	Level         int      `json:"level"`
+	StartLine     int      `json:"start_line"`
+	EndLine       int      `json:"end_line"`
+	DocumentTitle string   `json:"document_title"`
+	DocumentURLs  []string `json:"document_urls,omitempty"`
+	// DocbuilderURL is a synthetic permalink of the form
+	// `<docbuilder_base_url>/<uid>` populated by the service
+	// layer when ragabast.docbuilder_base_url is configured. It
+	// is empty when the base URL is not configured or the doc
+	// has no UID, so existing callers that don't read this
+	// field are unaffected.
+	DocbuilderURL      string   `json:"docbuilder_url,omitempty"`
 	DocumentTags       []string `json:"document_tags,omitempty"`
 	DocumentCategories []string `json:"document_categories,omitempty"`
 	ParentID           string   `json:"parent_id,omitempty"`

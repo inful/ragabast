@@ -39,6 +39,23 @@ type Config struct {
 
 	// Paths configuration.
 	Paths PathsConfig `yaml:"paths"`
+
+	// Ragabast holds ragabast-specific presentation knobs.
+	Ragabast RagabastConfig `yaml:"ragabast"`
+}
+
+// RagabastConfig holds ragabast-specific presentation / linking
+// configuration that doesn't belong under one of the existing
+// provider- or storage-specific sections.
+type RagabastConfig struct {
+	// DocbuilderBaseURL is the root URL of the docbuilder
+	// instance that renders the ingested documents. When set,
+	// every search result and document info gets a synthetic
+	// `docbuilder_url` field computed as
+	// `<DocbuilderBaseURL>/<uid>`. Empty (the default) keeps
+	// behavior unchanged — only the doc's own frontmatter
+	// `urls:` surface as links.
+	DocbuilderBaseURL string `env:"RAGABAST_DOCBUILDER_BASE_URL" yaml:"docbuilder_base_url,omitempty"`
 }
 
 // OllamaConfig holds configuration for the embedding and chat-completions

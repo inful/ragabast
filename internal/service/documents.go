@@ -12,7 +12,19 @@ func (s *Service) ListDocuments(ctx context.Context) ([]models.DocumentInfo, err
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}
+	s.enrichDocInfos(docs)
 	return docs, nil
+}
+
+// enrichDocInfos populates the DocbuilderURL field on every
+// info whose UID is non-empty. Safe to call multiple times.
+func (s *Service) enrichDocInfos(docs []models.DocumentInfo) {
+	if s.config.Ragabast.DocbuilderBaseURL == "" {
+		return
+	}
+	for i := range docs {
+		docs[i].DocbuilderURL = s.buildDocbuilderURL(docs[i].UID)
+	}
 }
 
 // GetDocument retrieves a specific document.

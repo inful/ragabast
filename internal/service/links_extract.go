@@ -37,6 +37,14 @@ func extractURLs(results []models.SearchResult) []string {
 		for _, url := range result.DocumentURLs {
 			add(url)
 		}
+		// DocbuilderURL is a synthetic permalink (set by the
+		// service layer when ragabast.docbuilder_base_url is
+		// configured). It is intentionally kept separate from
+		// DocumentURLs so operators can tell which URLs came
+		// from frontmatter vs. which the system generated.
+		if result.DocbuilderURL != "" {
+			add(result.DocbuilderURL)
+		}
 		for _, url := range extractURLsFromText(result.Content) {
 			add(url)
 		}

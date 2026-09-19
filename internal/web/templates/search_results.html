@@ -53,10 +53,16 @@
             </div>
             <p class="is-size-7">
                 Path: <code>{{ .HeaderPath }}</code> (Level {{ .Level }})
+                {{ if or .DocbuilderURL .DocumentURLs }}
+                &middot;
+                {{ if .DocbuilderURL }}
+                <a href="{{ .DocbuilderURL }}" target="_blank" rel="noopener">direct link</a>
+                {{ end }}
                 {{ if .DocumentURLs }}
-                &middot; Links:
+                {{ if .DocbuilderURL }} &middot; {{ end }}Links:
                 {{ range .DocumentURLs }}
                 <a href="{{ . }}" target="_blank" rel="noopener">{{ . }}</a>
+                {{ end }}
                 {{ end }}
                 {{ end }}
             </p>
