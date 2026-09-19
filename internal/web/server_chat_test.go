@@ -75,7 +75,7 @@ func TestChatPage_RendersHTMXForm(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeChatService{answer: "ok"})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 
 	s.router.ServeHTTP(w, req)
@@ -91,7 +91,7 @@ func TestChatMessage_AppendsUserAndAssistant(t *testing.T) {
 	form := url.Values{}
 	form.Set("message", "<b>hi</b>")
 
-	req := httptest.NewRequest(http.MethodPost, "/chat/message", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/chat/message", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 
@@ -121,7 +121,7 @@ func TestChatMessage_ServiceErrorReturnsGeneric500(t *testing.T) {
 	form := url.Values{}
 	form.Set("message", "hello")
 
-	req := httptest.NewRequest(http.MethodPost, "/chat/message", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/chat/message", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 

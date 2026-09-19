@@ -84,7 +84,7 @@ func TestHandleSearchAPI_FiltersByMinScore(t *testing.T) {
 	s := NewServer(cfg, svc)
 
 	body := []byte(`{"query":"q","limit":5,"min_score":0.5}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/search", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/search", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -113,7 +113,7 @@ func TestHandleQueryAPI_PassesModelAndHistory(t *testing.T) {
 	s := NewServer(cfg, svc)
 
 	body := []byte(`{"query":"q","top_k":5,"include_hits":true}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/query", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/query", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
