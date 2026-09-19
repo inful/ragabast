@@ -1,0 +1,49 @@
+<!--
+    chat_message.html renders one round of a chat exchange. The
+    LLM reply is pre-rendered to safe HTML by the handler
+    (AnswerHTML); the markdown converter handles links, code
+    blocks, and inline markdown, and the sanitizer runs there
+    too. This template does NOT do any markdown rendering of
+    its own.
+
+    When the LLM retrieval returned sources, we render a
+    collapsible <details> block listing each source. The
+    DocbuilderURL field on each source (populated by the
+    service layer when ragabast.docbuilder_base_url is
+    configured) is used as the primary "direct link" entry;
+    when that field is empty, we fall back to the
+    document_id chip so the user can still see what was
+    cited.
+-->
+
+<div hx-swap-oob="delete" id="chat-messages-placeholder"></div>
+
+<div class="content">
+    <div class="box">
+        <p class="has-text-weight-semibold">You</p>
+        <pre class="chat-msg">{{ .User }}</pre>
+    </div>
+    <div class="box has-background-light">
+        <p class="has-text-weight-semibold">Assistant</p>
+        <div class="chat-msg content">{{ .AnswerHTML }}</div>
+    </div>
+</div>
+
+{{ if .Sources }}
+<details class="mt-2">
+    <summary>{{ len .Sources }} source{{ if ne (len .Sources) 1 }}s{{ end }}</summary>
+    <ol class="mt-2">
+        {{ range .Sources }}
+        <li>
+            {{ if .DocumentTitle }}{{ .DocumentTitle }}{{ else }}{{ .DocumentID }}{{ end }}
+            ({{ if .DocbuilderURL }}
+                <a href="{{ .DocbuilderURL }}" target="_blank" rel="noopener">direct link</a>
+            {{ else }}
+                <code>{{ .DocumentID }}</code>
+            {{ end }})
+            — similarity {{ printf "%.2f" .Similarity }}
+        </li>
+        {{ end }}
+    </ol>
+</details>
+{{ end }}

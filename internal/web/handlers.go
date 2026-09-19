@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
 )
 
@@ -59,14 +60,16 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 }
 
 // serveBasicHTML serves basic HTML when templates are not available.
-// search.html and search_results.html are intentionally NOT served
-// here: the in-tree templates/search.html + search_results.html are
-// the canonical forms (added in the same commit that wired up the
-// tag/category/document_id filter passthrough). Earlier Go-string
-// fallbacks for those two pages had a `[]models.SearchResult` type
-// assertion that panicked on every search request; routing them
-// back through a fallback would just bring the panic back, so they
-// are absent here on purpose.
+// search.html, search_results.html, and chat_message.html are
+// intentionally NOT served here: the in-tree templates/search.html,
+// templates/search_results.html, and templates/chat_message.html
+// are the canonical forms. Earlier Go-string fallbacks for
+// search had a `[]models.SearchResult` type assertion that panicked
+// on every search request; routing them back through a fallback
+// would just bring the panic back. chat_message.html also surfaced
+// no source documents at all (handleChatMessage discarded
+// QueryDebugInfo.Results), so we want the in-tree template there
+// too. These three are absent here on purpose.
 func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
@@ -74,8 +77,6 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 	switch templateName {
 	case "chat.html":
 		s.serveChatHTML(w, data)
-	case "chat_message.html":
-		s.serveChatMessageHTML(w, data)
 	case "ingest.html":
 		s.serveIngestHTML(w, data)
 	case "ingest_success.html":
@@ -178,28 +179,6 @@ func (s *Server) serveChatHTML(w http.ResponseWriter, data any) {
 	</script>
 </body>
 </html>`, data.(map[string]any)["Title"])
-}
-
-func (s *Server) serveChatMessageHTML(w http.ResponseWriter, data any) {
-	user := template.HTMLEscapeString(data.(map[string]any)["User"].(string))
-	answer, err := renderChatMarkdownToSafeHTML(data.(map[string]any)["Answer"].(string))
-	if err != nil {
-		answer = template.HTMLEscapeString(data.(map[string]any)["Answer"].(string))
-	}
-
-	// Remove placeholder if this is the first message.
-	_, _ = fmt.Fprint(w, `<div hx-swap-oob="delete" id="chat-messages-placeholder"></div>`)
-
-	_, _ = fmt.Fprintf(w, `<div class="content">
-	<div class="box">
-		<p class="has-text-weight-semibold">You</p>
-		<pre class="chat-msg">%s</pre>
-	</div>
-	<div class="box has-background-light">
-		<p class="has-text-weight-semibold">Assistant</p>
-		<div class="chat-msg content">%s</div>
-	</div>
-</div>`, user, answer)
 }
 
 func (s *Server) serveIngestHTML(w http.ResponseWriter, data any) {
@@ -325,15 +304,37 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, _, err := s.service.QueryDebugWithOptions(r.Context(), msg, chatTopK(r), service.LLMOptions{})
+	answer, info, err := s.service.QueryDebugWithOptions(r.Context(), msg, chatTopK(r), service.LLMOptions{})
 	if err != nil {
 		internalError(w, r, "query", err)
 		return
 	}
 
+	// Render the LLM reply to safe HTML once at the handler
+	// boundary so the template can drop it in via {{ .AnswerHTML }}
+	// without doing markdown conversion inline. Markdown-to-HTML
+	// is already sanitized by renderChatMarkdownToSafeHTML.
+	answerHTML, mdErr := renderChatMarkdownToSafeHTML(answer)
+	if mdErr != nil {
+		// Fall back to escaped plaintext so the user still sees
+		// the assistant's reply if markdown rendering blows up.
+		answerHTML = template.HTMLEscapeString(answer)
+	}
+
+	var sources []models.SearchResult
+	if info != nil {
+		sources = info.Results
+	}
+
+	// answerHTML is trusted — markdown was already rendered
+	// through bluemonday's sanitizer above. Wrap as
+	// template.HTML so html/template doesn't double-escape the
+	// tags when we drop it into the page.
 	s.renderTemplate(w, "chat_message.html", map[string]any{
-		"User":   msg,
-		"Answer": answer,
+		"User":       msg,
+		"Answer":     answer,
+		"AnswerHTML": template.HTML(answerHTML),
+		"Sources":    sources,
 	})
 }
 
