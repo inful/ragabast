@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -41,7 +40,6 @@ func TestDoctor_ConfigValidAndDimensionsMatch(t *testing.T) {
 
 	cfg := doctorConfig(
 		"nomic-embed-text:v1.5",
-		768,
 		filepath.Join(tmp, "data", "vectors"),
 		filepath.Join(tmp, "data"),
 	)
@@ -67,7 +65,6 @@ func TestDoctor_DimensionMismatchWarns(t *testing.T) {
 
 	cfg := doctorConfig(
 		"gemini-embedding-2",
-		768, // WRONG: gemini-embedding-2 is 3072-dim
 		filepath.Join(tmp, "data", "vectors"),
 		filepath.Join(tmp, "data"),
 	)
@@ -102,7 +99,6 @@ func TestDoctor_UnknownModelIsAcknowledged(t *testing.T) {
 
 	cfg := doctorConfig(
 		"my-custom-finetune-v3",
-		768,
 		filepath.Join(tmp, "data", "vectors"),
 		filepath.Join(tmp, "data"),
 	)
@@ -162,9 +158,122 @@ paths:
 	})
 }
 
+// TestDoctor_StoreStateMismatchWarns pins the case doctor was
+// missing before: config says embedding_dimension 768 but the
+// store already contains vectors of length 3072 (stale data
+// from a previous model, or a partial reset, or an upgrade
+// from a pre-7c9d6d8 ragabast that didn't fail-fast at ingest).
+// This is the case where `ragabast doctor` should be the
+// authoritative answer even when the config-level model/dim
+// table check passes — config and store can disagree.
+//
+// The warning text depends on which chromem-go error path the
+// store falls into. A uniform-length-but-wrong-dim store
+// surfaces the actual stored dimension; a mixed-dim store
+// (the realistic post-upgrade scenario) trips chromem-go at
+// the similarity step before we can read the length. Either
+// path must produce a warning with the recovery command.
+func TestDoctor_StoreStateMismatchWarns(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	persistDir := filepath.Join(tmp, "data", "vectors")
+	dataDir := filepath.Join(tmp, "data")
+
+	// Seed the store with 3072-dim chunks to simulate stale
+	// data from a previous model. We bypass the
+	// checkEmbeddingDimension guard by constructing a VectorDB
+	// whose configured dim matches what we're about to write.
+	seedDB, err := newSeedVectorDB(persistDir, 3072)
+	require.NoError(t, err)
+	seedChunk := &chunkForSeed{ID: "c1", DocumentID: "d1"}
+	seedVec := make([]float32, 3072)
+	require.NoError(t, seedDB.addChunkForSeed(seedChunk, seedVec))
+
+	// Config says 768. Doctor must catch the mismatch.
+	cfg := doctorConfig("nomic-embed-text:v1.5", persistDir, dataDir)
+	cfgPath := writeDoctorConfig(t, cfg)
+
+	out := captureLogs(t, func() {
+		cmd := DoctorCmd{ConfigOpts: ConfigOpts{Config: cfgPath}}
+		require.NoError(t, cmd.Run(nil),
+			"store-state mismatch is a warning, not a hard error")
+	})
+
+	require.Contains(t, out, "vector reset --force",
+		"doctor must point at the recovery command")
+	// Either of these two strings indicates the mismatch was
+	// detected. The exact wording depends on whether the store
+	// is uniform-length-but-wrong (3072 surfaces cleanly) or
+	// mixed-dim (chromem-go bails out at the similarity step
+	// and we report that error). Both are valid detections.
+	detectedAsMismatch := strings.Contains(out, "3072") ||
+		strings.Contains(out, "vectors must have the same length")
+	require.True(t, detectedAsMismatch,
+		"doctor must surface either the actual stored dim (3072) or the chromem-go corruption signal; got: %s", out)
+}
+
+// TestDoctor_StoreStateMatchOk pins the happy path: when the
+// store actually contains 768-dim vectors and the config says
+// 768, the new store-state check passes.
+func TestDoctor_StoreStateMatchOk(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	persistDir := filepath.Join(tmp, "data", "vectors")
+	dataDir := filepath.Join(tmp, "data")
+
+	// Seed with 768-dim chunks.
+	seedDB, err := newSeedVectorDB(persistDir, 768)
+	require.NoError(t, err)
+	seedVec := make([]float32, 768)
+	require.NoError(t, seedDB.addChunkForSeed(&chunkForSeed{ID: "c1", DocumentID: "d1"}, seedVec))
+
+	cfg := doctorConfig("nomic-embed-text:v1.5", persistDir, dataDir)
+	cfgPath := writeDoctorConfig(t, cfg)
+
+	out := captureLogs(t, func() {
+		cmd := DoctorCmd{ConfigOpts: ConfigOpts{Config: cfgPath}}
+		require.NoError(t, cmd.Run(nil))
+	})
+
+	require.Contains(t, out, "stored embedding dimension (768) matches",
+		"doctor must explicitly affirm the store-state match; got: %s", out)
+}
+
+// TestDoctor_EmptyStorePasses pins that an empty (or missing)
+// store does not produce a warning — there's nothing to verify
+// against, and the next ingest will fill the store at the
+// configured dim (which the prior model/dim table check already
+// covers).
+func TestDoctor_EmptyStorePasses(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+
+	persistDir := filepath.Join(tmp, "data", "vectors") // not created
+	dataDir := filepath.Join(tmp, "data")
+
+	cfg := doctorConfig("nomic-embed-text:v1.5", persistDir, dataDir)
+	cfgPath := writeDoctorConfig(t, cfg)
+
+	out := captureLogs(t, func() {
+		cmd := DoctorCmd{ConfigOpts: ConfigOpts{Config: cfgPath}}
+		require.NoError(t, cmd.Run(nil))
+	})
+
+	require.Contains(t, out, "empty",
+		"doctor must explicitly note the empty-store state; got: %s", out)
+}
+
 // doctorConfig builds a minimal valid YAML config string with the
 // given embedding model name, dimension, and persistence paths.
-func doctorConfig(embeddingModel string, embeddingDim int, persistenceDir, dataDir string) string {
+// The embedding dimension is hardcoded to 768 — every existing
+// doctor test calls doctorConfig with 768 because that's the
+// "expected" configured dim, and any test that needs a
+// different dim goes through writeDoctorConfig directly. Keeping
+// the parameter would just be dead flexibility; the unparam
+// linter agrees.
+func doctorConfig(embeddingModel, persistenceDir, dataDir string) string {
 	return `ollama:
   base_url: http://127.0.0.1:8000/v1
   embedding_model: ` + embeddingModel + `
@@ -174,7 +283,7 @@ func doctorConfig(embeddingModel string, embeddingDim int, persistenceDir, dataD
 vectordb:
   persistence_dir: ` + persistenceDir + `
   collection_name: test
-  embedding_dimension: ` + strconv.Itoa(embeddingDim) + `
+  embedding_dimension: 768
 server:
   address: 0.0.0.0
   port: 8080
@@ -195,4 +304,42 @@ func writeDoctorConfig(t *testing.T, content string) string {
 	path := filepath.Join(t.TempDir(), "config.yml")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 	return path
+}
+
+// chunkForSeed is a small struct that satisfies the parts of
+// *models.Chunk the vector DB needs (ID, DocumentID, etc.) for
+// seeding without coupling the doctor tests to the full models
+// package surface.
+type chunkForSeed struct {
+	ID         string
+	DocumentID string
+}
+
+// newSeedVectorDB opens (or creates) a VectorDB at the given
+// path with the given embedding dimension and seeds one chunk.
+// It is used by the doctor tests to construct the "store
+// already has data" scenario without going through the full
+// service layer.
+func newSeedVectorDB(persistDir string, dim int) (*seedVectorDB, error) {
+	return newSeedVectorDBAt(persistDir, dim)
+}
+
+// addChunkForSeed injects a chunk with the given embedding into
+// the seed store. The seed chunk is a minimal models.Chunk
+// shape; the doc-level metadata fields the seed-store uses are
+// populated with safe defaults.
+func (db *seedVectorDB) addChunkForSeed(chunk *chunkForSeed, embedding []float32) error {
+	full := &modelsChunkForSeed{
+		ID:                  chunk.ID,
+		DocumentID:          chunk.DocumentID,
+		DocumentTitle:       "T",
+		HeaderPath:          "",
+		Level:               1,
+		StartLine:           1,
+		EndLine:             1,
+		Content:             "seed",
+		DocumentFingerprint: "seed",
+		UID:                 chunk.DocumentID,
+	}
+	return db.addChunk(full, embedding)
 }

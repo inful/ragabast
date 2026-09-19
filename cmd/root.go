@@ -127,7 +127,15 @@ func (c *DoctorCmd) Run(ctx *kong.Context) error {
 	// we don't pay the file-system cost when check (1) failed.
 	c.checkPersistenceDirReachable(cfg)
 
-	// Check 4: optional live server check.
+	// Check 4: actual store contents. The earlier model/dim
+	// table check answers "does the configured model match the
+	// configured dimension?"; this one answers "do the vectors
+	// that are already on disk match the configured dimension?"
+	// — the latter catches stale data from a previous model
+	// even when the current config is internally consistent.
+	c.checkStoreEmbeddingDimension(cfg)
+
+	// Check 5: optional live server check.
 	if c.CheckServer {
 		c.checkEmbeddingsServer(cfg)
 	} else {
@@ -137,6 +145,65 @@ func (c *DoctorCmd) Run(ctx *kong.Context) error {
 	log.Println()
 	log.Println("If a check failed or warned, see README + plans/ingestion.md for the fix path.")
 	return nil
+}
+
+// checkStoreEmbeddingDimension opens the configured vector
+// store, samples one stored embedding, and compares its actual
+// length to vectordb.embedding_dimension. This is the check
+// that catches "the config is internally consistent but the
+// on-disk store is stale from a previous model".
+//
+// Three outcomes:
+//   - Empty store: nothing to verify, print a "store is empty"
+//     note (the prior model/dim table check still covers the
+//     ingest path).
+//   - Actual length matches configured length: success.
+//   - Actual length does NOT match: WARNING naming both
+//     numbers and the recovery command (vector reset --force).
+func (c *DoctorCmd) checkStoreEmbeddingDimension(cfg *config.Config) {
+	dir := cfg.VectorDB.PersistenceDir
+	if dir == "" {
+		// checkPersistenceDirReachable already warned about
+		// empty path; nothing more to add.
+		return
+	}
+	db, err := vector.NewVectorDB(
+		cfg.VectorDB.CollectionName,
+		cfg.VectorDB.EmbeddingDimension,
+		dir,
+	)
+	if err != nil {
+		log.Printf("⚠ could not open vector store at %s: %v\n", dir, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	actual, found, err := db.SampleEmbeddingLength(ctx)
+	if err != nil {
+		// Mixed-dim or other chromem-go failure: the underlying
+		// error wraps "vectors must have the same length".
+		// Surface it with the reset fix; that's exactly the case
+		// the user needs to know about.
+		log.Printf("⚠ store sample query failed: %v. "+
+			"This usually means the store holds vectors of mixed dimensions. "+
+			"Recover with `ragabast vector reset --force` followed by `ragabast ingest`.\n",
+			err)
+		return
+	}
+	if !found {
+		log.Println("─ store is empty: nothing to verify yet (the model/dim table check covers ingest)")
+		return
+	}
+	if actual == cfg.VectorDB.EmbeddingDimension {
+		log.Printf("✓ stored embedding dimension (%d) matches vectordb.embedding_dimension\n",
+			actual)
+		return
+	}
+	log.Printf("⚠ stored embedding dimension is %d but vectordb.embedding_dimension is %d. "+
+		"The store holds vectors from a previous model. Run `ragabast vector reset --force` "+
+		"then `ragabast ingest` to rebuild it from source documents.\n",
+		actual, cfg.VectorDB.EmbeddingDimension)
 }
 
 // checkEmbeddingDimensionMatch looks up the configured embedding

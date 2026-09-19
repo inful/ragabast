@@ -370,6 +370,50 @@ func (db *VectorDB) Count() (int, error) {
 	return db.collection.Count(), nil
 }
 
+// SampleEmbeddingLength returns the length of the first stored
+// embedding in the collection, plus a "found" flag that is true
+// only when the collection has at least one chunk. Empty stores
+// return (0, false, nil); callers can distinguish "no data yet"
+// from "data exists, length N".
+//
+// Used by `ragabast doctor` to detect a stale-data mismatch:
+// the operator's config says the collection is configured for
+// vectordb.embedding_dimension N, but the on-disk store still
+// holds vectors of length M from a previous model. Comparing
+// the two is the only way to catch this — the model/dim table
+// check (cmd/doctor_models.go) only catches config-level
+// mismatches.
+func (db *VectorDB) SampleEmbeddingLength(ctx context.Context) (int, bool, error) {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	count := db.collection.Count()
+	if count == 0 {
+		return 0, false, nil
+	}
+
+	// Use a dummy embedding of the configured dim to pull back
+	// one document. This will FAIL (chromem-go returns
+	// "vectors must have the same length") if the collection has
+	// mixed dims internally; that's actually the case we want to
+	// surface to the user, not paper over. The error message at
+	// the higher level points at vector reset --force.
+	dummyEmbedding := make([]float32, db.embeddingDimension)
+	options := chromem.QueryOptions{
+		QueryEmbedding: dummyEmbedding,
+		NResults:       1,
+	}
+
+	results, err := db.collection.QueryWithOptions(ctx, options)
+	if err != nil {
+		return 0, false, fmt.Errorf("sample query failed: %w", err)
+	}
+	if len(results) == 0 {
+		return 0, false, nil
+	}
+	return len(results[0].Embedding), true, nil
+}
+
 // splitMetadataList moved to metadata.go.
 
 // DocumentFingerprint returns the stored fingerprint for a document if it exists.
