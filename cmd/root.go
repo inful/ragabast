@@ -228,7 +228,7 @@ func (c *StatusCmd) Run(ctx *kong.Context) error {
 
 	log.Printf("✓ Total chunks: %d\n", stats["total_chunks"])
 	log.Printf("✓ Embedding model: %s\n", stats["embedding_model"])
-	log.Printf("✓ Generation model: %s\n", stats["generation_model"])
+	log.Printf("✓ Chat model: %s\n", stats["chat_model"])
 	log.Printf("✓ Collection: %s\n", stats["collection_name"])
 
 	if c.Verbose {
