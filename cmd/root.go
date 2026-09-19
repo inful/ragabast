@@ -17,6 +17,13 @@ import (
 
 // CLI represents the main command-line interface structure.
 type CLI struct {
+	// VersionFlag wires `--version` and reads the value from
+	// the `version` var in kong.Vars (set by main.go from the
+	// build-time -ldflags injection). When the user passes
+	// `--version`, kong prints the version and exits 0 before
+	// any subcommand is dispatched.
+	Version kong.VersionFlag
+
 	Ingest IngestCmd     `cmd:"" help:"Ingest and process docbuilder documents"`
 	Query  QueryCmd      `cmd:"" help:"Query the vector database with natural language"`
 	Serve  ServeCmd      `cmd:"" help:"Start the web server"`
