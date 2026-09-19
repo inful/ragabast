@@ -234,9 +234,7 @@ func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, optio
 }
 
 func (c *OpenAIEmbeddingClient) applyAuth(req *http.Request) {
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	applyAuth(req, c.apiKey)
 }
 
 // buildEmbeddingBody marshals the request, merging OpenAIEmbeddingRequest.Options

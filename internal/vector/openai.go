@@ -224,9 +224,7 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 }
 
 func (c *OpenAILLMClient) applyAuth(req *http.Request) {
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
+	applyAuth(req, c.apiKey)
 }
 
 // buildChatBody marshals the request, then merges OpenAIChatRequest.Options
