@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/ragabast/internal/parser"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,33 +21,6 @@ type frontmatterSuggestRequestBody struct {
 type frontmatterSuggestResponseBody struct {
 	Frontmatter map[string]any `json:"frontmatter"`
 	Applied     map[string]any `json:"applied"`
-}
-
-// splitDocbuilderFrontmatter pulls the YAML frontmatter (between
-// the outer --- markers) out of a docbuilder document, returning
-// the trimmed frontmatter bytes, the trimmed markdown body, and a
-// bool that says whether the document actually had a frontmatter
-// block. Returns ok=false (and the original content as markdown)
-// when the document is not wrapped in --- markers.
-//
-// Kept here rather than in the parser package because it is only
-// used to seed the frontmatter-suggest endpoint. The parser has
-// its own extractFrontmatter for the ingest path; we deliberately
-// don't share because they have slightly different tolerance
-// (this one trims more aggressively, the parser one validates).
-func splitDocbuilderFrontmatter(raw string) (frontmatterYAML []byte, markdown string, ok bool) {
-	content := strings.TrimSpace(raw)
-	if !strings.HasPrefix(content, "---\n") {
-		return nil, content, false
-	}
-	rest := content[len("---\n"):]
-	before, after, ok0 := strings.Cut(rest, "\n---\n")
-	if !ok0 {
-		return nil, content, false
-	}
-	fm := strings.TrimSpace(before)
-	md := strings.TrimSpace(after)
-	return []byte(fm), md, true
 }
 
 // registerFrontmatterOperation wires POST /api/frontmatter/suggest.
@@ -72,7 +46,7 @@ func registerFrontmatterOperation(api huma.API, svc serviceAPI) {
 			return nil, huma.Error400BadRequest("allowed_tags is required")
 		}
 
-		fmBytes, markdown, hasFM := splitDocbuilderFrontmatter(content)
+		fmBytes, markdown, hasFM := parser.SplitDocbuilderFrontmatter([]byte(content))
 		existing := map[string]any{}
 		if hasFM && len(fmBytes) > 0 {
 			if err := yaml.Unmarshal(fmBytes, &existing); err != nil {
@@ -93,7 +67,7 @@ func registerFrontmatterOperation(api huma.API, svc serviceAPI) {
 			mergedAllowedTags = uniqueAppend(mergedAllowedTags, existingTags)
 		}
 
-		sug, err := svc.SuggestFrontmatter(ctx, markdown, existing, mergedAllowedCategories, mergedAllowedTags)
+		sug, err := svc.SuggestFrontmatter(ctx, string(markdown), existing, mergedAllowedCategories, mergedAllowedTags)
 		if err != nil {
 			preview := input.Body.Content
 			if len(preview) > 80 {
