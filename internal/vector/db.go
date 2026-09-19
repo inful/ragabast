@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/philippgille/chromem-go"
 	"github.com/ragabast/internal/models"
@@ -80,47 +79,11 @@ func (db *VectorDB) AddChunk(ctx context.Context, chunk *models.Chunk, embedding
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	metadata := map[string]string{
-		"document_id":    chunk.DocumentID,
-		"chunk_id":       chunk.ID,
-		"header_path":    chunk.HeaderPath,
-		"level":          strconv.Itoa(chunk.Level),
-		"start_line":     strconv.Itoa(chunk.StartLine),
-		"end_line":       strconv.Itoa(chunk.EndLine),
-		"document_title": chunk.DocumentTitle,
-	}
-	if len(chunk.DocumentURLs) > 0 {
-		metadata["document_urls"] = strings.Join(chunk.DocumentURLs, "\n")
-	}
-	if len(chunk.DocumentTags) > 0 {
-		metadata["document_tags"] = strings.Join(chunk.DocumentTags, "\n")
-	}
-	if len(chunk.DocumentCategories) > 0 {
-		metadata["document_categories"] = strings.Join(chunk.DocumentCategories, "\n")
-	}
-	if !chunk.DocumentCreatedAt.IsZero() {
-		metadata["document_created_at"] = chunk.DocumentCreatedAt.UTC().Format(time.RFC3339)
-	}
-	if !chunk.DocumentUpdatedAt.IsZero() {
-		metadata["document_updated_at"] = chunk.DocumentUpdatedAt.UTC().Format(time.RFC3339)
-	}
-
-	// Add optional metadata if present
-	if chunk.Fingerprint != "" {
-		metadata["fingerprint"] = chunk.Fingerprint
-	}
-	if chunk.UID != "" {
-		metadata["uid"] = chunk.UID
-	}
-	if chunk.ParentID != "" {
-		metadata["parent_id"] = chunk.ParentID
-	}
-
 	doc := chromem.Document{
 		ID:        chunk.ID,
 		Content:   chunk.Content,
 		Embedding: embedding,
-		Metadata:  metadata,
+		Metadata:  chunkToMetadata(chunk.ID, chunk),
 	}
 
 	err := db.collection.AddDocument(ctx, doc)
@@ -154,46 +117,11 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 			return fmt.Errorf("chunk %d: %w", i, models.ErrEmbeddingFailed)
 		}
 
-		metadata := map[string]string{
-			"document_id":    chunk.DocumentID,
-			"chunk_id":       chunk.ID,
-			"header_path":    chunk.HeaderPath,
-			"level":          strconv.Itoa(chunk.Level),
-			"start_line":     strconv.Itoa(chunk.StartLine),
-			"end_line":       strconv.Itoa(chunk.EndLine),
-			"document_title": chunk.DocumentTitle,
-		}
-		if len(chunk.DocumentURLs) > 0 {
-			metadata["document_urls"] = strings.Join(chunk.DocumentURLs, "\n")
-		}
-		if len(chunk.DocumentTags) > 0 {
-			metadata["document_tags"] = strings.Join(chunk.DocumentTags, "\n")
-		}
-		if len(chunk.DocumentCategories) > 0 {
-			metadata["document_categories"] = strings.Join(chunk.DocumentCategories, "\n")
-		}
-		if !chunk.DocumentCreatedAt.IsZero() {
-			metadata["document_created_at"] = chunk.DocumentCreatedAt.UTC().Format(time.RFC3339)
-		}
-		if !chunk.DocumentUpdatedAt.IsZero() {
-			metadata["document_updated_at"] = chunk.DocumentUpdatedAt.UTC().Format(time.RFC3339)
-		}
-
-		if chunk.Fingerprint != "" {
-			metadata["fingerprint"] = chunk.Fingerprint
-		}
-		if chunk.UID != "" {
-			metadata["uid"] = chunk.UID
-		}
-		if chunk.ParentID != "" {
-			metadata["parent_id"] = chunk.ParentID
-		}
-
 		docs[i] = chromem.Document{
 			ID:        chunk.ID,
 			Content:   chunk.Content,
 			Embedding: embeddings[i],
-			Metadata:  metadata,
+			Metadata:  chunkToMetadata(chunk.ID, chunk),
 		}
 	}
 
@@ -297,37 +225,7 @@ func (db *VectorDB) GetChunk(ctx context.Context, chunkID string) (*models.Chunk
 		return nil, fmt.Errorf("failed to get chunk: %w", err)
 	}
 
-	level := 0
-	startLine := 0
-	endLine := 0
-
-	if val, ok := doc.Metadata["level"]; ok {
-		level, _ = strconv.Atoi(val)
-	}
-	if val, ok := doc.Metadata["start_line"]; ok {
-		startLine, _ = strconv.Atoi(val)
-	}
-	if val, ok := doc.Metadata["end_line"]; ok {
-		endLine, _ = strconv.Atoi(val)
-	}
-
-	return &models.Chunk{
-		ID:                 doc.Metadata["chunk_id"],
-		DocumentID:         doc.Metadata["document_id"],
-		Content:            doc.Content,
-		HeaderPath:         doc.Metadata["header_path"],
-		Level:              level,
-		StartLine:          startLine,
-		EndLine:            endLine,
-		DocumentTitle:      doc.Metadata["document_title"],
-		Fingerprint:        doc.Metadata["fingerprint"],
-		UID:                doc.Metadata["uid"],
-		DocumentURLs:       splitNonEmptyLines(doc.Metadata["document_urls"]),
-		DocumentTags:       splitNonEmptyLines(doc.Metadata["document_tags"]),
-		DocumentCategories: splitNonEmptyLines(doc.Metadata["document_categories"]),
-		DocumentCreatedAt:  parseRFC3339(doc.Metadata["document_created_at"]),
-		DocumentUpdatedAt:  parseRFC3339(doc.Metadata["document_updated_at"]),
-	}, nil
+	return metadataToChunk(doc.Metadata, doc.Content), nil
 }
 
 // GetChunksByDocument retrieves all chunks for a specific document.
@@ -357,37 +255,7 @@ func (db *VectorDB) GetChunksByDocument(ctx context.Context, documentID string) 
 
 	chunks := make([]*models.Chunk, len(results))
 	for i, result := range results {
-		level := 0
-		startLine := 0
-		endLine := 0
-
-		if val, ok := result.Metadata["level"]; ok {
-			level, _ = strconv.Atoi(val)
-		}
-		if val, ok := result.Metadata["start_line"]; ok {
-			startLine, _ = strconv.Atoi(val)
-		}
-		if val, ok := result.Metadata["end_line"]; ok {
-			endLine, _ = strconv.Atoi(val)
-		}
-
-		chunks[i] = &models.Chunk{
-			ID:                 result.Metadata["chunk_id"],
-			DocumentID:         result.Metadata["document_id"],
-			Content:            result.Content,
-			HeaderPath:         result.Metadata["header_path"],
-			Level:              level,
-			StartLine:          startLine,
-			EndLine:            endLine,
-			DocumentTitle:      result.Metadata["document_title"],
-			Fingerprint:        result.Metadata["fingerprint"],
-			UID:                result.Metadata["uid"],
-			DocumentURLs:       splitNonEmptyLines(result.Metadata["document_urls"]),
-			DocumentTags:       splitNonEmptyLines(result.Metadata["document_tags"]),
-			DocumentCategories: splitNonEmptyLines(result.Metadata["document_categories"]),
-			DocumentCreatedAt:  parseRFC3339(result.Metadata["document_created_at"]),
-			DocumentUpdatedAt:  parseRFC3339(result.Metadata["document_updated_at"]),
-		}
+		chunks[i] = metadataToChunk(result.Metadata, result.Content)
 	}
 
 	return chunks, nil
@@ -448,27 +316,7 @@ func (db *VectorDB) Count() (int, error) {
 	return db.collection.Count(), nil
 }
 
-// splitMetadataList splits a metadata value that was stored as
-// newline-joined items into a slice with empty entries filtered out.
-// Returns nil for empty input so the SearchResult keeps the
-// `omitempty` JSON contract.
-func splitMetadataList(raw string) []string {
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, "\n")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		out = append(out, p)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
+// splitMetadataList moved to metadata.go.
 
 // DocumentFingerprint returns the stored fingerprint for a document if it exists.
 func (db *VectorDB) DocumentFingerprint(ctx context.Context, documentID string) (string, bool, error) {
@@ -620,32 +468,7 @@ func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentIn
 	return docs, nil
 }
 
-func splitNonEmptyLines(s string) []string {
-	if s == "" {
-		return []string{}
-	}
-
-	parts := strings.Split(s, "\n")
-	filtered := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		filtered = append(filtered, p)
-	}
-	return filtered
-}
-
-func parseRFC3339(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	parsed, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed
-}
+// splitNonEmptyLines and parseRFC3339 moved to metadata.go.
 
 // Close cleans up resources.
 func (db *VectorDB) Close() error {
