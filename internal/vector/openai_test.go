@@ -69,7 +69,7 @@ func TestOpenAILLMClient_Chat_SendsTemperature(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second, false)
 
 	ctx := context.Background()
 	out, err := client.Chat(ctx, []OpenAIMessage{{Role: "user", Content: "hello"}}, map[string]any{"temperature": 0.12})
@@ -109,7 +109,7 @@ func TestOpenAILLMClient_Chat_TemperatureNotDuplicated(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second, false)
 	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "hi"}}, map[string]any{
 		"temperature": 0.5,
 		"top_p":       0.9,
@@ -138,7 +138,7 @@ func TestOpenAILLMClient_Chat_TemperatureCoercesFromInt(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second, false)
 	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "hi"}}, map[string]any{
 		"temperature": 1, // int, not float
 	})
@@ -164,7 +164,7 @@ func TestOpenAILLMClient_Chat_SendsAuthHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "secret-key", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "secret-key", 5*time.Second, false)
 
 	ctx := context.Background()
 	out, err := client.Chat(ctx, []OpenAIMessage{{Role: "user", Content: "hi"}}, nil)
@@ -196,7 +196,7 @@ func TestOpenAILLMClient_ChatWithSystem_PrefixesSystemMessage(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second, false)
 	ctx := context.Background()
 	out, err := client.ChatWithSystem(ctx, "you are helpful", "hello", nil)
 	require.NoError(t, err)
@@ -223,7 +223,7 @@ func TestOpenAILLMClient_Chat_EmptyChoicesReturnsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second, false)
 	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "x"}}, nil)
 	require.ErrorIs(t, err, models.ErrGenerationFailed)
 }
@@ -237,7 +237,7 @@ func TestOpenAILLMClient_Chat_EmptyContentReturnsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "some-model", "", 5*time.Second, false)
 	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "x"}}, nil)
 	require.ErrorIs(t, err, models.ErrGenerationFailed)
 }
@@ -245,7 +245,7 @@ func TestOpenAILLMClient_Chat_EmptyContentReturnsError(t *testing.T) {
 func TestOpenAILLMClient_Chat_EmptyMessagesReturnsError(t *testing.T) {
 	t.Parallel()
 
-	client := NewOpenAILLMClientWithOptions("http://example.invalid", "m", "", time.Second)
+	client := NewOpenAILLMClientWithOptions("http://example.invalid", "m", "", time.Second, false)
 	_, err := client.Chat(context.Background(), nil, nil)
 	require.ErrorIs(t, err, models.ErrGenerationFailed)
 }
@@ -259,7 +259,7 @@ func TestOpenAILLMClient_Chat_ServerError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second, false)
 	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "x"}}, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "500")
@@ -274,7 +274,7 @@ func TestOpenAILLMClient_Chat_ApiErrorInBody(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL, "m", "", 5*time.Second, false)
 	_, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "x"}}, nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "context length exceeded")

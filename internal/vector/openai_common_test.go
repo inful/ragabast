@@ -56,7 +56,7 @@ func TestOpenAILLMClient_AcceptsBaseURLWithV1Suffix(t *testing.T) {
 
 	// Re-add /v1 to whatever the test server gave us. If the helper doesn't
 	// strip it, the client would post to /v1/v1/chat/completions.
-	client := NewOpenAILLMClientWithOptions(srv.URL+"/v1", "m", "", 5*time.Second)
+	client := NewOpenAILLMClientWithOptions(srv.URL+"/v1", "m", "", 5*time.Second, false)
 	out, err := client.Chat(context.Background(), []OpenAIMessage{{Role: "user", Content: "x"}}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "ok", out)
