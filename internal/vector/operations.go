@@ -38,13 +38,6 @@ func (vo *VectorOperations) SetSearchIndex(idx *SearchIndex) {
 	vo.searchIndex = idx
 }
 
-// SearchIndex returns the wired keyword index, or nil when
-// hybrid search is not enabled. The HTTP layer uses this to
-// decide which search paths to expose.
-func (vo *VectorOperations) SearchIndex() *SearchIndex {
-	return vo.searchIndex
-}
-
 // IngestDocument processes all chunks of a document.
 func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Document) error {
 	if doc == nil {
