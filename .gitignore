@@ -45,3 +45,21 @@ data/vectors
 .tokensave
 tmp/
 **/data/vectors/
+
+# Agent / harness instruction files. These are operator-local
+# guidance for Claude / Gemini / Copilot / opencode / mise and have
+# nothing to do with the ragabast build; keeping them out of the
+# repo means each contributor's preferred tooling does not leak
+# into the codebase.
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.github/copilot-instructions.md
+opencode.json
+mise.toml
+
+# Sample / scratch data dropped under data/documents/ while
+# debugging. Anything in data/ is operator-local by convention;
+# only data/vectors/ is consumed at runtime (and that path is
+# git-ignored above).
+data/documents/
