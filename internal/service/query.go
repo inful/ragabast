@@ -143,6 +143,17 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 		return "", nil, fmt.Errorf("search failed: %w", err)
 	}
 
+	// Populate DocbuilderURL on every result so the chat handler's
+	// InlineSourceLinks post-processor can convert the LLM's
+	// [src:N] markers into clickable links. Without this call,
+	// the post-processor falls into the "no URL → bare title text"
+	// branch and the user sees source titles concatenated with no
+	// links — the bug reported on 2026-09-20. Mirrors what
+	// Service.Search does at line 74; QueryDebugWithOptions uses
+	// vectorOps.Search directly so it has to do the enrichment
+	// itself.
+	s.enrichWithDocbuilderURLs(results)
+
 	if len(results) == 0 {
 		return "No relevant information found.", nil, nil
 	}
