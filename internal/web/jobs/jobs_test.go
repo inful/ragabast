@@ -79,52 +79,51 @@ func TestQueue_SubmitAndProcess(t *testing.T) {
 }
 
 // TestQueue_PersistsAcrossRestart is the headline
-// persistence test: submit a job, simulate a crash by
-// constructing a fresh Queue against the same directory,
+// persistence test: simulate a process crash mid-ingest
+// (worker claimed the job, renamed pending → processing,
+// then died), restart the queue against the same dir,
 // verify the unfinished job is re-enqueued and processed.
+//
+// We simulate the crash by manually moving the job file
+// from .json to .processing.json with status=processing —
+// the exact on-disk shape the worker would have left behind
+// had it died after the atomic claim. This avoids a race
+// against a real worker's completion timing that made the
+// earlier implementation flaky under -race.
 func TestQueue_PersistsAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
 
-	// First "process" — submit but never let a worker run.
-	// We do this by submitting, then immediately stopping
-	// the queue (which closes pending). The job file remains
-	// on disk in "pending" status.
+	// First "process" — create the queue, submit one job,
+	// then simulate the crash BEFORE starting workers.
+	// Without workers running, the job file sits at
+	// <id>.json with status=pending. We then move it to
+	// <id>.processing.json with status=processing — the
+	// state a worker would leave behind if it died after
+	// claiming the job but before completing it.
 	q1, err := New(dir, 1<<20, 2)
 	require.NoError(t, err)
-	svc1 := &fakeService{
-		// Delay must be set BEFORE Start so the worker
-		// reads the value from a synchronized point. Setting
-		// it later (after Submit) is a data race that the
-		// -race detector flags.
-		delay: 500 * time.Millisecond,
-	}
-	q1.Start(svc1, nil)
 
 	j, err := q1.Submit("durable-content", "192.0.2.1:1234")
 	require.NoError(t, err)
 
-	// Stop while a worker is mid-call. The atomic rename
-	// pending → processing has moved the file; if we then
-	// stop, recover() sees the .processing.json and
-	// resets it to pending.
-	q1.Stop()
+	// Read the pending file, rewrite with status=processing
+	// to simulate "worker died mid-flight", then move it to
+	// the processing path. recoverUnfinished scans both
+	// paths and re-enqueues whichever jobs are not
+	// completed/failed.
+	srcPath := q1.path(j.ID)
+	dstPath := q1.processingPath(j.ID)
+	pending, gerr := q1.Get(j.ID)
+	require.NoError(t, gerr)
+	pending.Status = StatusProcessing
+	now := time.Now().UTC()
+	pending.StartedAt = &now
+	require.NoError(t, os.Rename(srcPath, dstPath))
+	require.NoError(t, q1.writeAtPath(pending, dstPath))
 
-	// Give the worker time to move the file to .processing
-	// (or not — depends on goroutine scheduling). Either
-	// way, the file is NOT in .completed state.
-	require.Eventually(t, func() bool {
-		entries, _ := os.ReadDir(dir)
-		for _, e := range entries {
-			name := e.Name()
-			if name == j.ID+".json" || name == j.ID+".processing.json" {
-				return true
-			}
-		}
-		return false
-	}, 2*time.Second, 10*time.Millisecond,
-		"job file must exist on disk after first process stops")
-
-	// Second "process" — fresh Queue, same directory.
+	// Second "process" — fresh Queue, same directory. Recovery
+	// must pick up the processing file, reset it to pending,
+	// and feed it to a worker.
 	svc2 := &fakeService{}
 	q2, err := New(dir, 1<<20, 2)
 	require.NoError(t, err)
