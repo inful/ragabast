@@ -48,9 +48,14 @@ func internalError(w http.ResponseWriter, r *http.Request, op string, err error)
 func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	router := chi.NewRouter()
 
+	// securityHeadersMiddleware runs first so the defense
+	// headers land on every response — including error
+	// responses from middleware deeper in the chain.
+	router.Use(securityHeadersMiddleware)
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RealIP)
+	router.Use(maxBytesReaderMiddleware)
 	router.Use(middleware.Timeout(60 * time.Second))
 
 	if cfg.Server.EnableCORS {
@@ -131,9 +136,23 @@ func (s *Server) registerRoutes() {
 func (s *Server) Start() error {
 	addr := s.config.Server.ListenAddr()
 
+	// ReadTimeout/WriteTimeout/IdleTimeout are read from the
+	// config but were previously never applied to the
+	// http.Server literal — slowloris and slow-body attacks
+	// could pin connections open indefinitely. The chi
+	// middleware.Timeout cancels the handler context but NOT
+	// the underlying connection; only the http.Server timeouts
+	// do that.
+	//
+	// Defaults: ReadTimeout=15s, WriteTimeout=15s,
+	// IdleTimeout=120s (the last is fixed, not from config,
+	// because no historical config knob exists for it).
 	s.server = &http.Server{
-		Addr:    addr,
-		Handler: s.router,
+		Addr:         addr,
+		Handler:      s.router,
+		ReadTimeout:  s.config.Server.ReadTimeout,
+		WriteTimeout: s.config.Server.WriteTimeout,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
