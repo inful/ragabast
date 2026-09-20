@@ -49,7 +49,7 @@
                 &middot; Similarity: <strong>{{ printf "%.3f" .Similarity }}</strong>
             </p>
             <div class="content">
-                <p>{{ .Content }}</p>
+                {{ .ContentHTML }}
             </div>
             <p class="is-size-7">
                 Path: <code>{{ .HeaderPath }}</code> (Level {{ .Level }})

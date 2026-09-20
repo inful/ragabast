@@ -1,6 +1,7 @@
 package models
 
 import (
+	"html/template"
 	"slices"
 	"time"
 )
@@ -100,15 +101,22 @@ func (c *Chunk) GetFullPath() string {
 
 // SearchResult represents a result from vector similarity search.
 type SearchResult struct {
-	ChunkID       string   `json:"chunk_id"`
-	DocumentID    string   `json:"document_id"`
-	Content       string   `json:"content"`
-	HeaderPath    string   `json:"header_path,omitempty"`
-	Level         int      `json:"level"`
-	StartLine     int      `json:"start_line"`
-	EndLine       int      `json:"end_line"`
-	DocumentTitle string   `json:"document_title"`
-	DocumentURLs  []string `json:"document_urls,omitempty"`
+	ChunkID    string `json:"chunk_id"`
+	DocumentID string `json:"document_id"`
+	Content    string `json:"content"`
+	// ContentHTML is the same Content rendered as safe HTML
+	// for use in web templates. Populated by the handler layer
+	// (so the service layer stays free of template-package
+	// imports) and only meaningful when the result is being
+	// rendered, not when it's being passed to the LLM. Empty
+	// when the result came from a non-rendering caller.
+	ContentHTML   template.HTML `json:"-"`
+	HeaderPath    string        `json:"header_path,omitempty"`
+	Level         int           `json:"level"`
+	StartLine     int           `json:"start_line"`
+	EndLine       int           `json:"end_line"`
+	DocumentTitle string        `json:"document_title"`
+	DocumentURLs  []string      `json:"document_urls,omitempty"`
 	// DocbuilderURL is a synthetic permalink of the form
 	// `<docbuilder_base_url>/<uid>` populated by the service
 	// layer when ragabast.docbuilder_base_url is configured. It

@@ -423,11 +423,29 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pre-render each result's Content as sanitized HTML so
+	// the template can drop it straight into the page instead
+	// of dumping raw markdown. Without this, headings,
+	// bold/italic, inline code, code fences, and lists all
+	// show up as literal punctuation in the result cards.
+	// Wraps as template.HTML because the markdown has already
+	// been through bluemonday's UGCPolicy sanitizer below.
+	rendered := make([]models.SearchResult, len(results))
+	for i, r := range results {
+		rendered[i] = r
+		html, mdErr := renderChatMarkdownToSafeHTML(r.Content)
+		if mdErr != nil {
+			rendered[i].ContentHTML = template.HTML(template.HTMLEscapeString(r.Content))
+		} else {
+			rendered[i].ContentHTML = template.HTML(html)
+		}
+	}
+
 	s.renderTemplate(w, "search_results.html", map[string]any{
 		"Title":   "Search Results",
 		"Query":   query,
 		"Filters": filters,
-		"Results": results,
+		"Results": rendered,
 	})
 }
 
@@ -481,4 +499,39 @@ func (s *Server) handleStatic(w http.ResponseWriter, _ *http.Request) {
 	// For now, serve a basic response
 	w.Header().Set("Content-Type", "text/plain")
 	_, _ = w.Write([]byte("Static assets would be served here"))
+}
+
+// handleDebugChatSearch is a temporary diagnostic endpoint
+// (gated by ragabast.enable_debug_endpoints: true) that runs
+// the EXACT same Search the chat handler uses and returns
+// each result's populated fields as JSON. Used to diagnose
+// the 2026-09-20 chat-link bug without re-reading rendered
+// HTML. Will be removed once the user-visible fix is in
+// production and verified.
+func (s *Server) handleDebugChatSearch(w http.ResponseWriter, r *http.Request) {
+	if !s.config.Ragabast.EnableDebugEndpoints {
+		http.NotFound(w, r)
+		return
+	}
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		q = "docbuilder"
+	}
+	results, err := s.service.Search(r.Context(), q, 5, service.SearchFilters{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = fmt.Fprintf(w, `{"config":{"docbuilder_base_url":%q,"templates_dir":%q},"results":[`,
+		s.config.Ragabast.DocbuilderBaseURL, s.config.Paths.TemplatesDir)
+	for i, res := range results {
+		if i > 0 {
+			_, _ = fmt.Fprint(w, ",")
+		}
+		_, _ = fmt.Fprintf(w,
+			`{"i":%d,"document_title":%q,"content":%q}`,
+			i, res.DocumentTitle, res.Content)
+	}
+	_, _ = fmt.Fprint(w, "]}")
 }
