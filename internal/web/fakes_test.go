@@ -142,6 +142,8 @@ type fakeService struct {
 	ingestErr         error
 	tags              []string
 	categories        []string
+	documents         []models.DocumentInfo
+	listErr           error
 }
 
 func (f *fakeService) CheckHealth(context.Context) (bool, error) {
@@ -174,6 +176,12 @@ func (f *fakeService) Search(_ context.Context, query string, _ int, filters ser
 }
 
 func (f *fakeService) ListDocuments(context.Context) ([]models.DocumentInfo, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	if f.documents != nil {
+		return f.documents, nil
+	}
 	return []models.DocumentInfo{}, nil
 }
 

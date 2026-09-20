@@ -26,6 +26,11 @@ type Server struct {
 	router    *chi.Mux
 	server    *http.Server
 	templates *template.Template
+	// fallback holds pre-parsed html/template instances for
+	// every page the embedded template set does not cover.
+	// serveBasicHTML uses them so the fallback path stays
+	// safe-by-default (every {{ }} substitution is escaped).
+	fallback *fallbackTemplates
 }
 
 // internalError logs the underlying error and returns a generic 500 to the
@@ -96,6 +101,7 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 		service:   svc,
 		router:    router,
 		templates: templates,
+		fallback:  newFallbackTemplates(),
 	}
 
 	s.registerRoutes()

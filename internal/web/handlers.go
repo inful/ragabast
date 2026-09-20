@@ -70,204 +70,146 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 // no source documents at all (handleChatMessage discarded
 // QueryDebugInfo.Results), so we want the in-tree template there
 // too. These three are absent here on purpose.
+//
+// All four pages that DO fall back here (chat.html, ingest.html,
+// ingest_success.html, documents.html) are rendered through
+// html/template instances pre-parsed in newFallbackTemplates
+// (see fallback_renderers.go). That guarantees every {{ }}
+// substitution is contextually escaped — fixing the previous
+// stored-XSS bug where fmt.Fprintf %s/%v interpolated
+// attacker-controlled strings (doc.Title from the H1 header,
+// doc.Tags from YAML frontmatter) directly into the response.
 func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
-	// Simple HTML templates
 	switch templateName {
 	case "chat.html":
-		s.serveChatHTML(w, data)
+		s.renderFallback(w, "chat.html", chatFallbackData{Title: titleFromMap(data, "RAGabast - Chat")})
 	case "ingest.html":
-		s.serveIngestHTML(w, data)
+		s.renderFallback(w, "ingest.html", ingestFallbackData{Title: titleFromMap(data, "RAGabast - Ingest")})
 	case "ingest_success.html":
-		s.serveIngestSuccessHTML(w, data)
+		s.renderFallback(w, "ingest_success.html", ingestSuccessFallbackData{
+			Title:      titleFromMap(data, "Ingest Successful"),
+			DocumentID: stringFromMap(data, "DocumentID"),
+			Chunks:     intFromMap(data, "Chunks"),
+			Tags:       tagsFromMap(data),
+		})
 	case "documents.html":
-		s.serveDocumentsHTML(w, data)
+		s.renderFallback(w, "documents.html", documentsFallbackData{
+			Title:     titleFromMap(data, "RAGabast - Documents"),
+			Documents: docsRowsFromMap(data),
+		})
 	default:
 		http.NotFound(w, nil)
 	}
 }
 
-func (s *Server) serveChatHTML(w http.ResponseWriter, data any) {
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-	<title>%s</title>
-	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-	<script src="https://unpkg.com/htmx.org@1.9.10"></script>
-	<style>
-		.chat-log { max-height: 60vh; overflow-y: auto; }
-		.chat-msg { max-width: 100%%; overflow-wrap: anywhere; word-break: break-word; }
-		pre.chat-msg { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; overflow-x: hidden; }
-		.chat-msg a { overflow-wrap: anywhere; word-break: break-word; }
-		.chat-msg pre, .chat-msg code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-		.htmx-indicator { display: none; }
-		.htmx-request.htmx-indicator { display: inline-block; }
-	</style>
-</head>
-<body class="container mt-4">
-	<h1 class="title">Chat</h1>
-	<p class="subtitle">Ask questions against the ingested documents.</p>
-
-	<div id="chat-messages" class="box chat-log">
-		<div class="content" id="chat-messages-placeholder">
-			<p class="has-text-grey">No messages yet.</p>
-		</div>
-	</div>
-
-	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input" hx-on::before-request="document.getElementById('chat-send')?.classList.add('is-loading')" hx-on::after-request="this.reset(); document.getElementById('chat-send')?.classList.remove('is-loading'); document.getElementById('chat-input')?.focus()" hx-on::response-error="document.getElementById('chat-send')?.classList.remove('is-loading')">
-		<div class="field">
-			<label class="label">Message</label>
-			<div class="control">
-				<textarea id="chat-input" class="textarea" name="message" rows="2" placeholder="Ask a question..." required></textarea>
-			</div>
-		</div>
-		<div class="field is-grouped">
-			<div class="control">
-				<button id="chat-send" class="button is-warning" type="submit">Send</button>
-			</div>
-			<div class="control htmx-indicator" id="chat-indicator">
-				<span class="tag is-light">Thinking…</span>
-			</div>
-		</div>
-	</form>
-
-	<script>
-		(function () {
-			function scrollChatToBottom() {
-				var el = document.getElementById('chat-messages');
-				if (!el) return;
-				el.scrollTop = el.scrollHeight;
-			}
-
-			function submitChatForm() {
-				var form = document.getElementById('chat-form');
-				if (!form) return;
-				if (typeof form.requestSubmit === 'function') {
-					form.requestSubmit();
-					return;
-				}
-				form.submit();
-			}
-
-			var input = document.getElementById('chat-input');
-			if (input) {
-				input.addEventListener('keydown', function (e) {
-					// Cmd+Enter (macOS) or Ctrl+Enter (Windows/Linux) submits.
-					if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-						e.preventDefault();
-						submitChatForm();
-					}
-					// Esc clears the input.
-					if (e.key === 'Escape') {
-						e.preventDefault();
-						input.value = '';
-						input.focus();
-					}
-				});
-			}
-
-			document.body.addEventListener('htmx:afterSwap', function (evt) {
-				if (evt.target && evt.target.id === 'chat-messages') {
-					scrollChatToBottom();
-				}
-			});
-
-			// If the page loads with existing content (future), keep it pinned.
-			scrollChatToBottom();
-		})();
-	</script>
-</body>
-</html>`, data.(map[string]any)["Title"])
-}
-
-func (s *Server) serveIngestHTML(w http.ResponseWriter, data any) {
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>%s</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-</head>
-<body class="container mt-4">
-    <h1 class="title">Ingest Document</h1>
-    <form method="post" action="/ingest">
-        <div class="field">
-            <label class="label">Docbuilder Content</label>
-            <div class="control">
-                <textarea class="textarea" name="content" rows="15" placeholder="Paste your docbuilder markdown content here..." required></textarea>
-            </div>
-            <p class="help">Include YAML frontmatter with fingerprint, uid, tags, categories, and URLs</p>
-        </div>
-        <div class="field">
-            <div class="control">
-                <button class="button is-primary" type="submit">Ingest</button>
-                <a href="/" class="button is-light">Back</a>
-            </div>
-        </div>
-    </form>
-</body>
-</html>`, data.(map[string]any)["Title"])
-}
-
-func (s *Server) serveIngestSuccessHTML(w http.ResponseWriter, data any) {
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>%s</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-</head>
-<body class="container mt-4">
-    <div class="notification is-success">
-        <h1 class="title">Document Ingested Successfully!</h1>
-        <p><strong>Document ID:</strong> %s</p>
-        <p><strong>Chunks Created:</strong> %d</p>
-        <p><strong>Tags:</strong> %v</p>
-    </div>
-    <div class="buttons">
-        <a href="/ingest" class="button is-primary">Ingest Another</a>
-        <a href="/search" class="button is-info">Search</a>
-        <a href="/" class="button is-light">Home</a>
-    </div>
-</body>
-</html>`, data.(map[string]any)["Title"],
-		data.(map[string]any)["DocumentID"],
-		data.(map[string]any)["Chunks"],
-		data.(map[string]any)["Tags"])
-}
-
-func (s *Server) serveDocumentsHTML(w http.ResponseWriter, data any) {
-	docs := data.(map[string]any)["Documents"]
-	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>%s</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-</head>
-<body class="container mt-4">
-    <h1 class="title">Ingested Documents</h1>
-    <a href="/" class="button is-light mb-4">Back</a>
-`, data.(map[string]any)["Title"])
-
-	if docs != nil && len(docs.([]any)) > 0 {
-		_, _ = fmt.Fprintf(w, `<table class="table is-fullwidth is-striped">
-            <thead><tr><th>Title</th><th>ID</th><th>Tags</th><th>Category</th><th>Chunks</th></tr></thead>
-            <tbody>`)
-		for _, d := range docs.([]any) {
-			doc := d.(map[string]any)
-			_, _ = fmt.Fprintf(w, `<tr>
-                <td>%s</td>
-                <td><code>%s</code></td>
-                <td>%v</td>
-                <td>%s</td>
-                <td>%d</td>
-            </tr>`, doc["Title"], doc["ID"], doc["Tags"], doc["Category"], doc["Chunks"])
-		}
-		_, _ = fmt.Fprintf(w, `</tbody></table>`)
-	} else {
-		_, _ = fmt.Fprintf(w, `<p>No documents ingested yet.</p>`)
+// titleFromMap extracts a string "Title" field from the
+// map[string]any shape that renderTemplate passes through. Falls
+// back to the supplied default so a missing field does not
+// render as "<no value>".
+func titleFromMap(data any, fallback string) string {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return fallback
 	}
+	if t, ok := m["Title"].(string); ok && t != "" {
+		return t
+	}
+	return fallback
+}
 
-	_, _ = fmt.Fprintf(w, `</body></html>`)
+// stringFromMap is the generic-string accessor used by fields
+// whose absence should silently render as empty rather than panic.
+func stringFromMap(data any, key string) string {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if s, ok := m[key].(string); ok {
+		return s
+	}
+	return ""
+}
+
+// intFromMap is the int accessor. Returns 0 on type mismatch;
+// the {{ .Chunks }} substitution prints 0 in that case which
+// matches the existing fmt.Fprintf behavior.
+func intFromMap(data any, key string) int {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	default:
+		return 0
+	}
+}
+
+// tagsFromMap extracts a []string from the data map, regardless
+// of whether the handler stored it as []string or []any. The
+// legacy handlers stored []any because the data map flowed from
+// an untyped literal.
+func tagsFromMap(data any) []string {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return nil
+	}
+	switch v := m["Tags"].(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// docsRowsFromMap adapts the []models.DocumentInfo slice that
+// handleDocumentsPage passes through into the strongly-typed
+// documentsFallbackRow slice that the fallback template expects.
+// Every field that flows into the page is HTML-escaped by
+// html/template at render time; this helper only changes types.
+func docsRowsFromMap(data any) []documentsFallbackRow {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := m["Documents"].([]models.DocumentInfo)
+	if !ok {
+		return nil
+	}
+	out := make([]documentsFallbackRow, 0, len(raw))
+	for _, item := range raw {
+		out = append(out, documentsFallbackRow{
+			Title:    item.Title,
+			ID:       item.ID,
+			Tags:     item.Tags,
+			Category: firstOrEmpty(item.Categories),
+			Chunks:   item.ChunkCount,
+		})
+	}
+	return out
+}
+
+// firstOrEmpty returns the first element of a slice or "" if the
+// slice is empty. Used for the Category column which historically
+// showed only the first category in the table.
+func firstOrEmpty(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
 }
 
 func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
