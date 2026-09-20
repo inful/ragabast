@@ -378,6 +378,22 @@ func (c *Config) SaveConfig(path string) error {
 
 // ApplyEnvOverrides applies environment variable overrides to config fields.
 func (c *Config) ApplyEnvOverrides() {
+	// Ragabast config.
+	if v := os.Getenv("RAGABAST_DOCBUILDER_BASE_URL"); v != "" {
+		c.Ragabast.DocbuilderBaseURL = v
+	}
+	if v := os.Getenv("RAGABAST_LOG_CHAT_REQUESTS"); v != "" {
+		// Accept the common truthy spellings so an operator
+		// doesn't need to know our exact format. Empty string
+		// is treated as false (the default).
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "t", "yes", "y", "on":
+			c.Ragabast.LogChatRequests = true
+		case "0", "false", "f", "no", "n", "off":
+			c.Ragabast.LogChatRequests = false
+		}
+	}
+
 	// Ollama config.
 	if url := os.Getenv("OLLAMA_BASE_URL"); url != "" {
 		c.Ollama.BaseURL = url

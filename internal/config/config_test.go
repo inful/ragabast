@@ -151,3 +151,30 @@ func TestLoad_AppliesPerServerAPIKeyEnvOverrides(t *testing.T) {
 	require.Equal(t, "chat-key", loaded.Ollama.EffectiveChatAPIKey())
 	require.Equal(t, "embed-key", loaded.Ollama.EffectiveEmbeddingAPIKey())
 }
+
+func TestLoad_AppliesLogChatRequestsEnvOverride(t *testing.T) {
+	t.Setenv("RAGABAST_LOG_CHAT_REQUESTS", "true")
+	loaded, err := Load("")
+	require.NoError(t, err)
+	require.True(t, loaded.Ragabast.LogChatRequests,
+		"RAGABAST_LOG_CHAT_REQUESTS=true must enable LogChatRequests")
+
+	t.Setenv("RAGABAST_LOG_CHAT_REQUESTS", "false")
+	loaded, err = Load("")
+	require.NoError(t, err)
+	require.False(t, loaded.Ragabast.LogChatRequests,
+		"RAGABAST_LOG_CHAT_REQUESTS=false must disable LogChatRequests")
+
+	t.Setenv("RAGABAST_LOG_CHAT_REQUESTS", "yes")
+	loaded, err = Load("")
+	require.NoError(t, err)
+	require.True(t, loaded.Ragabast.LogChatRequests,
+		"truthy spellings ('yes') must enable LogChatRequests")
+}
+
+func TestLoad_AppliesDocbuilderBaseURLEnvOverride(t *testing.T) {
+	t.Setenv("RAGABAST_DOCBUILDER_BASE_URL", "https://docs.example.com")
+	loaded, err := Load("")
+	require.NoError(t, err)
+	require.Equal(t, "https://docs.example.com", loaded.Ragabast.DocbuilderBaseURL)
+}
