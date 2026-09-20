@@ -189,16 +189,8 @@ func (s *Service) Query(ctx context.Context, query string, limit int) (string, e
 	return response, err
 }
 
-// QueryDebug performs a search and generates a response, returning debug information
-// about the retrieved chunks and constructed prompt.
-//
-// Deprecated: see Service.Query.
-func (s *Service) QueryDebug(ctx context.Context, query string, limit int) (string, *QueryDebugInfo, error) {
-	warnDeprecated("QueryDebug")
-	return s.QueryDebugWithOptions(ctx, query, limit, LLMOptions{})
-}
-
-// QueryDebugWithOptions is like QueryDebug but allows controlling LLM generation options.
+// QueryDebugWithOptions performs a search and generates a response, returning
+// debug information about the retrieved chunks and constructed prompt.
 //
 // Deprecated: see Service.Query.
 func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts LLMOptions) (string, *QueryDebugInfo, error) {

@@ -125,7 +125,7 @@ graph TB
   | `IngestDocument(ctx, content) (*models.Document, error)` | Raw markdown string. |
   | `Search(ctx, query, limit, filters)` | **Find-docs entry point (v0.3.0).** Pure semantic ranking via the embedding store. Kept for callers that depend on v0.3.0 semantics; new callers should use `HybridSearch`. |
   | `HybridSearch(ctx, query, limit, filters, mode)` | **Find-docs entry point (v0.4.0+).** Runs keyword, semantic, or hybrid (RRF) per the `mode` parameter. Filters apply to BOTH rankings before fusion. The HTTP API defaults to `hybrid`. |
-  | `Query`, `QueryDebug`, `QueryDebugWithOptions` | Chat-mode RAG. Soft-deprecated: prefer `Search` for retrieval-only callers. A one-shot warning is logged per process to nudge migrations. |
+  | `Query`, `QueryDebugWithOptions` | Chat-mode RAG. Soft-deprecated: prefer `Search` for retrieval-only callers. A one-shot warning is logged per process to nudge migrations. |
   | `SuggestFrontmatter(ctx, doc)` | LLM-assisted `description`/`categories`/`tags`/`custom_tags` suggestion; parser tolerates unstructured LLM output via `constructJSONFromText`. |
   | `SuggestLinks(ctx, query)` | Returns link URLs extracted from the top retrieved chunks. |
   | `GetNormalizedTags`, `GetNormalizedCategories`, `GetTagsAndCategories` | Catalog lookups over the vector store metadata. |
