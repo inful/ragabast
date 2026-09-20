@@ -52,6 +52,13 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// headers land on every response — including error
 	// responses from middleware deeper in the chain.
 	router.Use(securityHeadersMiddleware)
+	// redactAccessLogMiddleware MUST run before
+	// middleware.Logger so chi sees the rewritten URL when
+	// it formats the access line. The middleware mutates
+	// r.URL.RawQuery in place (replacing values for known
+	// sensitive keys with "[REDACTED]") so the operator
+	// query/messages/text fields never land in the log.
+	router.Use(redactAccessLogMiddleware)
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RealIP)

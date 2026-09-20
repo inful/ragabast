@@ -394,6 +394,24 @@ func resolvePath(path string) string {
 }
 
 // SaveConfig saves the configuration to a YAML file.
+//
+// Permission: the file is written with mode 0o600 (owner
+// read/write only). config.yml may carry bearer tokens
+// (server.auth_token) and LLM API keys (ollama.api_key);
+// the default umask on Linux is 022 which would otherwise
+// produce a world-readable file. SaveConfig overrides the
+// umask explicitly so operators do not have to remember to
+// chmod after generating the config.
+//
+// On overwrite (the file already exists), SaveConfig first
+// chmods the existing file to 0o600 before truncating it.
+// os.WriteFile alone would NOT change permissions on an
+// existing file; a fresh write with mode 0o600 only applies
+// when the file is being created.
+//
+// The directory is still created with 0o755 (readable to
+// all) so a Docker-style bind mount can read config files
+// the operator placed there; the file itself is owner-only.
 func (c *Config) SaveConfig(path string) error {
 	// Ensure directory exists.
 	dir := filepath.Dir(path)
@@ -401,12 +419,24 @@ func (c *Config) SaveConfig(path string) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
+	// Force 0o600 on any existing file before we overwrite
+	// it. Otherwise the new WriteFile below would inherit
+	// whatever mode the existing file had — and the
+	// `config init --force` overwrite path is exactly the
+	// time operators are most likely to carry tokens in
+	// the file.
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return fmt.Errorf("failed to chmod existing config: %w", err)
+		}
+	}
+
 	data, err := yaml.Marshal(c)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
