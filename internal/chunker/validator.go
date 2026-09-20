@@ -129,18 +129,6 @@ func ExtractHeaderHierarchy(headerPath string) []string {
 	return parts
 }
 
-// GetChunkLevelFromHeader determines the chunk level based on header prefix.
-func GetChunkLevelFromHeader(header string) int {
-	// H1 = level 1, H2 = level 2
-	if strings.HasPrefix(header, "# ") {
-		return 1
-	}
-	if strings.HasPrefix(header, "## ") {
-		return 2
-	}
-	return 0 // No header or inline content
-}
-
 // NormalizeChunkContent normalizes chunk content for consistent processing.
 func NormalizeChunkContent(content string) string {
 	content = SanitizeContent(content)
