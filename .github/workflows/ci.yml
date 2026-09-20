@@ -37,11 +37,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           # Bind tightly to whatever go.mod says, so govulncheck
-          # scans the same stdlib we develop against. Using a
-          # bare "1.25" string left setup-go free to install
-          # the latest patch, which drifted into Go 1.26
-          # territory and tripped a wave of stdlib CVEs
-          # (GO-2026-4600..4603 etc.) we have no control over.
+          # scans the same stdlib we develop against. go.mod's
+          # Go directive should track the latest stable Go
+          # patch; new stdlib CVEs will fail CI until the
+          # patch is bumped. That's the intended behaviour —
+          # the alternative is ignoring real stdlib vulns that
+          # we DO call (e.g. http.Server.ListenAndServe for
+          # crypto/tls, html/template.Execute for template
+          # handling).
           go-version-file: go.mod
           cache: true
 
