@@ -96,14 +96,33 @@ Every other route requires `Authorization: Bearer <token>` when
 
 ### Rate-limited routes
 
-The LLM-backed endpoints share a per-client-IP token bucket. Health
-checks, catalog reads, ingest, and HTML page renders are NOT throttled:
+The LLM-backed and ingest endpoints share a per-client-IP token
+bucket. Health checks, catalog reads, and HTML page renders are NOT
+throttled:
 
 - `POST /api/query`, `/api/search`, `/api/link-suggestions`, `/api/frontmatter/suggest`
 - `POST /chat/message`, `POST /search`
+- `POST /api/ingest`, `/api/ingest/raw`, `/api/ingest/file`, `POST /ingest`
 
 `429 Too Many Requests` is returned with a `Retry-After` header when the
 bucket is empty.
+
+### Async ingest queue (audit log)
+
+`POST /api/ingest/async` accepts a document and returns `202
+Accepted` immediately; a bounded worker pool drains the queue in
+the background. Every state transition is logged:
+
+```
+ingest job event=ingest.job.started job_id=… remote_addr=… bytes=…
+ingest job event=ingest.job.completed job_id=… document_id=… chunks=…
+ingest job event=ingest.job.failed job_id=… error=…
+```
+
+Jobs persist to `<async_ingest_queue_dir>/<job_id>.json` (mode
+`0700`); a restart during a long import resumes from where the
+process died. The in-memory channel is a transient cache; the
+on-disk file is the source of truth.
 
 ## HTTP hardening shipped by default
 

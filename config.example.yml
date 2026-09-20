@@ -94,9 +94,8 @@ server:
   # and delete documents. Env: SERVER_AUTH_TOKEN.
   auth_token: ""
   # Per-client-IP token-bucket rate applied to the LLM-backed
-  # endpoints (/api/query, /api/search, /api/link-suggestions,
-  # /api/frontmatter/suggest, /chat/message, /search). 0
-  # disables the limiter (the local-dev default).
+  # and ingest endpoints. 0 disables the limiter (the
+  # local-dev default).
   # Env: SERVER_RATE_LIMIT_PER_MINUTE.
   rate_limit_per_minute: 0
   # Maximum burst (immediate requests before the per-minute rate
@@ -104,6 +103,26 @@ server:
   # tight enough that a hostile scripted client cannot burn
   # upstream tokens. Env: SERVER_RATE_LIMIT_BURST.
   rate_limit_burst: 5
+  # Per-document size cap for both the sync and async ingest
+  # paths. The 10 MiB request-body limit caps the whole
+  # request, but a single ingest request is one document —
+  # the smaller per-document cap protects the chunker and
+  # embedding model from being pinned by one giant input.
+  # Env: SERVER_MAX_INGEST_DOCUMENT_BYTES.
+  max_ingest_document_bytes: 1048576
+  # On-disk directory for the async ingest queue (see
+  # /api/ingest/async). Empty disables async ingest — the
+  # endpoint returns 503 and the sync POST /api/ingest path
+  # remains available. The directory is created with mode
+  # 0700 at server start; each job file is 0600.
+  # Env: SERVER_ASYNC_INGEST_QUEUE_DIR.
+  async_ingest_queue_dir: data/jobs
+  # Worker-pool concurrency for the async ingest queue.
+  # 0 falls back to 1. Default 5 — matches the historical
+  # IngestLimiter concurrency; raise it to match the
+  # embeddings server's request parallelism.
+  # Env: SERVER_ASYNC_INGEST_WORKERS.
+  async_ingest_workers: 5
   read_timeout: 15s
   write_timeout: 15s
 

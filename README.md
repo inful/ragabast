@@ -138,9 +138,11 @@ Env: `SERVER_CORS_ORIGINS` (comma-separated).
 ### Rate limiting (H-4)
 
 The LLM-backed endpoints (`/api/query`, `/api/search`, `/api/link-suggestions`,
-`/api/frontmatter/suggest`, `/chat/message`, `/search`) share a per-client-IP
-token-bucket limiter. The bucket refills continuously; an empty bucket
-returns `429 Too Many Requests` with a `Retry-After` header.
+`/api/frontmatter/suggest`, `/chat/message`, `/search`) AND the ingest
+endpoints (`/api/ingest`, `/api/ingest/raw`, `/api/ingest/file`, `/ingest`)
+share a per-client-IP token-bucket limiter. The bucket refills
+continuously; an empty bucket returns `429 Too Many Requests` with a
+`Retry-After` header.
 
 | Field | Default | Effect |
 |---|---|---|
@@ -151,7 +153,46 @@ Health checks, static, and HTML form renders are NOT throttled.
 
 Env: `SERVER_RATE_LIMIT_PER_MINUTE`, `SERVER_RATE_LIMIT_BURST`.
 
-### HTTP hardening (H-1, H-2, M-4)
+### Async ingest (high-volume docbuilder imports)
+
+docbuilder imports documents in bursts — often thousands at once on a
+fresh install. Synchronous ingest pins the HTTP client until each
+embedding round-trip returns, which can time out long before the
+import finishes. The async path lets docbuilder fire-and-forget.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/ingest/async` | Submit a document for async ingest. Returns `202 Accepted` with a `job_id`. The job is persisted to disk; a bounded worker pool processes it in the background. |
+| `GET` | `/api/ingest/jobs/{job_id}` | Poll job status. Returns `pending`, `processing`, `completed`, or `failed` plus `document_id`, `chunks`, and timing fields. |
+
+The synchronous `POST /api/ingest` path remains available for
+interactive use — both endpoints share the same auth, rate limit, and
+per-document size cap.
+
+| Field | Default | Effect |
+|---|---|---|
+| `server.async_ingest_queue_dir` | `data/jobs` | On-disk directory for persisted jobs. Empty disables async ingest (endpoints return 503). Directory is `0700`; each job file is `0600`. Env: `SERVER_ASYNC_INGEST_QUEUE_DIR`. |
+| `server.async_ingest_workers` | `5` | Worker-pool concurrency. `0` falls back to `1`. Env: `SERVER_ASYNC_INGEST_WORKERS`. |
+
+**Restart safety.** Every state transition is persisted to
+`<queue_dir>/<job_id>.json` (or `<job_id>.processing.json` while a
+worker holds the job). On startup, any unfinished job is re-enqueued
+and processed. A deploy, crash, or OOM kill during a long import
+resumes from where the process died — the in-memory pending channel
+is a transient cache; the on-disk representation is the source of
+truth.
+
+**Audit trail.** Every state transition logs a line via the standard
+`log` package:
+
+```
+ingest job event=ingest.job.started job_id=... remote_addr=... bytes=...
+ingest job event=ingest.job.completed job_id=... document_id=... chunks=...
+ingest job event=ingest.job.failed job_id=... error=...
+```
+
+Tail the operator log to monitor the queue without needing a separate
+audit pipeline.### HTTP hardening (H-1, H-2, M-4)
 
 Every response carries the defense headers below:
 

@@ -215,6 +215,7 @@ graph TB
   | `huma_api.go` | `registerHumaOperations` — wires every other file together, plus the global `serviceAPI` contract |
   | `huma_catalog.go` | health, tags, categories, tags-and-categories |
   | `huma_ingest.go` | raw / multipart / file ingest (behind `IngestLimiter`) |
+| `huma_jobs.go` | `/api/ingest/async` + `/api/ingest/jobs/{id}` — persistent job queue (see `internal/web/jobs/`) |
   | `huma_documents.go` | document list / get / prune |
   | `huma_query.go` | `POST /api/query` (chat) + `POST /api/search` (find-docs) |
   | `huma_frontmatter.go` | `POST /api/frontmatter/suggest` |
@@ -228,10 +229,12 @@ graph TB
   | GET | `/api/tags` | normalized tags |
   | GET | `/api/categories` | normalized categories |
   | GET | `/api/tags-categories` | both |
-  | POST | `/api/ingest` | ingest one Markdown document |
-  | POST | `/api/ingest/raw` | ingest raw Markdown body |
-  | POST | `/api/ingest/file` | ingest multipart upload |
-  | GET | `/api/documents` | list ingested documents |
+| POST | `/api/ingest` | ingest one Markdown document (sync) |
+| POST | `/api/ingest/raw` | ingest raw Markdown body (sync) |
+| POST | `/api/ingest/file` | ingest multipart upload (sync) |
+| POST | `/api/ingest/async` | submit ingest job; returns 202 + job_id |
+| GET | `/api/ingest/jobs/{id}` | poll async ingest job status |
+| GET | `/api/documents` | list ingested documents |
   | GET | `/api/documents/{document_id}` | get one |
   | POST | `/api/documents/prune` | delete chunks not present on disk |
   | POST | `/api/query` | chat-mode (soft-deprecated) |
@@ -318,6 +321,7 @@ graph TB
 | `internal/vector` | chromem-go wrapper, embedding client, LLM client, `SearchFilters`-aware `Where` |
 | `internal/service` | `Service` wiring + every business operation (ingest, search, query, frontmatter, links, catalog, stats, health) |
 | `internal/web` | chi router, HUMA API, HTMX pages, server lifecycle |
+| `internal/web/jobs` | Persistent async ingest queue (JSON files + bounded worker pool + restart recovery) |
 
 ## When you change X, expect Y to notice
 

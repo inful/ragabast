@@ -151,8 +151,8 @@ for that.
 
 ## HTTP API
 
-Three endpoints, all under `/api/ingest*` and all returning the same
-JSON shape (`internal/web/huma_ingest.go::ingestResponseBody`):
+Three sync endpoints, all under `/api/ingest*` and all returning the
+same JSON shape (`internal/web/huma_ingest.go::ingestResponseBody`):
 
 ```json
 {
@@ -167,6 +167,14 @@ that returns `HTTP 429` with a `Retry-After` header when saturated.
 The limiter capacity is `IngestLimiter.NewIngestLimiter(maxConcurrent,
 retryAfter)` and the constructor defaults to `1` concurrent ingest
 with a `1s` retry if the config is missing.
+
+A separate async ingest path is also available for high-volume
+docbuilder imports — see `internal/web/jobs/` and
+`internal/web/huma_jobs.go`. POST `/api/ingest/async` returns 202
+Accepted with a `job_id`; GET `/api/ingest/jobs/{job_id}` polls
+status. The queue persists each job to
+`<async_ingest_queue_dir>/<job_id>.json`, so a restart during a
+long import resumes from where the process died.
 
 ### `POST /api/ingest` — JSON body
 
