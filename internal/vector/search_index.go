@@ -27,7 +27,6 @@ import (
 	"os"
 	"path/filepath"
 	goregexp "regexp"
-	"sync"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis"
@@ -93,41 +92,49 @@ const (
 	regexLengthName    = "ragabast_technical_length"
 )
 
-// ensureRegistered registers the custom tokenizer and length
-// filter with bleve's registry exactly once, on first use.
-// Replaces a package-level init() function (lint: gochecknoinits).
-var (
-	registerOnce sync.Once
-	errRegister  error
-)
-
-func ensureRegistered() error {
-	registerOnce.Do(func() {
-		// Tokenizer: split on the regex `[\p{L}\p{N}_-]+`. This
-		// matches runs of letter, digit, underscore, or hyphen
-		// — the same set Tokenize() used to emit. Every other
-		// rune is a token boundary.
-		tokenizerRE := mustCompileRegex(`[\p{L}\p{N}_-]+`)
-		if err := registry.RegisterTokenizer(regexTokenizerName, func(_ map[string]any, _ *registry.Cache) (analysis.Tokenizer, error) {
-			return regexp.NewRegexpTokenizer(tokenizerRE), nil
-		}); err != nil {
-			errRegister = fmt.Errorf("register regex tokenizer: %w", err)
-			return
+// init registers the custom tokenizer and length filter with
+// bleve's global registry at process start.
+//
+// bleve resolves analyzer names by looking them up in its
+// registry when parsing a persisted mapping. Lazy registration
+// (gated on sync.Once inside BuildMapping) only fires when the
+// caller goes through NewSearchIndex; LoadSearchIndex calls
+// bleve.Open directly, which means the registry is empty on
+// restart and bleve refuses to load the index with
+// "no tokenizer with name or type 'ragabast_technical_tokenizer'
+// registered". Registration must run before any code touches
+// the registry, so init() is the only correct location.
+//
+//nolint:gochecknoinits // bleve's global registry must be populated before any index open.
+func init() {
+	// Tokenizer: split on the regex `[\p{L}\p{N}_-]+`. This
+	// matches runs of letter, digit, underscore, or hyphen
+	// — the same set Tokenize() used to emit. Every other
+	// rune is a token boundary.
+	tokenizerRE := mustCompileRegex(`[\p{L}\p{N}_-]+`)
+	if err := registry.RegisterTokenizer(regexTokenizerName, func(_ map[string]any, _ *registry.Cache) (analysis.Tokenizer, error) {
+		return regexp.NewRegexpTokenizer(tokenizerRE), nil
+	}); err != nil {
+		// Bleve returns ErrAlreadyDefined when a second init
+		// runs (e.g. test binary re-exec); treat as success.
+		if !errors.Is(err, registry.ErrAlreadyDefined) {
+			panic(fmt.Sprintf("ragabast: register regex tokenizer: %v", err))
 		}
+	}
 
-		// Length filter: drop tokens shorter than 2 chars. We
-		// register our own (with the exact min we want) rather
-		// than reusing bleve's stock length filter, because the
-		// bleve stock filter requires explicit min/max in the
-		// mapping config and we want a single, named, configured
-		// instance.
-		if err := registry.RegisterTokenFilter(regexLengthName, func(_ map[string]any, _ *registry.Cache) (analysis.TokenFilter, error) {
-			return length.NewLengthFilter(2, 1024), nil
-		}); err != nil {
-			errRegister = fmt.Errorf("register length filter: %w", err)
+	// Length filter: drop tokens shorter than 2 chars. We
+	// register our own (with the exact min we want) rather
+	// than reusing bleve's stock length filter, because the
+	// bleve stock filter requires explicit min/max in the
+	// mapping config and we want a single, named, configured
+	// instance.
+	if err := registry.RegisterTokenFilter(regexLengthName, func(_ map[string]any, _ *registry.Cache) (analysis.TokenFilter, error) {
+		return length.NewLengthFilter(2, 1024), nil
+	}); err != nil {
+		if !errors.Is(err, registry.ErrAlreadyDefined) {
+			panic(fmt.Sprintf("ragabast: register length filter: %v", err))
 		}
-	})
-	return errRegister
+	}
 }
 
 // mustCompileRegex panics on bad regex so the init-time
@@ -144,9 +151,6 @@ func mustCompileRegex(pat string) *goregexp.Regexp {
 // index. Exposed at package level so doctor/reset commands
 // can inspect field definitions.
 func BuildMapping() (*mapping.IndexMappingImpl, error) {
-	if err := ensureRegistered(); err != nil {
-		return nil, err
-	}
 	m := bleve.NewIndexMapping()
 
 	// Custom analyzer: our regex tokenizer + lowercase +
