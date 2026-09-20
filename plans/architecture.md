@@ -21,7 +21,8 @@ graph TB
         service[Service struct<br/>config + parser + chunker<br/>+ vectorOps + llmClient]
         searchFilters[SearchFilters<br/>DocumentID, Tag, Category]
         ingestFn[IngestFile / IngestDirectory]
-        searchFn[Search — find-docs]
+        searchFn[Search — semantic-only (v0.3.0)]
+        hybridFn[HybridSearch — semantic + keyword RRF (v0.4.0+)]
         queryFn[Query / QueryDebug — soft-deprecated]
         frontmatterFn[SuggestFrontmatter]
         linksFn[SuggestLinks]
@@ -122,7 +123,8 @@ graph TB
   | `IngestFile(ctx, filePath) error` | One file off disk. |
   | `IngestDirectory(ctx, dirPath) (IngestResult, error)` | Walks a directory and ingests every `.md`; returns aggregate counts. |
   | `IngestDocument(ctx, content) (*models.Document, error)` | Raw markdown string. |
-  | `Search(ctx, query, limit, filters)` | **Find-docs entry point.** Embed query, retrieve top-K with optional filters, return raw `[]SearchResult` without an LLM call. |
+  | `Search(ctx, query, limit, filters)` | **Find-docs entry point (v0.3.0).** Pure semantic ranking via the embedding store. Kept for callers that depend on v0.3.0 semantics; new callers should use `HybridSearch`. |
+  | `HybridSearch(ctx, query, limit, filters, mode)` | **Find-docs entry point (v0.4.0+).** Runs keyword, semantic, or hybrid (RRF) per the `mode` parameter. Filters apply to BOTH rankings before fusion. The HTTP API defaults to `hybrid`. |
   | `Query`, `QueryDebug`, `QueryDebugWithOptions` | Chat-mode RAG. Soft-deprecated: prefer `Search` for retrieval-only callers. A one-shot warning is logged per process to nudge migrations. |
   | `SuggestFrontmatter(ctx, doc)` | LLM-assisted `description`/`categories`/`tags`/`custom_tags` suggestion; parser tolerates unstructured LLM output via `constructJSONFromText`. |
   | `SuggestLinks(ctx, query)` | Returns link URLs extracted from the top retrieved chunks. |
@@ -268,11 +270,20 @@ graph TB
      `VectorOperations.IngestDocument` (embed via `/v1/embeddings`) →
      `VectorDB.AddChunk` (chromem-go persistent store).
 
-2. **Find-docs search (recommended)**
-   - User query → `SearchFilters{DocumentID?, Tag?, Category?}` →
-     `OpenAIEmbeddingClient.embed(query)` (Matryoshka `dimensions` if configured) →
-     `VectorDB.Search(queryEmbedding, limit, filters)` (chromem-go `Where`) →
-     `[]SearchResult` (chunk + metadata + score). **No LLM call.**
+2. **Find-docs search (recommended; hybrid in v0.4.0+)**
+   - User query → `SearchFilters{DocumentID?, Tag?, Category?, mode?}` →
+     `mode=hybrid` runs both rankings in parallel:
+     - **Semantic side**: `OpenAIEmbeddingClient.embed(query)`
+       (Matryoshka `dimensions` if configured) →
+       `VectorDB.Search(queryEmbedding, limit, filters)` (chromem-go `Where`)
+     - **Keyword side**: `SearchIndex.Search(query, limit, filters)`
+       (bleve BM25 against the on-disk keyword index at
+       `<vectordb.persistence_dir>/search/`)
+     - **Fusion**: `rrfFuse(semanticIDs, keywordIDs, k=60)` →
+       top-K chunks enriched via `db.GetChunk` →
+       `[]SearchResult`. **No LLM call.**
+   - `mode=semantic` skips the keyword side entirely (v0.3.0 behaviour);
+     `mode=keyword` skips the embedding side.
 
 3. **Chat-mode query (soft-deprecated)**
    - User message + chat history → `Service.Query` → embed →
@@ -318,7 +329,7 @@ graph TB
 | `internal/models` | `Document`, `Chunk`, `SearchResult`, `IngestResult`, sentinel errors |
 | `internal/parser` | docbuilder Markdown → `*Document` (frontmatter + body + fingerprint) |
 | `internal/chunker` | H1/H2 split, stable chunk IDs, size validation |
-| `internal/vector` | chromem-go wrapper, embedding client, LLM client, `SearchFilters`-aware `Where` |
+| `internal/vector` | chromem-go wrapper, embedding client, LLM client, `SearchFilters`-aware `Where`, bleve-backed keyword index (`internal/vector/search_index.go`) |
 | `internal/service` | `Service` wiring + every business operation (ingest, search, query, frontmatter, links, catalog, stats, health) |
 | `internal/web` | chi router, HUMA API, HTMX pages, server lifecycle |
 | `internal/web/jobs` | Persistent async ingest queue (JSON files + bounded worker pool + restart recovery) |

@@ -224,6 +224,11 @@ storage path uses `DocumentNeedsUpdate` to decide what to do:
 | Yes | Match | No-op (no embedding call). |
 | Yes | Mismatch | Delete the old chunks, then insert the new ones. |
 
+Both stores (chromem-go for embeddings, bleve for the keyword
+index) are updated in the same call. A re-ingest never leaves a
+stale entry in either store — see `VectorOperations.IngestDocument`
+in `internal/vector/operations.go`.
+
 Chunk IDs are deterministic (see "The pipeline" above), so the
 "delete then insert" path is safe — no transient duplicate IDs.
 
@@ -266,7 +271,7 @@ In `config.yml` / `config.example.yml`. Defaults from
 | `processing.chunk_overlap` | `150` | Character overlap between adjacent chunks. Larger values increase recall at the cost of storage. |
 | `ollama.base_url`, `ollama.embedding_model`, `ollama.embedding_dimensions` | `http://localhost:11434`, `nomic-embed-text:v1.5`, `0` | Where embeddings come from. `embedding_dimensions > 0` requests Matryoshka truncation. |
 | `vectordb.embedding_dimension` | `768` | Must match the dimension of the vectors being stored. See "When you must `rm -rf data/vectors/`" above. |
-| `vectordb.persistence_dir` | `./data/vectors` | Where `chromem-go` writes its files. |
+| `vectordb.persistence_dir` | `./data/vectors` | Where `chromem-go` writes its files. The bleve keyword index lives at `<persistence_dir>/search/`; `ragabast vector reset --force` wipes both. |
 | `server.enable_cors` | `true` | When true, CORS processing runs. Cross-origin browser requests are only allowed for origins in `server.cors_origins`. |
 | `server.cors_origins` | `[]` | Allow-list of origins echoed in `Access-Control-Allow-Origin`. Empty disables cross-origin browser requests. Set to `["*"]` only for trusted local-only deployments. |
 | `server.auth_token` | `""` | Bearer token required on every protected endpoint. Leave empty for local single-user installs. Operators exposing ragabast on a non-loopback interface **must** set this. |

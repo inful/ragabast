@@ -81,6 +81,53 @@ Notes:
 - Use a specific config file: `ragabast serve --config ./config.yml`
 - Create a starter config: `ragabast config init` (or `ragabast init`) (writes `config.yml` with mode `0600`)
 
+## Search
+
+ragabast exposes a hybrid search endpoint that combines an embedding
+similarity ranking with a BM25 keyword ranking, fused via Reciprocal
+Rank Fusion (RRF, k=60).
+
+```
+POST /api/search
+{
+  "query":       "kubernetes ingress tls",
+  "limit":       5,                       // default 5
+  "min_score":   0,                       // optional, default 0 (no floor)
+  "mode":        "hybrid",                // hybrid | semantic | keyword
+  "document_id": "",                      // optional filter
+  "tag":         "security",              // optional filter
+  "category":    "tutorial"               // optional filter
+}
+```
+
+`mode` selects the ranking strategy. The v0.4.0 default is `hybrid`;
+pass `semantic` for pure embedding similarity (the v0.3.0 behaviour) or
+`keyword` for bleve-only search. Unknown modes return 422.
+
+Filters are applied to BOTH rankings before fusion; a chunk that fails
+the `document_id` / `tag` / `category` filter never appears in the
+result, even if it ranks at the top of both lists.
+
+CLI equivalent:
+
+```
+ragabast search "kubernetes ingress tls" \
+  --tag security \
+  --mode hybrid
+```
+
+The keyword index lives at `<vectordb.persistence_dir>/search/` next to
+the vector DB. `ragabast vector reset --force` wipes both stores in one
+go; the next `ragabast ingest` rebuilds them from source documents.
+
+### Why hybrid
+
+Pure embedding search paraphrases ("how do I configure TLS" matches
+`tls_handshake: configure`) but misses exact terms. Pure keyword
+search gets exact-term recall right but cannot paraphrase. RRF fuses
+the two rankings so a chunk that ranks #1 in either list is surfaced,
+and a chunk that ranks highly in both rises to the top.
+
 ## Security
 
 ragabast ships hardened for safe local-dev use and for non-loopback
