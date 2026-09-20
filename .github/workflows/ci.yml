@@ -36,7 +36,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          # Bind tightly to whatever go.mod says, so govulncheck
+          # scans the same stdlib we develop against. Using a
+          # bare "1.25" string left setup-go free to install
+          # the latest patch, which drifted into Go 1.26
+          # territory and tripped a wave of stdlib CVEs
+          # (GO-2026-4600..4603 etc.) we have no control over.
+          go-version-file: go.mod
           cache: true
 
       - name: go mod download
@@ -67,14 +73,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version-file: go.mod
           cache: true
 
       - name: golangci-lint
         # Pinned to the same major as local development
         # (`.golangci.yml version: "2"`). Bump deliberately
         # when the linter version is upgraded.
-        uses: golangci/golangci-lint-action@v6
+        # v7 is required for golangci-lint v2.x — v6 rejects
+        # v2 versions with "invalid version string 'v2.8.0'".
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.8.0
           args: --timeout=5m
