@@ -109,8 +109,10 @@ func TestQueue_PersistsAcrossRestart(t *testing.T) {
 	// Read the pending file, rewrite with status=processing
 	// to simulate "worker died mid-flight", then move it to
 	// the processing path. recoverUnfinished scans both
-	// paths and re-enqueues whichever jobs are not
-	// completed/failed.
+	// paths but fences on file mtime — a real crashed worker
+	// leaves the file with old mtime, while a live worker
+	// keeps touching it. We set the mtime to an hour old so
+	// recoverUnfinished reaps the orphaned file.
 	srcPath := q1.path(j.ID)
 	dstPath := q1.processingPath(j.ID)
 	pending, gerr := q1.Get(j.ID)
@@ -120,6 +122,8 @@ func TestQueue_PersistsAcrossRestart(t *testing.T) {
 	pending.StartedAt = &now
 	require.NoError(t, os.Rename(srcPath, dstPath))
 	require.NoError(t, q1.writeAtPath(pending, dstPath))
+	oldTime := time.Now().Add(-1 * time.Hour)
+	require.NoError(t, os.Chtimes(dstPath, oldTime, oldTime))
 
 	// Second "process" — fresh Queue, same directory. Recovery
 	// must pick up the processing file, reset it to pending,

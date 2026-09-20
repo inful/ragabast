@@ -280,19 +280,31 @@ func (q *Queue) Stop() {
 }
 
 // recoverUnfinished scans the queue dir at startup and
-// re-enqueues every job whose status is pending or processing.
-// "processing" is treated as resumable: the prior worker may
-// have died mid-job; the ingest operation is idempotent (the
-// vector store dedupes by fingerprint) so re-processing is
-// safe.
+// re-enqueues every job whose status is pending. The "processing"
+// path is fenced by file mtime so a still-running worker is not
+// reaped by a peer startup's recovery scan.
 //
 // Two file shapes can be on disk at startup:
 //
 //  1. <id>.json with status=pending — normal pending job.
-//  2. <id>.processing.json with status=processing — a prior
-//     worker claimed the job, wrote the processing state, and
-//     crashed before the final rename. We rename it back to
-//     <id>.json (status=pending) and re-enqueue.
+//  2. <id>.processing.json — a worker holds this job; we cannot
+//     tell from the filesystem alone whether the worker is
+//     alive or dead. We fence on file mtime: a worker keeps
+//     touching the file on every state transition (mark-processing,
+//     write-final), so a recent mtime means the worker is alive.
+//     Anything older than recoverStaleThreshold is presumed
+//     orphaned and reaped.
+//
+// Note: this used to ALSO process .processing.json files
+// unconditionally — that was racy because recover runs at
+// startup in parallel with the workers, and a worker that
+// was mid-IngestDocument could be reaped from under it,
+// producing a duplicate IngestDocument call. The fence is
+// the fix; tests that simulate a true mid-process crash
+// set the file mtime to old via os.Chtimes before the
+// second Start to exercise the recovery path.
+const recoverStaleThreshold = 5 * time.Second
+
 func (q *Queue) recoverUnfinished(audit AuditFunc) {
 	entries, err := os.ReadDir(q.dir)
 	if err != nil {
@@ -316,6 +328,21 @@ func (q *Queue) recoverUnfinished(audit AuditFunc) {
 		var sourcePath string
 		switch {
 		case strings.HasSuffix(name, ".processing.json"):
+			// Only reap a .processing.json file if its
+			// mtime is older than the stale threshold.
+			// A live worker keeps touching the file on
+			// every state transition; a crashed worker
+			// leaves the file at its last write time. A
+			// 5s threshold tolerates slow IngestDocument
+			// calls while still catching real crashes
+			// quickly enough to matter.
+			info, ierr := e.Info()
+			if ierr != nil {
+				continue
+			}
+			if time.Since(info.ModTime()) < recoverStaleThreshold {
+				continue
+			}
 			id = strings.TrimSuffix(name, ".processing.json")
 			sourcePath = q.processingPath(id)
 		case strings.HasSuffix(name, ".json"):
