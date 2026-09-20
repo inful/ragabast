@@ -7,9 +7,10 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/ragabast/internal/config"
+	"github.com/ragabast/internal/web/jobs"
 )
 
-func registerHumaAPI(router chi.Router, _ *config.Config, svc serviceAPI) huma.API {
+func registerHumaAPI(router chi.Router, cfg *config.Config, svc serviceAPI, ingestQueue *jobs.Queue) huma.API {
 	humaCfg := huma.DefaultConfig("Ragabast API", "1.0.0")
 	humaCfg.DocsPath = "/docs"
 	humaCfg.OpenAPIPath = "/openapi.json"
@@ -22,6 +23,6 @@ func registerHumaAPI(router chi.Router, _ *config.Config, svc serviceAPI) huma.A
 	// been retired.
 	limiter := NewIngestLimiter(5, 1*time.Second)
 
-	registerHumaOperations(api, svc, limiter)
+	registerHumaOperations(api, svc, limiter, cfg.Server.MaxIngestDocumentBytes, ingestQueue)
 	return api
 }

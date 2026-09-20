@@ -9,12 +9,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/ragabast/internal/config"
+	"github.com/ragabast/internal/web/jobs"
 )
 
 // Server represents the web server. HTTP handlers and template
@@ -31,6 +33,11 @@ type Server struct {
 	// serveBasicHTML uses them so the fallback path stays
 	// safe-by-default (every {{ }} substitution is escaped).
 	fallback *fallbackTemplates
+	// ingestQueue is the async ingest job queue. nil when
+	// server.async_ingest_queue_dir is empty (operator opted
+	// out of async ingest). The HTTP layer returns 503 from
+	// /api/ingest/async when this is nil.
+	ingestQueue *jobs.Queue
 }
 
 // internalError logs the underlying error and returns a generic 500 to the
@@ -119,12 +126,44 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 		templates = template.New("base")
 	}
 
+	// Async ingest queue. The queue is the source of truth
+	// for /api/ingest/async: submissions land here, a
+	// bounded worker pool drains it, every state transition
+	// is persisted to <cfg.Server.AsyncIngestQueueDir>. A
+	// restart re-enqueues any pending/processing jobs.
+	//
+	// Empty AsyncIngestQueueDir disables async ingest — the
+	// /api/ingest/async endpoint returns 503 in that case.
+	// The synchronous POST /api/ingest path is unaffected.
+	//
+	// The queue's IngestDocument adapter wraps the
+	// serviceAPI; we hand it svc so workers can call
+	// IngestDocument without reaching back into the
+	// web-package's internals.
+	var ingestQueue *jobs.Queue
+	if cfg.Server.AsyncIngestQueueDir != "" {
+		q, qerr := jobs.New(
+			cfg.Server.AsyncIngestQueueDir,
+			cfg.Server.MaxIngestDocumentBytes,
+			cfg.Server.AsyncIngestWorkers,
+		)
+		if qerr != nil {
+			log.Printf("web: failed to create ingest queue at %s: %v; async ingest disabled", cfg.Server.AsyncIngestQueueDir, qerr)
+		} else {
+			ingestQueue = q
+			ingestQueue.Start(jobsServiceAdapter{svc: svc}, auditFunc(log.Printf))
+			log.Printf("web: async ingest queue started at %s (workers=%d, max_document_bytes=%d)",
+				q.Dir(), q.Workers(), q.MaxBytes())
+		}
+	}
+
 	s := &Server{
-		config:    cfg,
-		service:   svc,
-		router:    router,
-		templates: templates,
-		fallback:  newFallbackTemplates(),
+		config:      cfg,
+		service:     svc,
+		router:      router,
+		templates:   templates,
+		fallback:    newFallbackTemplates(),
+		ingestQueue: ingestQueue,
 	}
 
 	s.registerRoutes()
@@ -144,7 +183,7 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 // form-mounted LLM routes (/chat/message, /search), without
 // needing to wrap each route individually.
 func (s *Server) registerRoutes() {
-	registerHumaAPI(s.router, s.config, s.service)
+	registerHumaAPI(s.router, s.config, s.service, s.ingestQueue)
 
 	s.router.Get("/", s.handleChatPage)
 	s.router.Get("/chat", func(w http.ResponseWriter, r *http.Request) {
@@ -208,8 +247,71 @@ func (s *Server) Start() error {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
+	// Drain the async ingest queue FIRST so workers finish
+	// whatever jobs are in flight before we close the HTTP
+	// listener. (Stop on the queue signals workers to exit
+	// after the current job; we don't wait for the queue to
+	// empty — that's the operator's responsibility to
+	// monitor via the job status endpoint.)
+	if s.ingestQueue != nil {
+		s.ingestQueue.Stop()
+	}
+
 	if s.server != nil {
 		return s.server.Shutdown(ctx)
 	}
 	return nil
+}
+
+// jobsServiceAdapter adapts the web-layer serviceAPI to the
+// jobs.Service interface. IngestDocument returns the values
+// the job tracker needs (document ID, chunk count) plus any
+// error; the queue handles persistence and status transitions.
+type jobsServiceAdapter struct {
+	svc serviceAPI
+}
+
+func (a jobsServiceAdapter) IngestDocument(ctx context.Context, content string) (string, int, error) {
+	doc, err := a.svc.IngestDocument(ctx, content)
+	if err != nil {
+		return "", 0, err
+	}
+	return doc.ID, len(doc.Chunks), nil
+}
+
+// auditFunc adapts a log.Printf-style function to the
+// jobs.AuditFunc shape. State transitions are written to the
+// standard log so operators tailing the process see them
+// without needing a separate audit pipeline.
+//
+// Format: "ingest job event=<name> key=value ...".
+// Keys are job_id, document_id, error, etc. — chosen for
+// grep-ability rather than human-friendliness; an operator
+// alerting on these should match on `event=ingest.job.failed`
+// and surface the job_id.
+func auditFunc(logf func(format string, args ...any)) jobs.AuditFunc {
+	return func(event string, fields ...any) {
+		logf("ingest job event=%s %s", "ingest.job."+event, formatAuditFields(fields))
+	}
+}
+
+// formatAuditFields renders the key/value pairs AuditFunc
+// received as a flat list (k, v, k, v, ...) into a single
+// space-separated string. Odd-length input is treated as if
+// the last key had an empty value.
+func formatAuditFields(fields []any) string {
+	out := ""
+	var outSb303 strings.Builder
+	for i := 0; i < len(fields); i += 2 {
+		if i > 0 {
+			outSb303.WriteString(" ")
+		}
+		if i+1 < len(fields) {
+			outSb303.WriteString(fmt.Sprintf("%v=%v", fields[i], fields[i+1]))
+		} else {
+			outSb303.WriteString(fmt.Sprintf("%v=", fields[i]))
+		}
+	}
+	out += outSb303.String()
+	return out
 }

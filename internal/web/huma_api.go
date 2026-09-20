@@ -1,6 +1,9 @@
 package web
 
-import "github.com/danielgtaylor/huma/v2"
+import (
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/ragabast/internal/web/jobs"
+)
 
 // RegisterHumaOperations registers every Huma API operation on
 // api. The actual handlers live in the per-resource files:
@@ -20,12 +23,13 @@ import "github.com/danielgtaylor/huma/v2"
 //
 // The signature MUST stay stable — huma_api_test.go and the chi
 // adapter in huma_chi.go both call this exact function.
-func registerHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter) {
+func registerHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter, maxIngestDocumentBytes int, ingestQueue *jobs.Queue) {
 	registerCatalogOperations(api, svc)
 	registerQueryOperation(api, svc)
 	registerSearchOperation(api, svc)
-	registerIngestOperations(api, svc, limiter)
+	registerIngestOperations(api, svc, limiter, maxIngestDocumentBytes)
 	registerDocumentsOperations(api, svc)
 	registerLinkSuggestionsOperation(api, svc)
 	registerFrontmatterOperation(api, svc)
+	registerIngestJobsOperations(api, ingestQueue)
 }

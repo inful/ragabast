@@ -187,12 +187,24 @@ func clientIP(r *http.Request) string {
 
 // llmPathPrefixes is the set of URL prefixes that count
 // against the per-IP token bucket. Anything outside this set
-// (health checks, static, HTML form renders, ingest) is not
-// throttled — only the routes that spend upstream tokens.
+// (health checks, static, HTML form renders, the documents
+// list/delete/prune endpoints) is not throttled — only the
+// routes that spend upstream tokens or write to the store.
 //
-// The list mirrors the LLM-backed endpoints listed in the
-// security review: /api/query, /api/search, /api/link-suggestions,
-// /api/frontmatter/suggest, /chat/message (POST), /search (POST).
+// The list mirrors the rate-sensitive endpoints from the
+// security review:
+//   - LLM-backed endpoints (chat-completions cost):
+//     /api/query, /api/search, /api/link-suggestions,
+//     /api/frontmatter/suggest, /chat/message (POST),
+//     /search (POST).
+//   - Ingest endpoints (embedding + write cost):
+//     /api/ingest, /api/ingest/raw, /api/ingest/file,
+//     /ingest (POST).
+//
+// Ingest is included because a single caller can saturate
+// the 5-slot IngestLimiter forever without per-IP
+// throttling — a hostile operator could amplify embedding
+// spend by hammering /api/ingest at line rate.
 var llmPathPrefixes = []string{
 	"/api/query",
 	"/api/search",
@@ -200,6 +212,10 @@ var llmPathPrefixes = []string{
 	"/api/frontmatter/suggest",
 	"/chat/message",
 	"/search",
+	"/api/ingest",
+	"/api/ingest/raw",
+	"/api/ingest/file",
+	"/ingest",
 }
 
 // llmPathMiddleware is the chi-level rate-limit middleware

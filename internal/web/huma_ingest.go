@@ -26,7 +26,12 @@ type ingestResponseBody struct {
 // registerIngestOperations wires the three ingest endpoints
 // (JSON body, raw markdown body, multipart file upload). All
 // three share the same limiter and the same response shape.
-func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter) {
+//
+// maxDocumentBytes is the per-document size cap (from
+// server.max_ingest_document_bytes). A 0 value disables the
+// check — useful for tests but should not be set in
+// production; the config default is 1 MiB.
+func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter, maxDocumentBytes int) {
 	huma.Register(api, huma.Operation{
 		OperationID: "ingest",
 		Method:      http.MethodPost,
@@ -43,6 +48,9 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		content := strings.TrimSpace(input.Body.Content)
 		if content == "" {
 			return nil, huma.Error400BadRequest("content is required")
+		}
+		if err := checkIngestSize(len(content), maxDocumentBytes); err != nil {
+			return nil, err
 		}
 
 		doc, err := svc.IngestDocument(ctx, content)
@@ -75,6 +83,9 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 
 		if len(bytes.TrimSpace(input.RawBody)) == 0 {
 			return nil, huma.Error400BadRequest("request body is required")
+		}
+		if err := checkIngestSize(len(input.RawBody), maxDocumentBytes); err != nil {
+			return nil, err
 		}
 
 		doc, err := svc.IngestDocument(ctx, string(input.RawBody))
@@ -116,6 +127,9 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		if len(bytes.TrimSpace(b)) == 0 {
 			return nil, huma.Error400BadRequest("file is empty")
 		}
+		if sizeErr := checkIngestSize(len(b), maxDocumentBytes); sizeErr != nil {
+			return nil, sizeErr
+		}
 
 		doc, err := svc.IngestDocument(ctx, string(b))
 		if err != nil {
@@ -139,4 +153,32 @@ func acquireIngestSlot(limiter *IngestLimiter) bool {
 		return true
 	}
 	return limiter.TryAcquire()
+}
+
+// checkIngestSize returns a huma 413 error if the document
+// content exceeds the configured per-document limit. A
+// maxDocumentBytes of 0 disables the check (test-only path);
+// production callers should always pass a non-zero value via
+// server.max_ingest_document_bytes (default 1 MiB).
+//
+// The check happens BEFORE the embedding model is invoked, so
+// the worst case is a single chunker pass over the rejected
+// document — bounded work, no upstream spend.
+//
+// huma does not export an Error413 constructor, so we
+// construct an *huma.ErrorModel with the right status. The
+// Huma middleware extracts the status from ErrorModel.GetStatus
+// and writes the matching HTTP response.
+func checkIngestSize(contentLen, maxDocumentBytes int) error {
+	if maxDocumentBytes <= 0 {
+		return nil
+	}
+	if contentLen > maxDocumentBytes {
+		return &huma.ErrorModel{
+			Status: http.StatusRequestEntityTooLarge,
+			Title:  http.StatusText(http.StatusRequestEntityTooLarge),
+			Detail: "document exceeds server.max_ingest_document_bytes",
+		}
+	}
+	return nil
 }

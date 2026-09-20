@@ -22,6 +22,7 @@ type fakeHumaService struct {
 	ingested          *models.Document
 	ingestErr         error
 	lastIngestContent string
+	ingestCalls       int
 	searchResults     []models.SearchResult
 	searchErr         error
 	documents         []models.DocumentInfo
@@ -40,6 +41,7 @@ func (f *fakeHumaService) CheckHealth(_ context.Context) (bool, error) {
 }
 
 func (f *fakeHumaService) IngestDocument(_ context.Context, content string) (*models.Document, error) {
+	f.ingestCalls++
 	if f.ingestErr != nil {
 		return nil, f.ingestErr
 	}
@@ -48,6 +50,14 @@ func (f *fakeHumaService) IngestDocument(_ context.Context, content string) (*mo
 		return f.ingested, nil
 	}
 	return &models.Document{ID: "doc-1", Chunks: []models.Chunk{{}, {}}}, nil
+}
+
+// callCount reports how many times IngestDocument has been
+// invoked on this fake. The async-ingest tests use it to
+// pin that the worker pool called the service exactly once
+// per submitted job.
+func (f *fakeHumaService) callCount() int {
+	return f.ingestCalls
 }
 
 func (f *fakeHumaService) Search(_ context.Context, _ string, _ int, _ service.SearchFilters) ([]models.SearchResult, error) {

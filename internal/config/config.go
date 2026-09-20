@@ -196,6 +196,31 @@ type ServerConfig struct {
 	// the limiter, not for "tolerance" reasons.
 	RateLimitBurst int `env:"SERVER_RATE_LIMIT_BURST" yaml:"rate_limit_burst,omitempty"`
 
+	// MaxIngestDocumentBytes caps the size of a single
+	// document accepted by the ingest endpoints. The 10 MiB
+	// request-body limit (H-2) protects the server from
+	// memory exhaustion in general, but a single ingest
+	// request is also one document — which would still pin
+	// the embedding model and OOM the chunker. The default
+	// (1 MiB) is generous for any plausible single
+	// docbuilder document; operators working with unusually
+	// large source documents can raise it.
+	MaxIngestDocumentBytes int `env:"SERVER_MAX_INGEST_DOCUMENT_BYTES" yaml:"max_ingest_document_bytes,omitempty"`
+
+	// AsyncIngestQueueDir is the on-disk directory the async
+	// ingest queue persists jobs to. Empty disables async
+	// ingest (the /api/ingest/async endpoint returns 503).
+	// Default: <data_dir>/jobs. The directory is created
+	// with mode 0700 at server start; each job file is 0600.
+	AsyncIngestQueueDir string `env:"SERVER_ASYNC_INGEST_QUEUE_DIR" yaml:"async_ingest_queue_dir,omitempty"`
+
+	// AsyncIngestWorkers caps the worker-pool concurrency
+	// for the async ingest queue. 0 falls back to 1.
+	// Default 5 — matches the historical IngestLimiter
+	// concurrency for the sync path; raise it to match the
+	// embeddings server's request parallelism.
+	AsyncIngestWorkers int `env:"SERVER_ASYNC_INGEST_WORKERS" yaml:"async_ingest_workers,omitempty"`
+
 	// ReadTimeout for HTTP requests.
 	ReadTimeout time.Duration `env:"SERVER_READ_TIMEOUT" yaml:"read_timeout"`
 
@@ -287,11 +312,12 @@ func DefaultConfig() *Config {
 			EmbeddingDimension: 768, // nomic-embed-text-v1.5 dimension
 		},
 		Server: ServerConfig{
-			Address:      "0.0.0.0",
-			Port:         8080,
-			EnableCORS:   true,
-			ReadTimeout:  15 * time.Second,
-			WriteTimeout: 15 * time.Second,
+			Address:                "0.0.0.0",
+			Port:                   8080,
+			EnableCORS:             true,
+			MaxIngestDocumentBytes: 1 << 20, // 1 MiB
+			ReadTimeout:            15 * time.Second,
+			WriteTimeout:           15 * time.Second,
 		},
 		Processing: ProcessingConfig{
 			MaxChunkSize: 2000,
@@ -533,6 +559,19 @@ func (c *Config) ApplyEnvOverrides() {
 			c.Server.RateLimitBurst = n
 		}
 	}
+	if v := os.Getenv("SERVER_MAX_INGEST_DOCUMENT_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Server.MaxIngestDocumentBytes = n
+		}
+	}
+	if v := os.Getenv("SERVER_ASYNC_INGEST_QUEUE_DIR"); v != "" {
+		c.Server.AsyncIngestQueueDir = v
+	}
+	if v := os.Getenv("SERVER_ASYNC_INGEST_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Server.AsyncIngestWorkers = n
+		}
+	}
 	if v := os.Getenv("SERVER_CORS_ORIGINS"); v != "" {
 		// Comma-separated origin list. Empty entries are
 		// dropped; whitespace around entries is trimmed.
@@ -702,6 +741,12 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		errs = append(errs, "server.port must be between 1 and 65535")
+	}
+	if c.Server.MaxIngestDocumentBytes < 0 {
+		errs = append(errs, "server.max_ingest_document_bytes must be >= 0")
+	}
+	if c.Server.AsyncIngestWorkers < 0 {
+		errs = append(errs, "server.async_ingest_workers must be >= 0")
 	}
 
 	// Validate Processing config.

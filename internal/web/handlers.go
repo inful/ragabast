@@ -446,6 +446,16 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-document size cap (server.max_ingest_document_bytes).
+	// The 10 MiB request-body limit (H-2) caps the whole
+	// request, but a single ingest request is one document —
+	// the smaller per-document cap protects the chunker and
+	// embedding model from being pinned by one giant input.
+	if maxBytes := s.config.Server.MaxIngestDocumentBytes; maxBytes > 0 && len(content) > maxBytes {
+		http.Error(w, "Document exceeds server.max_ingest_document_bytes", http.StatusRequestEntityTooLarge)
+		return
+	}
+
 	// Ingest document
 	doc, err := s.service.IngestDocument(r.Context(), content)
 	if err != nil {
