@@ -78,11 +78,15 @@ jobs:
 
       - name: golangci-lint
         # Pinned to the same major as local development
-        # (`.golangci.yml version: "2"`). Bump deliberately
-        # when the linter version is upgraded.
+        # (`.golangci.yml version: "2"`). v2.13.x is built with
+        # Go 1.26 — older v2.x releases were built with Go 1.25
+        # and refused to load against a go.mod that targets 1.26
+        # ("the Go language version used to build golangci-lint
+        # is lower than the targeted Go version").
+        # Bump deliberately when the linter version is upgraded.
         # v7 is required for golangci-lint v2.x — v6 rejects
-        # v2 versions with "invalid version string 'v2.8.0'".
+        # v2 versions with "invalid version string 'v2.x'".
         uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.8.0
+          version: v2.13.2
           args: --timeout=5m
