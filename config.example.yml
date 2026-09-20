@@ -81,6 +81,18 @@ server:
   address: 0.0.0.0
   port: 8080
   enable_cors: true
+  # Comma-separated list of origins allowed by CORS. Default
+  # (empty) disables cross-origin browser requests. Use "*"
+  # only for trusted local-only deployments; the safe default
+  # for a server reachable from outside loopback is to list
+  # every origin explicitly. Env: SERVER_CORS_ORIGINS.
+  cors_origins: []
+  # Bearer token required on every protected endpoint. Leave
+  # empty for local single-user installs. Operators exposing
+  # ragabast on a non-loopback interface MUST set this — empty
+  # means anyone who can reach the listener can ingest, query,
+  # and delete documents. Env: SERVER_AUTH_TOKEN.
+  auth_token: ""
   read_timeout: 15s
   write_timeout: 15s
 

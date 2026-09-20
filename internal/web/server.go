@@ -58,20 +58,20 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	router.Use(maxBytesReaderMiddleware)
 	router.Use(middleware.Timeout(60 * time.Second))
 
+	// CORS runs before auth so OPTIONS preflight requests do
+	// not require a bearer token (browsers do not send
+	// credentials on preflight). The new allow-list middleware
+	// replaces the previous wildcard-or-nothing behavior.
 	if cfg.Server.EnableCORS {
-		router.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-				w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-				if r.Method == http.MethodOptions {
-					w.WriteHeader(http.StatusNoContent)
-					return
-				}
-				next.ServeHTTP(w, r)
-			})
-		})
+		router.Use(corsMiddleware(cfg.Server.CORSOrigins))
 	}
+
+	// Auth runs last so the body-size limit, security
+	// headers, CORS preflight, and request logging all apply
+	// to auth-failed requests too. With auth_token empty
+	// (the default) the middleware is a no-op so the
+	// single-user local install keeps working.
+	router.Use(authMiddleware(cfg.Server.AuthToken))
 
 	// Load templates in this order of precedence:
 	//   1. cfg.Paths.TemplatesDir, if set (operator override via

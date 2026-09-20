@@ -159,6 +159,29 @@ type ServerConfig struct {
 	// Enable CORS.
 	EnableCORS bool `env:"SERVER_ENABLE_CORS" yaml:"enable_cors"`
 
+	// CORSOrigins is the explicit allow-list of origins the
+	// server will echo in Access-Control-Allow-Origin. Wildcard
+	// "*" is supported for trusted local-only deployments but
+	// is NOT the default — leaving it unset (empty slice)
+	// disables cross-origin browser requests entirely, which
+	// is the safe default for a single-tenant tool exposed on
+	// 127.0.0.1.
+	CORSOrigins []string `env:"SERVER_CORS_ORIGINS" yaml:"cors_origins,omitempty"`
+
+	// AuthToken is the shared bearer-token secret the web
+	// layer requires on every state-changing or read endpoint
+	// when it is non-empty. Empty (the default) keeps the
+	// server open so local single-user installs work without
+	// configuration. Operators exposing ragabast on a
+	// non-loopback interface MUST set this — without it, any
+	// network-reachable client can ingest, query, and delete
+	// documents.
+	//
+	// Wire format: clients send `Authorization: Bearer <token>`.
+	// Comparison uses constant-time equality (subtle.ConstantTimeCompare)
+	// so the endpoint cannot be used as a timing oracle.
+	AuthToken string `env:"SERVER_AUTH_TOKEN" yaml:"auth_token,omitempty"`
+
 	// ReadTimeout for HTTP requests.
 	ReadTimeout time.Duration `env:"SERVER_READ_TIMEOUT" yaml:"read_timeout"`
 
@@ -452,6 +475,22 @@ func (c *Config) ApplyEnvOverrides() {
 		if p, err := strconv.Atoi(port); err == nil {
 			c.Server.Port = p
 		}
+	}
+	if v := os.Getenv("SERVER_AUTH_TOKEN"); v != "" {
+		c.Server.AuthToken = v
+	}
+	if v := os.Getenv("SERVER_CORS_ORIGINS"); v != "" {
+		// Comma-separated origin list. Empty entries are
+		// dropped; whitespace around entries is trimmed.
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		c.Server.CORSOrigins = out
 	}
 
 	// Paths config.
