@@ -88,11 +88,17 @@ func TestChatMessage_LinksAreRenderedAsClickableAnchors(t *testing.T) {
 		"link text should be the document title, not the [src:N] marker")
 
 	// Anchors open in a new tab with noopener, per
-	// addTargetBlankToAnchors.
+	// addTargetBlankToAnchors. bluemonday's UGCPolicy also
+	// appends nofollow to anchor rel attributes, so the final
+	// rel value is "noopener noreferrer nofollow" — assert on
+	// the security-relevant tokens rather than the exact
+	// string to stay robust against future sanitizer changes.
 	require.Contains(t, body, `target="_blank"`,
 		"anchors must open in a new tab")
-	require.Contains(t, body, `rel="noopener noreferrer"`,
-		"anchors must carry noopener noreferrer")
+	require.Contains(t, body, "noopener",
+		"anchors must carry noopener to prevent tab-nabbing")
+	require.Contains(t, body, "noreferrer",
+		"anchors must carry noreferrer to avoid leaking the Referer header")
 }
 
 // TestChatMessage_HandlesModelsWithNativeThinkingTokens pins

@@ -46,6 +46,28 @@ func renderChatMarkdownToSafeHTML(md string) (string, error) {
 	return withTargets, nil
 }
 
+// sanitizeForChatHTML runs a final bluemonday UGCPolicy pass
+// over the markdown-rendered HTML before it is wrapped as
+// template.HTML in the chat page (see handleChatMessage in
+// handlers.go).
+//
+// Why this exists: the chat page wraps {{ .AnswerHTML }} as
+// template.HTML so html/template does not double-escape the
+// markdown tags we legitimately rendered. Every other field on
+// the page goes through html/template's auto-escape, so this
+// one field becomes "trusted by convention" — a security
+// smell. To keep that trust explicit, we re-sanitize right
+// before the wrap. If the markdown pipeline, InlineSourceLinks,
+// or bluemonday itself ever introduces an XSS-class bypass, the
+// final pass catches it.
+//
+// The pass is intentionally identical to chatSanitizer so
+// callers do not need to remember which UGCPolicy variant is
+// the "outermost" one.
+func sanitizeForChatHTML(html string) string {
+	return string(chatSanitizer.SanitizeBytes([]byte(html)))
+}
+
 func addTargetBlankToAnchors(html string) string {
 	return anchorTagRegex.ReplaceAllStringFunc(html, func(tag string) string {
 		lower := strings.ToLower(tag)

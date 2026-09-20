@@ -301,20 +301,32 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 	// cite anything).
 	answerWithInlineLinks := service.InlineSourceLinks(answer, sources)
 
-	// Render the (now inline-linked) LLM reply to safe HTML.
-	// Markdown-to-HTML is already sanitized by
-	// renderChatMarkdownToSafeHTML.
+	// Render the (now inline-linked) LLM reply to HTML.
+	//
+	// Trust model: the LLM reply is untrusted text. Anything
+	// that lands in {{ .AnswerHTML }} on the page is wrapped
+	// as template.HTML (so html/template does not double-escape
+	// the legitimate markdown tags we just rendered). Wrapping
+	// as template.HTML is a security smell — every other field
+	// in the template goes through html/template's auto-escape,
+	// so this one field becomes "trusted by convention". To
+	// keep that trust explicit, the pipeline below ends with a
+	// second bluemonday UGCPolicy pass (sanitizeForChatHTML)
+	// that strips anything the markdown renderer or
+	// InlineSourceLinks introduced that the first sanitizer
+	// pass missed. The markdown renderer already runs bluemonday
+	// once (see internal/web/markdown.go); this second pass is
+	// defense in depth, not a substitute.
 	answerHTML, mdErr := renderChatMarkdownToSafeHTML(answerWithInlineLinks)
 	if mdErr != nil {
 		// Fall back to escaped plaintext so the user still sees
 		// the assistant's reply if markdown rendering blows up.
+		// The string is HTML-escaped so it is safe to wrap as
+		// template.HTML below.
 		answerHTML = template.HTMLEscapeString(answerWithInlineLinks)
 	}
+	answerHTML = sanitizeForChatHTML(answerHTML)
 
-	// answerHTML is trusted — markdown was already rendered
-	// through bluemonday's sanitizer above. Wrap as
-	// template.HTML so html/template doesn't double-escape the
-	// tags when we drop it into the page.
 	s.renderTemplate(w, "chat_message.html", map[string]any{
 		"User":       msg,
 		"Answer":     answerWithInlineLinks,
