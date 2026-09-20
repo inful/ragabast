@@ -67,6 +67,17 @@ func NewService(cfg *config.Config) (*Service, error) {
 
 	vectorOps := vector.NewVectorOperations(db, embeddings)
 
+	// Wire the bleve-backed keyword index alongside the
+	// vector DB. The search index lives at a sibling path
+	// of the vector DB's persistence dir so a single
+	// `vector reset` cleans both up.
+	searchDir := vector.SearchIndexPathFor(cfg.VectorDB.PersistenceDir)
+	searchIdx, err := vector.LoadSearchIndex(searchDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize search index: %w", err)
+	}
+	vectorOps.SetSearchIndex(searchIdx)
+
 	docParser := parser.NewDocbuilderParser()
 	docChunker := chunker.NewChunker(cfg.Processing.MaxChunkSize, cfg.Processing.MinChunkSize, cfg.Processing.ChunkOverlap)
 

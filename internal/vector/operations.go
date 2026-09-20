@@ -8,17 +8,41 @@ import (
 )
 
 // VectorOperations handles high-level vector database operations.
+// It owns two parallel stores: the embedding vector DB and the
+// bleve-backed text index. Both stores are kept in sync on every
+// ingest, delete, and clear operation. When searchIndex is nil
+// (the historical default), the keyword side degrades gracefully
+// — the vector side keeps working unchanged.
 type VectorOperations struct {
-	db         *VectorDB
-	embeddings *OpenAIEmbeddingClient
+	db          *VectorDB
+	embeddings  *OpenAIEmbeddingClient
+	searchIndex *SearchIndex
 }
 
 // NewVectorOperations creates a new vector operations handler.
+// Call SetSearchIndex to enable the keyword index for hybrid
+// search; otherwise only semantic search is available.
 func NewVectorOperations(db *VectorDB, embeddings *OpenAIEmbeddingClient) *VectorOperations {
 	return &VectorOperations{
 		db:         db,
 		embeddings: embeddings,
 	}
+}
+
+// SetSearchIndex wires the bleve-backed keyword index into the
+// lifecycle. Once set, every IngestDocument / DeleteDocument /
+// DeleteChunk keeps both stores in sync. Calling with nil
+// disables the keyword side; existing writes still complete on
+// the vector side.
+func (vo *VectorOperations) SetSearchIndex(idx *SearchIndex) {
+	vo.searchIndex = idx
+}
+
+// SearchIndex returns the wired keyword index, or nil when
+// hybrid search is not enabled. The HTTP layer uses this to
+// decide which search paths to expose.
+func (vo *VectorOperations) SearchIndex() *SearchIndex {
+	return vo.searchIndex
 }
 
 // IngestDocument processes all chunks of a document.
@@ -42,8 +66,16 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 	if exists && needsUpdate {
 		// Clear old chunks before re-ingest.
 		// With deterministic IDs, this prevents duplicate-ID insert failures and makes re-ingest idempotent.
+		// Clear both stores — the keyword index has its own
+		// chunks and would otherwise leave stale entries that
+		// the vector DB no longer reports.
 		if deleteErr := vo.db.DeleteDocument(ctx, doc.ID); deleteErr != nil {
 			return fmt.Errorf("failed to clear existing document %s: %w", doc.ID, deleteErr)
+		}
+		if vo.searchIndex != nil {
+			if deleteErr := vo.searchIndex.DeleteDocument(doc.ID); deleteErr != nil {
+				return fmt.Errorf("failed to clear existing document from search index %s: %w", doc.ID, deleteErr)
+			}
 		}
 	}
 
@@ -89,6 +121,28 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 		return fmt.Errorf("failed to store document chunks: %w", err)
 	}
 
+	// Mirror every chunk into the keyword index when one
+	// is wired. Failure here surfaces to the caller; the
+	// vector DB write already committed, but the next
+	// re-ingest will hit the needsUpdate path and clean
+	// up both stores (so partial state self-heals).
+	if vo.searchIndex != nil {
+		summaries := make([]chunkSummary, 0, len(chunks))
+		for _, c := range chunks {
+			summaries = append(summaries, chunkSummary{
+				ID:         c.ID,
+				Content:    c.Content,
+				Title:      c.DocumentTitle,
+				DocumentID: c.DocumentID,
+				Tags:       c.DocumentTags,
+				Categories: c.DocumentCategories,
+			})
+		}
+		if addErr := vo.searchIndex.AddBatch(summaries); addErr != nil {
+			return fmt.Errorf("failed to index chunks for keyword search: %w", addErr)
+		}
+	}
+
 	return nil
 }
 
@@ -123,14 +177,31 @@ func (vo *VectorOperations) GetChunk(ctx context.Context, chunkID string) (*mode
 	return vo.db.GetChunk(ctx, chunkID)
 }
 
-// DeleteDocument removes all data for a document.
+// DeleteDocument removes all data for a document from both
+// the vector DB and the keyword index.
 func (vo *VectorOperations) DeleteDocument(ctx context.Context, documentID string) error {
-	return vo.db.DeleteDocument(ctx, documentID)
+	if err := vo.db.DeleteDocument(ctx, documentID); err != nil {
+		return err
+	}
+	if vo.searchIndex != nil {
+		if err := vo.searchIndex.DeleteDocument(documentID); err != nil {
+			return fmt.Errorf("delete from search index: %w", err)
+		}
+	}
+	return nil
 }
 
-// DeleteChunk removes a specific chunk.
+// DeleteChunk removes a single chunk from both stores.
 func (vo *VectorOperations) DeleteChunk(ctx context.Context, chunkID string) error {
-	return vo.db.DeleteChunk(ctx, chunkID)
+	if err := vo.db.DeleteChunk(ctx, chunkID); err != nil {
+		return err
+	}
+	if vo.searchIndex != nil {
+		if err := vo.searchIndex.DeleteChunk(chunkID); err != nil {
+			return fmt.Errorf("delete from search index: %w", err)
+		}
+	}
+	return nil
 }
 
 // GetStats returns statistics about the vector database.
