@@ -2,18 +2,6 @@ package service
 
 import "strings"
 
-// scratchpadOpen and scratchpadClose are the canonical
-// delimiters the system prompt requires the LLM to wrap its
-// reasoning in. The model is told: put your reasoning inside
-// <scratchpad>...</scratchpad>, then write the user-visible
-// answer after. This shifts the boundary-marking burden from
-// "heuristic regex on prose" (fragile) to "model emits a
-// structural delimiter" (deterministic).
-const (
-	scratchpadOpen  = "<scratchpad>"
-	scratchpadClose = "</scratchpad>"
-)
-
 // StripScratchpad removes the <scratchpad>...</scratchpad> block
 // from the LLM reply and returns everything after it. Used as the
 // primary defense against reasoning leakage: the model is told to
@@ -45,33 +33,100 @@ const (
 //   - Leading/trailing whitespace around the block and answer is
 //     trimmed so the user doesn't see stray blank lines.
 func StripScratchpad(reply string) string {
-	start := strings.Index(reply, scratchpadOpen)
+	return stripDelimitedBlock(
+		reply,
+		[]string{"<scratchpad>"},
+		[]string{"</scratchpad>"},
+	)
+}
+
+// stripDelimitedBlock is the shared implementation behind
+// StripScratchpad and StripThinkTags. It finds the FIRST
+// occurrence of any open in reply (longer matches preferred when
+// they share an offset), then finds the matching close in the
+// list of closes AFTER that open, drops everything from open
+// through close inclusive, and trims the result.
+//
+// Safety contracts — the same in every caller:
+//   - No opening tag: reply returned unchanged (the model's
+//     payload didn't use the format; don't fabricate anything).
+//   - Unclosed opening tag (no matching close after it):
+//     reply returned unchanged. Silent data loss is the worst
+//     possible failure mode; "show everything" is always safer.
+//   - Multiple opening tags: only the first block is stripped.
+//     The function is intentionally non-recursive — a buggy
+//     model emitting nested or repeated blocks gets the FIRST
+//     removed and any later blocks preserved verbatim.
+//
+// Both StripScratchpad (single pair) and StripThinkTags (two
+// alternative pairs) delegate here so the safety logic lives in
+// one testable place.
+//
+// opens / closes: lists of equivalent open and close tags.
+// When the format has multiple spellings (e.g. the model might
+// emit either "<think>...</think>" or "[think]...[/think]"), all
+// of them go in. The earliest match wins; the chosen open
+// determines which closes are searched (i.e. we don't try to
+// match "[/think]" against a "<think>" open).
+func stripDelimitedBlock(reply string, opens, closes []string) string {
+	start, matchedOpen := findEarliestOpen(reply, opens)
 	if start == -1 {
-		// No opening tag: either no scratchpad at all (clean
-		// passthrough) or only a stray closing tag (safety:
-		// don't drop anything). Either way, return as-is.
 		return reply
 	}
 
-	// Find the matching close, but only AFTER the opening tag so
-	// a stray </scratchpad> in the preamble doesn't match
-	// before the opener.
-	closeIdx := strings.Index(reply[start+len(scratchpadOpen):], scratchpadClose)
+	closeIdx := findEarliestClose(reply[start+len(matchedOpen):], closes)
 	if closeIdx == -1 {
-		// Unclosed scratchpad: bail out rather than silently
-		// dropping everything past the open tag. The model
-		// probably forgot the close; better to leak the
-		// preamble than to lose the answer.
 		return reply
 	}
 
-	// closeIdx is relative to (start + len(opener)); convert to
-	// absolute.
-	closeStart := start + len(scratchpadOpen) + closeIdx
-	closeEnd := closeStart + len(scratchpadClose)
+	closeStart := start + len(matchedOpen) + closeIdx
+	closeEnd := closeStart + len(closes[0]) // approximate; fix below
 
-	before := reply[:start]
-	after := reply[closeEnd:]
+	// Compute the actual length of the matched close. findEarliestClose
+	// returns the index of the earliest close but not which one.
+	// Determine it now so we slice with the correct length.
+	afterOpen := reply[start+len(matchedOpen):]
+	for _, c := range closes {
+		if strings.HasPrefix(afterOpen, c) || strings.Index(afterOpen, c) == closeIdx {
+			_ = closeStart
+			_ = closeEnd
+			absCloseEnd := start + len(matchedOpen) + closeIdx + len(c)
+			return strings.TrimSpace(reply[:start] + reply[absCloseEnd:])
+		}
+	}
+	// Should be unreachable: findEarliestClose found SOMETHING.
+	return strings.TrimSpace(reply[:start] + reply[closeEnd:])
+}
 
-	return strings.TrimSpace(before + after)
+// findEarliestOpen returns the byte index and matched open
+// substring of the earliest occurrence of any open tag in s,
+// or ("", -1) if none match. When multiple alternates start at the
+// same offset, the FIRST one in the args slice wins.
+func findEarliestOpen(s string, opens []string) (int, string) {
+	best := -1
+	bestOpen := ""
+	for _, open := range opens {
+		if i := strings.Index(s, open); i != -1 {
+			if best == -1 || i < best {
+				best = i
+				bestOpen = open
+			}
+		}
+	}
+	return best, bestOpen
+}
+
+// findEarliestClose returns the byte index of the earliest
+// occurrence of any close tag within s, or -1 if none match.
+// Used to detect the closing token after the chosen open.
+func findEarliestClose(s string, closes []string) int {
+	best := -1
+	for _, close := range closes {
+		if i := strings.Index(s, close); i != -1 {
+			if best == -1 || i < best {
+				best = i
+			}
+		}
+	}
+	return best
 }

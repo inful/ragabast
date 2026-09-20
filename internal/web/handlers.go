@@ -315,6 +315,18 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		sources = info.Results
 	}
 
+	// Strip the model's own native thinking tokens
+	// (<think>...</think> and the Qwen-style [think]...[/think]
+	// variant). Some model families (Qwen, DeepSeek, ...) emit
+	// their own reasoning tokens as a parallel channel to the
+	// ragabast-directed <scratchpad>...</scratchpad> format.
+	// Without this stripper, the user's visible reply includes
+	// the model's "thinking out loud" preamble even when the
+	// model also complies with our scratchpad directive. This is
+	// the most common source of leaked preamble that the user
+	// has been seeing.
+	answer = service.StripThinkTags(answer)
+
 	// Strip the <scratchpad>...</scratchpad> block the prompt
 	// asks the LLM to wrap its reasoning in. Deterministic — no
 	// heuristic matching of "Let me check…" style starters. If
