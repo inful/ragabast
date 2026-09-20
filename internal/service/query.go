@@ -98,7 +98,7 @@ func (s *Service) HybridSearch(
 	query string,
 	limit int,
 	filters SearchFilters,
-	mode vector.SearchMode,
+	mode SearchMode,
 ) ([]models.SearchResult, error) {
 	vFilters := vector.SearchFilters{
 		DocumentID: filters.DocumentID,
@@ -130,6 +130,21 @@ func (s *Service) enrichWithDocbuilderURLs(results []models.SearchResult) {
 func (s *Service) SearchByDocument(ctx context.Context, query string, documentID string, limit int) ([]models.SearchResult, error) {
 	return s.Search(ctx, query, limit, SearchFilters{DocumentID: documentID})
 }
+
+// SearchMode is the public re-export of vector.SearchMode so
+// callers (HTTP handlers, CLI) can refer to mode constants
+// without importing the lower-level vector package directly.
+type SearchMode = vector.SearchMode
+
+// ModeHybrid, ModeSemantic, ModeKeyword are exposed at the
+// service package level so HTTP and CLI callers can refer to
+// them as service.ModeHybrid rather than reaching into the
+// vector package.
+const (
+	ModeHybrid   = vector.ModeHybrid
+	ModeSemantic = vector.ModeSemantic
+	ModeKeyword  = vector.ModeKeyword
+)
 
 // deprecatedChatOnce guards the warning so it fires at most
 // once per method name across the whole process. Without this

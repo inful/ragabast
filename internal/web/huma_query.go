@@ -38,10 +38,32 @@ type queryHit struct {
 }
 
 // searchRequestBody is the JSON shape POSTed to /api/search.
+//
+// Mode defaults to "hybrid" (v0.4.0). Pass "semantic" for
+// pure embedding similarity (the v0.3.0 behavior) or
+// "keyword" for bleve-only search. The three modes are
+// useful for callers debugging why a particular chunk ranks
+// where it does.
+//
+// The document_id / tag / category filters are applied to
+// BOTH rankings before fusion; a chunk that fails any filter
+// never appears in the result.
+//
+// min_score is a pointer so the field is genuinely optional:
+// when omitted (nil), no minimum-relevance filter applies.
+// A v0.3.0 caller that omits min_score would have seen a
+// default of 0.5 applied server-side; the v0.4.0 default
+// is 0, which keeps low-similarity results in the response
+// for callers who want to see everything the ranking
+// produced.
 type searchRequestBody struct {
-	Query    string  `doc:"Search query" json:"query"`
-	Limit    int     `default:"5" doc:"Number of results" json:"limit" minimum:"1"`
-	MinScore float64 `default:"0.5" doc:"Minimum similarity score" json:"min_score" maximum:"1" minimum:"0"`
+	Query      string   `doc:"Search query" json:"query"`
+	Limit      int      `default:"5" doc:"Number of results" json:"limit" minimum:"1"`
+	MinScore   *float64 `doc:"Minimum relevance score in [0,1]. Omit for no minimum." json:"min_score,omitempty" maximum:"1" minimum:"0"`
+	Mode       string   `doc:"Search mode: hybrid (default), semantic, or keyword" enum:"hybrid,semantic,keyword" json:"mode,omitempty"`
+	DocumentID string   `doc:"Restrict results to one document" json:"document_id,omitempty"`
+	Tag        string   `doc:"Restrict results to chunks whose document has this tag" json:"tag,omitempty"`
+	Category   string   `doc:"Restrict results to chunks whose document has this category" json:"category,omitempty"`
 }
 
 type searchResultBody struct {
@@ -112,7 +134,7 @@ func registerSearchOperation(api huma.API, svc serviceAPI) {
 		OperationID: "search",
 		Method:      http.MethodPost,
 		Path:        "/api/search",
-		Summary:     "Semantic search",
+		Summary:     "Hybrid search across the embedding index and the keyword index",
 	}, func(ctx context.Context, input *struct{ Body searchRequestBody }) (*struct{ Body searchResponseBody }, error) {
 		q := strings.TrimSpace(input.Body.Query)
 		if q == "" {
@@ -123,12 +145,26 @@ func registerSearchOperation(api huma.API, svc serviceAPI) {
 		if limit == 0 {
 			limit = 5
 		}
-		minScore := input.Body.MinScore
-		if minScore == 0 {
-			minScore = 0.5
+		// min_score default dropped from 0.5 to 0 in v0.4.0:
+		// semantic similarity scores vary with the embeddings
+		// model and 0.5 was filtering too aggressively for
+		// nomic-embed-text. Callers who want the old
+		// behavior can pass min_score: 0.5 explicitly.
+		// The pointer is nil when the caller omits the field;
+		// dereference safely.
+		var minScore float64
+		if input.Body.MinScore != nil {
+			minScore = *input.Body.MinScore
 		}
 
-		results, err := svc.Search(ctx, q, limit, service.SearchFilters{})
+		mode := parseSearchMode(input.Body.Mode)
+		filters := service.SearchFilters{
+			DocumentID: input.Body.DocumentID,
+			Tag:        input.Body.Tag,
+			Category:   input.Body.Category,
+		}
+
+		results, err := svc.HybridSearch(ctx, q, limit, filters, mode)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("search failed")
 		}
@@ -150,4 +186,26 @@ func registerSearchOperation(api huma.API, svc serviceAPI) {
 
 		return &struct{ Body searchResponseBody }{Body: searchResponseBody{Count: len(filtered), Results: filtered}}, nil
 	})
+}
+
+// parseSearchMode maps the JSON wire string to the
+// service.SearchMode enum. Defaults to ModeHybrid when
+// the caller omits the field — this is the v0.4.0
+// behavior change from the v0.3.0 pure-semantic default.
+func parseSearchMode(s string) service.SearchMode {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "semantic":
+		return service.ModeSemantic
+	case "keyword":
+		return service.ModeKeyword
+	case "", "hybrid":
+		return service.ModeHybrid
+	default:
+		// Unknown mode — fall back to hybrid. We could
+		// 400 here but the hybrid path is the safest
+		// default and the error path is reserved for
+		// real failures (corrupt index, embeddings
+		// server down).
+		return service.ModeHybrid
+	}
 }

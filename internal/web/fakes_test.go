@@ -67,6 +67,18 @@ func (f *fakeHumaService) Search(_ context.Context, _ string, _ int, _ service.S
 	return f.searchResults, nil
 }
 
+// HybridSearch mirrors Search for the v0.4.0 hybrid-routing
+// path. Both fakes share the same canned results so existing
+// search tests that don't care about the mode still work;
+// tests that need to assert the mode is plumbed through can
+// capture f.lastSearchMode via a small wrapper if needed.
+func (f *fakeHumaService) HybridSearch(_ context.Context, _ string, _ int, _ service.SearchFilters, _ service.SearchMode) ([]models.SearchResult, error) {
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	return f.searchResults, nil
+}
+
 func (f *fakeHumaService) ListDocuments(_ context.Context) ([]models.DocumentInfo, error) {
 	return f.documents, nil
 }
@@ -145,6 +157,7 @@ type fakeService struct {
 	lastSearchQuery   string
 	lastSearchFilters service.SearchFilters
 	lastSearchLimit   int
+	lastSearchMode    service.SearchMode
 	queryAnswer       string
 	queryDebug        *service.QueryDebugInfo
 	queryErr          error
@@ -181,6 +194,20 @@ func (f *fakeService) Search(_ context.Context, query string, limit int, filters
 	f.lastSearchQuery = query
 	f.lastSearchFilters = filters
 	f.lastSearchLimit = limit
+	if f.searchErr != nil {
+		return nil, f.searchErr
+	}
+	return f.searchResults, nil
+}
+
+// HybridSearch is the v0.4.0 entry point; records the mode
+// alongside query/filters/limit so the v0.4.0 tests can
+// assert that mode is plumbed through.
+func (f *fakeService) HybridSearch(_ context.Context, query string, limit int, filters service.SearchFilters, mode service.SearchMode) ([]models.SearchResult, error) {
+	f.lastSearchQuery = query
+	f.lastSearchFilters = filters
+	f.lastSearchLimit = limit
+	f.lastSearchMode = mode
 	if f.searchErr != nil {
 		return nil, f.searchErr
 	}

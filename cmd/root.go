@@ -588,20 +588,34 @@ func (c *ListCmd) Run(ctx *kong.Context) error {
 // SearchCmd represents the search command.
 type SearchCmd struct {
 	ConfigOpts
-	Query   string `help:"Search query" arg:""`
-	TopK    int    `short:"k" default:"5" help:"Number of results"`
-	DocID   string `short:"d" help:"Filter by document ID"`
-	Verbose bool   `short:"v" help:"Show full content"`
+	Query    string `help:"Search query" arg:""`
+	TopK     int    `short:"k" default:"5" help:"Number of results"`
+	DocID    string `short:"d" help:"Filter by document ID"`
+	Tag      string `name:"tag" help:"Filter by tag"`
+	Category string `name:"category" help:"Filter by category"`
+	Mode     string `short:"m" default:"hybrid" help:"Search mode: hybrid (default), semantic, or keyword" enum:"hybrid,semantic,keyword"`
+	Verbose  bool   `short:"v" help:"Show full content"`
 }
 
 func (c *SearchCmd) Run(ctx *kong.Context) error {
 	return withService(c.ConfigOpts, func(ctx context.Context, _ *config.Config, svc *service.Service) error {
+		mode := parseSearchModeFlag(c.Mode)
+		filters := service.SearchFilters{
+			DocumentID: c.DocID,
+			Tag:        c.Tag,
+			Category:   c.Category,
+		}
+
+		// SearchByDocument is a v0.3.0 convenience wrapper
+		// that pre-fills the document_id filter. When the
+		// caller passed other filters too, drop down to
+		// HybridSearch so all of them apply.
 		var results []models.SearchResult
 		var err error
-		if c.DocID != "" {
+		if c.DocID != "" && c.Tag == "" && c.Category == "" {
 			results, err = svc.SearchByDocument(ctx, c.Query, c.DocID, c.TopK)
 		} else {
-			results, err = svc.Search(ctx, c.Query, c.TopK, service.SearchFilters{})
+			results, err = svc.HybridSearch(ctx, c.Query, c.TopK, filters, mode)
 		}
 		if err != nil {
 			return fmt.Errorf("search failed: %w", err)
@@ -614,7 +628,7 @@ func (c *SearchCmd) Run(ctx *kong.Context) error {
 
 		log.Printf("Search results for: %s\n\n", c.Query)
 		for i, result := range results {
-			log.Printf("[%d] %s (Similarity: %.3f)\n", i+1, result.DocumentTitle, result.Similarity)
+			log.Printf("[%d] %s (Score: %.3f)\n", i+1, result.DocumentTitle, result.Similarity)
 			log.Printf("    Chunk ID: %s\n", result.ChunkID)
 			if c.Verbose {
 				log.Printf("    Content: %s\n", result.Content)
@@ -624,4 +638,21 @@ func (c *SearchCmd) Run(ctx *kong.Context) error {
 
 		return nil
 	})
+}
+
+// parseSearchModeFlag translates the CLI string flag into the
+// service-level enum. Mirrors the JSON wire parser in
+// internal/web/huma_query.go so behavior is identical
+// regardless of which surface the caller uses.
+func parseSearchModeFlag(s string) service.SearchMode {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "semantic":
+		return service.ModeSemantic
+	case "keyword":
+		return service.ModeKeyword
+	case "", "hybrid":
+		return service.ModeHybrid
+	default:
+		return service.ModeHybrid
+	}
 }
