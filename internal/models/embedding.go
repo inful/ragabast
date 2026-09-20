@@ -39,16 +39,6 @@ func NewEmbedding() *Embedding {
 	}
 }
 
-// UpdateTimestamps updates the updated_at timestamp.
-func (e *Embedding) UpdateTimestamps() {
-	e.UpdatedAt = time.Now()
-}
-
-// IsValid checks if the embedding has valid data.
-func (e *Embedding) IsValid() bool {
-	return len(e.Vector) > 0 && e.Dimension > 0 && e.Model != ""
-}
-
 // CosineSimilarity calculates the cosine similarity between two embeddings.
 func (e *Embedding) CosineSimilarity(other *Embedding) float32 {
 	if len(e.Vector) != len(other.Vector) {
