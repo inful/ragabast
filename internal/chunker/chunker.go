@@ -319,8 +319,3 @@ func (c *Chunker) ChunkWithHierarchy(doc *models.Document) ([]*models.Chunk, err
 
 	return chunks, nil
 }
-
-// ValidateChunk was previously a method on *Chunker; the actual
-// chunk validation lives in validator.go (free functions:
-// ValidateChunk, ValidateChunkBatch, etc.). The method here was
-// dead code and has been removed.
