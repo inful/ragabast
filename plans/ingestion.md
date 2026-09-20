@@ -259,7 +259,11 @@ In `config.yml` / `config.example.yml`. Defaults from
 | `ollama.base_url`, `ollama.embedding_model`, `ollama.embedding_dimensions` | `http://localhost:11434`, `nomic-embed-text:v1.5`, `0` | Where embeddings come from. `embedding_dimensions > 0` requests Matryoshka truncation. |
 | `vectordb.embedding_dimension` | `768` | Must match the dimension of the vectors being stored. See "When you must `rm -rf data/vectors/`" above. |
 | `vectordb.persistence_dir` | `./data/vectors` | Where `chromem-go` writes its files. |
-| `server.enable_cors` | `true` | Required for cross-origin browser uploads. |
+| `server.enable_cors` | `true` | When true, CORS processing runs. Cross-origin browser requests are only allowed for origins in `server.cors_origins`. |
+| `server.cors_origins` | `[]` | Allow-list of origins echoed in `Access-Control-Allow-Origin`. Empty disables cross-origin browser requests. Set to `["*"]` only for trusted local-only deployments. |
+| `server.auth_token` | `""` | Bearer token required on every protected endpoint. Leave empty for local single-user installs. Operators exposing ragabast on a non-loopback interface **must** set this. |
+| `server.rate_limit_per_minute` | `0` | Per-IP token-bucket rate on the LLM-backed endpoints. `0` disables the limiter. |
+| `server.rate_limit_burst` | `5` | Maximum burst before the per-minute rate kicks in. |
 
 Per-provider keys: `ollama.api_key` is the default bearer token;
 `ollama.embedding_api_key` overrides it for the embeddings server

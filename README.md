@@ -79,4 +79,117 @@ Notes:
 
 - Start the web server: `ragabast serve`
 - Use a specific config file: `ragabast serve --config ./config.yml`
-- Create a starter config: `ragabast config init` (or `ragabast init`) (writes `config.yml`)
+- Create a starter config: `ragabast config init` (or `ragabast init`) (writes `config.yml` with mode `0600`)
+
+## Security
+
+ragabast ships hardened for safe local-dev use and for non-loopback
+deployment. The defaults are safe-by-construction; every knob below has a
+sensible value and is documented in [config.example.yml](config.example.yml).
+
+### Authentication (C-1, H-3)
+
+The web server's API and form-mounted endpoints require a bearer token when
+`server.auth_token` is non-empty. Clients send `Authorization: Bearer <token>`;
+the token is compared in constant time (`crypto/subtle.ConstantTimeCompare`)
+so the endpoint cannot be used as a timing oracle.
+
+Wire format:
+```bash
+curl -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:8080/api/health
+```
+
+Public routes (always open, even when auth is configured) — these are the
+GET pages that load the HTML chrome in the operator's browser, plus static
+assets and CORS preflight:
+
+| Method | Path |
+|---|---|
+| GET | `/`, `/chat`, `/search`, `/ingest`, `/documents` |
+| GET | `/static/*` |
+| OPTIONS | `*` |
+
+Default behaviour when `auth_token` is empty: open access. This keeps the
+local single-user install working without configuration. Operators exposing
+ragabast on a non-loopback interface **must** set this — leaving it empty
+means anyone who can reach the listener can ingest, query, and delete
+documents.
+
+Env: `SERVER_AUTH_TOKEN`.
+
+### CORS (C-2)
+
+CORS is **off by default at the allow-list level**. Setting
+`server.enable_cors: true` enables CORS processing, but cross-origin browser
+requests are only allowed when the request's `Origin` header appears in
+`server.cors_origins`. Wildcard `*` is still supported for trusted local-only
+deployments but is not the default.
+
+```yaml
+server:
+  enable_cors: true
+  cors_origins:
+    - https://docs.example.com
+    - https://app.example.com
+```
+
+Env: `SERVER_CORS_ORIGINS` (comma-separated).
+
+### Rate limiting (H-4)
+
+The LLM-backed endpoints (`/api/query`, `/api/search`, `/api/link-suggestions`,
+`/api/frontmatter/suggest`, `/chat/message`, `/search`) share a per-client-IP
+token-bucket limiter. The bucket refills continuously; an empty bucket
+returns `429 Too Many Requests` with a `Retry-After` header.
+
+| Field | Default | Effect |
+|---|---|---|
+| `server.rate_limit_per_minute` | `0` (disabled) | Sustained per-IP rate. 0 disables the limiter. |
+| `server.rate_limit_burst` | `5` | Immediate requests allowed before the per-minute rate kicks in. |
+
+Health checks, static, and HTML form renders are NOT throttled.
+
+Env: `SERVER_RATE_LIMIT_PER_MINUTE`, `SERVER_RATE_LIMIT_BURST`.
+
+### HTTP hardening (H-1, H-2, M-4)
+
+Every response carries the defense headers below:
+
+| Header | Value |
+|---|---|
+| `X-Content-Type-Options` | `nosniff` |
+| `Referrer-Policy` | `no-referrer` |
+| `X-Frame-Options` | `DENY` |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` |
+
+Every request is also bounded:
+
+- Request body ≤ 10 MiB (enforced by `http.MaxBytesReader`; Huma endpoints use Huma's own cap).
+- `ReadTimeout` / `WriteTimeout` from config; fixed `IdleTimeout = 120s`.
+- Handler-level `Timeout(60s)` (chi) cancels the handler context.
+
+### LLM reply sanitization (H-6)
+
+The chat reply is rendered to HTML by `goldmark` + bluemonday UGCPolicy and
+then re-sanitized by a final `sanitizeForChatHTML` pass immediately before
+the `template.HTML` wrap. The double pass is defense in depth: a single bug
+in the markdown pipeline, `InlineSourceLinks`, or bluemonday itself does
+not become XSS through the chat UI.
+
+### Secrets in config (M-1, M-2)
+
+`ragabast config init` writes `config.yml` with mode `0o600` (owner read/write
+only). `config.yml` may carry bearer tokens (`server.auth_token`) and LLM API
+keys (`ollama.api_key`); the default Linux umask of `022` would otherwise
+produce a world-readable file. SaveConfig also chmods an existing file
+to `0o600` before overwriting it, so the `config init --force` path stays safe.
+
+The access log redacts values for these query keys before chi's logger
+formats the line: `query`, `message`, `text`, `content`, `document_id`,
+`docbuilder_base_url`. Non-sensitive keys (e.g. `tag`, `category`) pass
+through unchanged.
+
+The bearer token is **never** logged, even when `ragabast.log_chat_requests`
+is true. Only the chat request/response bodies are written under the
+`[chat-debug]` prefix.

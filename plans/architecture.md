@@ -48,7 +48,7 @@ graph TB
     end
 
     subgraph "HTTP server (internal/web)"
-        chi[chi router<br/>Logger / Recoverer / RealIP / 60s Timeout]
+        chi[chi router<br/>securityHeaders / redactAccessLog / Logger /<br/>Recoverer / RealIP / maxBytesReader /<br/>60s Timeout / cors / auth / rateLimiter]
         huma[HUMA v2 API /api/*]
         pages[HTMX pages /, /search, /ingest, /documents]
     end
@@ -185,10 +185,27 @@ graph TB
 
 ### HTTP server (`internal/web/`)
 
-- `chi` router. Built-in middlewares:
-  `middleware.Logger`, `middleware.Recoverer`, `middleware.RealIP`,
-  `middleware.Timeout(60s)`. CORS is opt-in via `server.enable_cors`
-  (sets wildcard origin + permissive headers; handles `OPTIONS`).
+- `chi` router. Middleware chain (in order, each file documents its own
+  purpose):
+
+  | Middleware | File | Purpose |
+  |---|---|---|
+  | `securityHeadersMiddleware` | `security_headers.go` | Adds CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS on every response. |
+  | `redactAccessLogMiddleware` | `redact_log.go` | Rewrites `r.URL.RawQuery` to redact `query`, `message`, `text`, `content`, `document_id`, `docbuilder_base_url` values before chi's logger runs. |
+  | `middleware.Logger` | chi | Access log (now reading the redacted URL). |
+  | `middleware.Recoverer` | chi | Catches panics; returns 500. |
+  | `middleware.RealIP` | chi | Populates `r.RemoteAddr` from `X-Forwarded-For` (chi v5.3.0+ validates trusted proxies; do not expose chi directly without a trusted proxy). |
+  | `maxBytesReaderMiddleware` | `max_bytes.go` | Wraps every request body with `http.MaxBytesReader` at 10 MiB. |
+  | `middleware.Timeout(60s)` | chi | Cancels handler context after 60s. |
+  | `corsMiddleware` | `cors.go` | Allow-list CORS (replaces the previous wildcard). `cors_origins` empty disables cross-origin browser requests. |
+  | `authMiddleware` | `auth.go` | Bearer-token auth via `Authorization: Bearer <token>`; constant-time compare. Skipped on public routes (HTML GETs, `/static/*`, OPTIONS). |
+  | `llmRateLimiter.llmPathMiddleware` | `rate_limit.go` | Per-IP token-bucket on the LLM-backed paths only (`/api/query`, `/api/search`, `/api/link-suggestions`, `/api/frontmatter/suggest`, `/chat/message`, `/search`); `429` + `Retry-After` when the bucket is empty. |
+
+- The `http.Server` literal in `Start()` applies the configured
+  `ReadTimeout`, `WriteTimeout`, plus a fixed 120 s `IdleTimeout`. Slowloris
+  and slow-body attacks cannot pin connections open indefinitely.
+- `service.SaveConfig` writes `config.yml` with mode `0o600`. Operators do
+  not have to remember to `chmod` after `config init`.
 - HUMA v2 is mounted via the chi adapter. Each resource gets its own
   `huma_*.go` file and its own `register*Operations` function:
 
@@ -281,7 +298,9 @@ graph TB
   the inline notes about per-provider keys, Matryoshka, and
   re-ingestion requirements.
 - **Logging**: standard `log` package; web handlers use `internalError`
-  to log the full chain while returning a generic 500.
+  to log the full chain while returning a generic 500. The access logger
+  sees a redacted URL — see `redact_log.go` for the list of query keys
+  whose values are replaced with `[REDACTED]`.
 - **Testing**: testify + humatest. Co-located `*_test.go` files. The
   `serviceAPI` interface lets the web layer be tested with
   `fakeHumaService` in `fakes_test.go` without spinning up a real
