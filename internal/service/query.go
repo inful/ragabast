@@ -99,6 +99,18 @@ func (s *Service) SearchByDocument(ctx context.Context, query string, documentID
 // method? Just call warnDeprecated with the method name.
 var deprecatedChatOnce sync.Map // map[string]*sync.Once
 
+// resetDeprecatedForTest clears the per-method deprecation
+// log-once state. Test-only: lets the deprecation test run
+// repeatedly within the same process (e.g. `go test -count=N`)
+// without the second-and-later runs silently passing because
+// the warning already fired.
+func resetDeprecatedForTest() {
+	deprecatedChatOnce.Range(func(k, _ any) bool {
+		deprecatedChatOnce.Delete(k)
+		return true
+	})
+}
+
 // warnDeprecated logs a one-shot deprecation notice pointing at
 // the find-docs replacement. It does not change behavior; the
 // deprecated method still runs. The notice is a soft nudge.

@@ -58,6 +58,11 @@ func TestService_QueryDebugWithOptions_LogsDeprecation(t *testing.T) {
 // against log spam: each deprecated method should warn at most
 // once per process. The simplest correctness check is that
 // calling the method twice doesn't produce a duplicate warning.
+//
+// Note: Service.Query delegates to QueryDebugWithOptions, so
+// a single Query() call triggers TWO distinct deprecation
+// warnings (one per deprecated method on the call path).
+// The test asserts each unique method warns at most once.
 func TestService_DeprecationWarning_FiresOncePerMethod(t *testing.T) {
 	buf := &bytes.Buffer{}
 	oldOut := log.Writer()
@@ -70,6 +75,8 @@ func TestService_DeprecationWarning_FiresOncePerMethod(t *testing.T) {
 	})
 
 	svc := &Service{config: config.DefaultConfig()}
+	resetDeprecatedForTest()
+	t.Cleanup(resetDeprecatedForTest)
 
 	callCount := int32(0)
 	doCall := func() {
@@ -84,7 +91,12 @@ func TestService_DeprecationWarning_FiresOncePerMethod(t *testing.T) {
 
 	require.Equal(t, int32(2), atomic.LoadInt32(&callCount), "sanity check: calls actually happened")
 
-	lines := strings.Count(buf.String(), "DEPRECATED")
-	require.Equal(t, 1, lines,
-		"deprecation warning should fire exactly once per process, not once per call; got %d", lines)
+	// Two distinct methods on the Query call path. Each
+	// should warn at most once across both calls.
+	queryLines := strings.Count(buf.String(), "Service.Query synthesizes")
+	queryDebugLines := strings.Count(buf.String(), "Service.QueryDebugWithOptions synthesizes")
+	require.Equal(t, 1, queryLines,
+		"Service.Query should warn exactly once; got %d", queryLines)
+	require.Equal(t, 1, queryDebugLines,
+		"Service.QueryDebugWithOptions should warn exactly once; got %d", queryDebugLines)
 }
