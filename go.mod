@@ -1,6 +1,6 @@
 module github.com/ragabast
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/alecthomas/kong v1.13.0
@@ -12,6 +12,7 @@ require (
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/stretchr/testify v1.10.0
 	github.com/yuin/goldmark v1.7.8
+	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

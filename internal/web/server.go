@@ -73,6 +73,17 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// single-user local install keeps working.
 	router.Use(authMiddleware(cfg.Server.AuthToken))
 
+	// Rate-limit middleware for the LLM-backed endpoints. The
+	// middleware is path-aware (see rate_limit.go) and a no-op
+	// for any non-LLM URL prefix; it is installed at the
+	// chain level so it covers both the Huma-mounted
+	// endpoints and the form-mounted endpoints without
+	// wrapping each route individually. The limiter is
+	// constructed below in the Server literal so it can be
+	// referenced from the route handlers too.
+	rateLimiter := newLLMRateLimiter(cfg.Server.RateLimitPerMinute, cfg.Server.RateLimitBurst)
+	router.Use(rateLimiter.llmPathMiddleware)
+
 	// Load templates in this order of precedence:
 	//   1. cfg.Paths.TemplatesDir, if set (operator override via
 	//      yaml / env TEMPLATES_DIR; intended for shipping a custom
@@ -115,6 +126,16 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 }
 
 // registerRoutes registers all API routes and web handlers.
+//
+// Rate limiting: a single per-IP token-bucket middleware is
+// installed at the chi level BEFORE routes are registered.
+// The middleware is path-aware — it only throttles requests
+// matching llmPathPrefixes (see rate_limit.go) and passes
+// every other request through. This means one middleware
+// covers the Huma-mounted LLM routes (/api/query, /api/search,
+// /api/link-suggestions, /api/frontmatter/suggest) AND the
+// form-mounted LLM routes (/chat/message, /search), without
+// needing to wrap each route individually.
 func (s *Server) registerRoutes() {
 	registerHumaAPI(s.router, s.config, s.service)
 

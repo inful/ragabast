@@ -182,6 +182,20 @@ type ServerConfig struct {
 	// so the endpoint cannot be used as a timing oracle.
 	AuthToken string `env:"SERVER_AUTH_TOKEN" yaml:"auth_token,omitempty"`
 
+	// RateLimitPerMinute is the per-client-IP token-bucket
+	// rate applied to the LLM-backed endpoints. Zero
+	// disables the limiter (the local-dev default). The
+	// bucket is refilled continuously; the effective
+	// sustained rate is the configured value.
+	RateLimitPerMinute int `env:"SERVER_RATE_LIMIT_PER_MINUTE" yaml:"rate_limit_per_minute,omitempty"`
+
+	// RateLimitBurst is the maximum number of immediate
+	// requests a single client IP can issue before the
+	// per-minute rate kicks in. Defaults to 5; raise it
+	// only if the operator's browser interaction trips
+	// the limiter, not for "tolerance" reasons.
+	RateLimitBurst int `env:"SERVER_RATE_LIMIT_BURST" yaml:"rate_limit_burst,omitempty"`
+
 	// ReadTimeout for HTTP requests.
 	ReadTimeout time.Duration `env:"SERVER_READ_TIMEOUT" yaml:"read_timeout"`
 
@@ -478,6 +492,16 @@ func (c *Config) ApplyEnvOverrides() {
 	}
 	if v := os.Getenv("SERVER_AUTH_TOKEN"); v != "" {
 		c.Server.AuthToken = v
+	}
+	if v := os.Getenv("SERVER_RATE_LIMIT_PER_MINUTE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.Server.RateLimitPerMinute = n
+		}
+	}
+	if v := os.Getenv("SERVER_RATE_LIMIT_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.Server.RateLimitBurst = n
+		}
 	}
 	if v := os.Getenv("SERVER_CORS_ORIGINS"); v != "" {
 		// Comma-separated origin list. Empty entries are

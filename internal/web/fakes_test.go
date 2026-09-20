@@ -134,6 +134,7 @@ type fakeService struct {
 	searchErr         error
 	lastSearchQuery   string
 	lastSearchFilters service.SearchFilters
+	lastSearchLimit   int
 	queryAnswer       string
 	queryDebug        *service.QueryDebugInfo
 	queryErr          error
@@ -166,9 +167,10 @@ func (f *fakeService) IngestDocument(_ context.Context, _ string) (*models.Docum
 // Search records the most-recent (query, limit, filters) call so the
 // web form-submit tests can assert that filter form fields actually
 // reach the service. Returns searchResults unless searchErr is set.
-func (f *fakeService) Search(_ context.Context, query string, _ int, filters service.SearchFilters) ([]models.SearchResult, error) {
+func (f *fakeService) Search(_ context.Context, query string, limit int, filters service.SearchFilters) ([]models.SearchResult, error) {
 	f.lastSearchQuery = query
 	f.lastSearchFilters = filters
+	f.lastSearchLimit = limit
 	if f.searchErr != nil {
 		return nil, f.searchErr
 	}

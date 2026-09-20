@@ -20,6 +20,17 @@ const defaultChatTopK = 5
 // pulling the entire vector DB into the LLM context.
 const maxChatTopK = 50
 
+// defaultSearchTopK is the form /search handler's default top_k. Larger
+// than chat (10 vs 5) because search returns summaries the user skims;
+// chat returns chunks the LLM consumes.
+const defaultSearchTopK = 5
+
+// maxSearchTopK caps the form /search handler's top_k. The HTML form's
+// max="50" attribute is advisory only; this constant is the server-side
+// security boundary. A curl request with top_k=1000000 lands here and is
+// clamped before reaching the vector DB.
+const maxSearchTopK = 50
+
 // chatTopK reads an optional 'top_k' form value, falling back to
 // defaultChatTopK. Out-of-range or unparseable values are clamped.
 func chatTopK(r *http.Request) int {
@@ -33,6 +44,25 @@ func chatTopK(r *http.Request) int {
 	}
 	if v > maxChatTopK {
 		return maxChatTopK
+	}
+	return v
+}
+
+// searchTopK reads an optional 'top_k' form value, falling back
+// to defaultSearchTopK. The clamp at maxSearchTopK is the
+// server-side security boundary (H-5); the HTML form's max="50"
+// attribute is advisory only.
+func searchTopK(r *http.Request) int {
+	raw := strings.TrimSpace(r.FormValue("top_k"))
+	if raw == "" {
+		return defaultSearchTopK
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return defaultSearchTopK
+	}
+	if v > maxSearchTopK {
+		return maxSearchTopK
 	}
 	return v
 }
@@ -358,12 +388,7 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 5
-	if raw := r.FormValue("top_k"); raw != "" {
-		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
-			limit = n
-		}
-	}
+	limit := searchTopK(r)
 
 	filters := service.SearchFilters{
 		Tag:        r.FormValue("tag"),

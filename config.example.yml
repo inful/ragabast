@@ -93,6 +93,17 @@ server:
   # means anyone who can reach the listener can ingest, query,
   # and delete documents. Env: SERVER_AUTH_TOKEN.
   auth_token: ""
+  # Per-client-IP token-bucket rate applied to the LLM-backed
+  # endpoints (/api/query, /api/search, /api/link-suggestions,
+  # /api/frontmatter/suggest, /chat/message, /search). 0
+  # disables the limiter (the local-dev default).
+  # Env: SERVER_RATE_LIMIT_PER_MINUTE.
+  rate_limit_per_minute: 0
+  # Maximum burst (immediate requests before the per-minute rate
+  # kicks in). Default 5 — generous for browser interaction,
+  # tight enough that a hostile scripted client cannot burn
+  # upstream tokens. Env: SERVER_RATE_LIMIT_BURST.
+  rate_limit_burst: 5
   read_timeout: 15s
   write_timeout: 15s
 
