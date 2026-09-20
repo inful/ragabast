@@ -5,13 +5,13 @@ go 1.26.0
 require (
 	github.com/alecthomas/kong v1.13.0
 	github.com/danielgtaylor/huma/v2 v2.34.1
-	github.com/go-chi/chi/v5 v5.2.3
+	github.com/go-chi/chi/v5 v5.3.0
 	github.com/google/uuid v1.6.0
 	github.com/inful/mdfp v1.1.0
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/stretchr/testify v1.10.0
-	github.com/yuin/goldmark v1.7.8
+	github.com/yuin/goldmark v1.7.17
 	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
 )

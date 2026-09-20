@@ -1,0 +1,80 @@
+# Runs govulncheck on every push and pull request so a new
+# transitive CVE in any of our direct dependencies fails CI
+# before it lands in a release. govulncheck is the official
+# Go vulnerability scanner; it cross-references the Go
+# vulnerability database against the symbols we actually
+# call (vs. reporting every CVE in every transitive module).
+#
+# Runs on push to main and on every PR. Release is implicit
+# because every tag push runs the release workflow which
+# also includes the test+lint steps.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel any in-flight run for the same ref so force-pushes
+# don't spawn parallel runs that race on the cache.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: go mod download
+        run: go mod download
+
+      - name: go test
+        run: go test ./... -count=1
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: govulncheck
+        # Official Go vulnerability scanner. Fails the build
+        # if any direct dependency has a known CVE affecting
+        # a symbol we actually call.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: golangci-lint
+        # Pinned to the same major as local development
+        # (`.golangci.yml version: "2"`). Bump deliberately
+        # when the linter version is upgraded.
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.8.0
+          args: --timeout=5m
