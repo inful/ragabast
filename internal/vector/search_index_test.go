@@ -1,6 +1,9 @@
 package vector
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -468,4 +471,49 @@ func TestSearchIndex_EmptyIndexWithQuery(t *testing.T) {
 	hits, err := idx.Search("kubernetes", 5, SearchFilters{})
 	require.NoError(t, err)
 	assert.Empty(t, hits)
+}
+
+// LoadSearchIndex must work in a fresh process where
+// NewSearchIndex has not yet fired the sync.Once that
+// registers the custom tokenizer + length filter with
+// bleve's registry. Otherwise `ragabast serve` crashes
+// on startup whenever the index already exists on disk
+// (every restart of any deployment that has ever booted
+// successfully).
+//
+// The in-process tests above always call NewSearchIndex
+// first, which masks the bug. This test reproduces the
+// production sequence (only LoadSearchIndex, in a fresh
+// process) by re-executing itself as a helper subprocess.
+func TestSearchIndex_LoadOnExistingIndexFromFreshProcess(t *testing.T) {
+	if os.Getenv("RAGABAST_SEARCH_INDEX_HELPER") == "1" {
+		// Helper path: open the pre-existing index and exit.
+		// Bleve.Open must succeed without any prior
+		// NewSearchIndex / BuildMapping call in this process.
+		path := os.Getenv("RAGABAST_SEARCH_INDEX_PATH")
+		idx, err := LoadSearchIndex(path)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper:", err)
+			os.Exit(1)
+		}
+		_ = idx.Close()
+		os.Exit(0)
+	}
+
+	// Orchestrator: build an index in a fresh temp dir, close
+	// it, then re-exec as the helper to test LoadSearchIndex
+	// in a process where sync.Once has not yet fired.
+	path := filepath.Join(t.TempDir(), "search")
+	idx, err := NewSearchIndex(path)
+	require.NoError(t, err)
+	require.NoError(t, idx.AddBatch([]chunkSummary{csID("c1", "kubernetes ingress tls")}))
+	require.NoError(t, idx.Close())
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestSearchIndex_LoadOnExistingIndexFromFreshProcess")
+	cmd.Env = append(os.Environ(),
+		"RAGABAST_SEARCH_INDEX_HELPER=1",
+		"RAGABAST_SEARCH_INDEX_PATH="+path,
+	)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "helper failed: %s", out)
 }
