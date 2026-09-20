@@ -167,7 +167,7 @@ func (vo *VectorOperations) searchSemanticOnly(
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
-	results, err := vo.db.Search(ctx, embedding, limit, filters.toWhere())
+	results, err := vo.db.Search(ctx, embedding, limit, filters.ToWhere())
 	if err != nil {
 		return nil, fmt.Errorf("semantic search failed: %w", err)
 	}
@@ -233,7 +233,7 @@ func (vo *VectorOperations) searchHybridRRF(
 	if vo.embeddings != nil {
 		embedding, err := vo.embeddings.GenerateEmbedding(ctx, query)
 		if err == nil {
-			results, err := vo.db.Search(ctx, embedding, limit*headroom, filters.toWhere())
+			results, err := vo.db.Search(ctx, embedding, limit*headroom, filters.ToWhere())
 			if err == nil {
 				semanticIDs = make([]string, 0, len(results))
 				for _, r := range results {
@@ -335,11 +335,13 @@ func chunkToSearchResult(chunk *models.Chunk, score float32) models.SearchResult
 	}
 }
 
-// toWhere translates SearchFilters into the chromem-go
-// Where map. Mirrors the helper in internal/service/query.go
-// but kept local to avoid an import cycle (vector is a lower
-// package than service).
-func (f SearchFilters) toWhere() map[string]string {
+// ToWhere translates SearchFilters into the chromem-go
+// Where map. Exported because the service.SearchFilters type
+// alias exposes this method to the service package; if it
+// were package-private the alias would not give service code
+// access to it (Go method visibility follows the package that
+// declared the method, not the type's aliasing package).
+func (f SearchFilters) ToWhere() map[string]string {
 	out := map[string]string{}
 	if d := trim(f.DocumentID); d != "" {
 		out["document_id"] = d
