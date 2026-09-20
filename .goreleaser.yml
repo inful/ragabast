@@ -133,11 +133,13 @@ changelog:
   format: "- {{ .SHA }}: {{ .Message }}"
 
 # ---------------------------------------------------------------------------
-# Release: publish a GitHub Release on tag push. `draft: true` so a human
-# reviews the auto-generated notes before they go public.
+# Release: publish a GitHub Release on tag push. Drafts were on for
+# early milestones while the auto-generated notes were an unknown
+# quantity; the changelog filter below strips chore/test/docs/ci noise
+# and groups by type, so the auto body is reliable enough to ship.
 # ---------------------------------------------------------------------------
 release:
-  draft: true
+  draft: false
   prerelease: auto
   name_template: "{{ .ProjectName }} v{{ .Version }}"
   header: |
