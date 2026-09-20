@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/vector"
 )
 
 // SearchFilters narrows a Search by document-level attributes.
@@ -66,8 +67,45 @@ type LLMOptions struct {
 
 // Search performs a semantic search, optionally narrowed by
 // document-level filters.
+//
+// Deprecated for hybrid ranking: use Service.HybridSearch with
+// mode=hybrid (the v0.4.0 default) when callers want exact-term
+// recall to complement embedding similarity. Kept for callers
+// that need pure semantic behavior and for the search-tests
+// that pin v0.3.0 semantics.
 func (s *Service) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
 	results, err := s.vectorOps.Search(ctx, query, limit, filters.toWhere())
+	if err != nil {
+		return nil, wrapCorruptionError(err)
+	}
+	s.enrichWithDocbuilderURLs(results)
+	return results, nil
+}
+
+// HybridSearch runs the configured search mode — keyword,
+// semantic, or hybrid (the v0.4.0 default). The HTTP API and
+// the `ragabast search` CLI both default to ModeHybrid; the
+// in-process Service.Search retains pure-semantic semantics
+// for callers that depend on them.
+//
+// Filters are translated from service.SearchFilters to the
+// vector package's SearchFilters and applied to BOTH rankings
+// (keyword side: term/match query against the document_id /
+// tags / categories fields; semantic side: chromem-go Where
+// filter on the corresponding metadata keys).
+func (s *Service) HybridSearch(
+	ctx context.Context,
+	query string,
+	limit int,
+	filters SearchFilters,
+	mode vector.SearchMode,
+) ([]models.SearchResult, error) {
+	vFilters := vector.SearchFilters{
+		DocumentID: filters.DocumentID,
+		Tag:        filters.Tag,
+		Category:   filters.Category,
+	}
+	results, err := s.vectorOps.SearchHybrid(ctx, query, limit, vFilters, mode)
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}

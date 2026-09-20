@@ -148,7 +148,7 @@ func (vo *VectorOperations) SearchHybrid(
 		return vo.searchKeywordOnly(ctx, query, limit, filters)
 	case ModeSemantic:
 		return vo.searchSemanticOnly(ctx, query, limit, filters)
-	case ModeHybrid, mode /* any unrecognized mode */ :
+	case ModeHybrid:
 		return vo.searchHybridRRF(ctx, query, limit, filters)
 	default:
 		return nil, fmt.Errorf("unknown search mode: %d", mode)
