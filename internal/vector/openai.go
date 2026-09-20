@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"maps"
 	"net/http"
 	"strings"
@@ -54,17 +55,43 @@ type openAIChatResponse struct {
 // Chat Completions API (vLLM, llama.cpp server, LM Studio, llama-stack,
 // OpenRouter, OpenAI, etc.).
 type OpenAILLMClient struct {
-	baseURL    string
-	model      string
-	apiKey     string
-	httpClient *http.Client
+	baseURL         string
+	model           string
+	apiKey          string
+	httpClient      *http.Client
+	logChatRequests bool
+}
+
+// chatDebugLogMaxBytes caps the size of any single body logged
+// by the chat-debug path. Prompts in ragabast can be large (the
+// context block can run thousands of characters); the log stays
+// scannable by truncating above this threshold and appending a
+// "...[truncated]" marker so operators know it was cut.
+const chatDebugLogMaxBytes = 8 * 1024 // 8 KiB
+
+// writeChatDebugLog emits a single chat-debug line at the
+// standard logger, truncating the body if it exceeds the cap.
+// Pulled out so the call sites in client.do are uniform.
+func writeChatDebugLog(label, body string) {
+	if len(body) > chatDebugLogMaxBytes {
+		body = body[:chatDebugLogMaxBytes] + "...[truncated]"
+	}
+	log.Printf("[chat-debug] %s: %s", label, body)
 }
 
 // NewOpenAILLMClientWithOptions is the fully-configurable constructor.
 // apiKey is sent as `Authorization: Bearer <key>` when non-empty.
 // Empty baseURL defaults to http://localhost:11434; empty model
 // defaults to gemma:2b; a non-positive timeout defaults to 60s.
-func NewOpenAILLMClientWithOptions(baseURL, model, apiKey string, timeout time.Duration) *OpenAILLMClient {
+//
+// logChatRequests, when true, makes the client log every chat
+// request and response body under the [chat-debug] log prefix so
+// operators can verify the prompt template actually reaches the
+// model and inspect what the model returned. Defaults to false
+// because the bodies can be large and contain context snippets
+// operators may not want in their log streams. The bearer token
+// is never logged — only the body and (implicitly) the URL.
+func NewOpenAILLMClientWithOptions(baseURL, model, apiKey string, timeout time.Duration, logChatRequests bool) *OpenAILLMClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -82,6 +109,7 @@ func NewOpenAILLMClientWithOptions(baseURL, model, apiKey string, timeout time.D
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		logChatRequests: logChatRequests,
 	}
 }
 
@@ -176,6 +204,14 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	// Optional debug logging: when ragabast.chat.debug_log is on,
+	// emit the full request body before sending. Operators use
+	// this to verify the prompt template actually reaches the
+	// model. Bearer token is never in this string.
+	if c.logChatRequests {
+		writeChatDebugLog("request", string(body))
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewBuffer(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
@@ -196,6 +232,14 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	// Optional debug logging: log the full response body after
+	// receiving. Operators use this to inspect what the model
+	// actually emitted (including the cases where ragabast's
+	// post-processors strip preamble).
+	if c.logChatRequests {
+		writeChatDebugLog("response", string(respBody))
 	}
 
 	if resp.StatusCode != http.StatusOK {

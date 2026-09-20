@@ -27,5 +27,6 @@ func newLLMChatClient(cfg *config.Config) llmChatClient {
 		cfg.Ollama.ChatModel,
 		cfg.Ollama.EffectiveChatAPIKey(),
 		cfg.Ollama.Timeout,
+		cfg.Ragabast.LogChatRequests,
 	)
 }

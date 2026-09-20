@@ -37,6 +37,15 @@ Notes:
 - Changing `embedding_model` (or its `EmbeddingDimension` in `vectordb:`) requires
   re-ingesting all documents: stop the server, `rm -rf data/vectors/`, and run
   `ragabast ingest` again.
+- Set `ragabast.log_chat_requests: true` (or env
+  `RAGABAST_LOG_CHAT_REQUESTS=true`) to have the chat-completions
+  client log every request and response body under the
+  `[chat-debug]` log prefix on stderr. Use this to verify the
+  system prompt actually reaches the model — you'll see the full
+  conversation including the parts ragabast's post-processors
+  strip from the user-visible reply. Default false. Bodies over
+  8 KiB are truncated with a `...[truncated]` marker. The bearer
+  token is never logged.
 - Set `ragabast.docbuilder_base_url` in YAML (or
   `RAGABAST_DOCBUILDER_BASE_URL`, e.g.
   `https://docs.example.com`) to surface a synthetic

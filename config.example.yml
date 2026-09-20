@@ -116,3 +116,13 @@ ragabast:
   # behavior unchanged — only the doc's own frontmatter
   # `urls:` surface as links.
   docbuilder_base_url: ""
+
+  # When true, the chat-completions client logs every request
+  # and response body under the [chat-debug] prefix on stderr.
+  # Default false. Use this to verify the system prompt
+  # actually reaches the model — see the full conversation,
+  # not just the post-processed user-visible reply. Bodies
+  # larger than 8 KiB are truncated with a "...[truncated]"
+  # marker so the log stays scannable. The bearer token is
+  # never logged.
+  log_chat_requests: false

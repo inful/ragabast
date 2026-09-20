@@ -56,6 +56,22 @@ type RagabastConfig struct {
 	// behavior unchanged — only the doc's own frontmatter
 	// `urls:` surface as links.
 	DocbuilderBaseURL string `env:"RAGABAST_DOCBUILDER_BASE_URL" yaml:"docbuilder_base_url,omitempty"`
+
+	// LogChatRequests, when true, makes the chat-completions
+	// client emit the full request body and full response body
+	// under the [chat-debug] log prefix on every chat call.
+	// Operators use this to verify the system prompt actually
+	// reaches the model and to inspect what the model
+	// returned, including the parts that ragabast's
+	// post-processors strip from the user-visible reply.
+	//
+	// Default false: chat prompts can be large (the context
+	// block routinely runs thousands of characters) and may
+	// include sensitive operator content. The bearer token is
+	// never logged — only the request and response bodies.
+	// Bodies larger than 8 KiB are truncated with a
+	// "...[truncated]" marker to keep the log scannable.
+	LogChatRequests bool `env:"RAGABAST_LOG_CHAT_REQUESTS" yaml:"log_chat_requests,omitempty"`
 }
 
 // OllamaConfig holds configuration for the embedding and chat-completions
