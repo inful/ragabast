@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -90,6 +91,126 @@ func TestValidate_RejectsOutOfRangeOllamaTopP(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Ollama.Options = map[string]any{"top_p": 1.2}
 	require.Error(t, cfg.Validate())
+}
+
+// TestValidate_AcceptsEmptyDocbuilderBaseURL pins the
+// "no permalinks" mode: empty URL is the default and must
+// keep Validate() happy so local single-user installs
+// without docbuilder don't trip on a new requirement.
+func TestValidate_AcceptsEmptyDocbuilderBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ragabast.DocbuilderBaseURL = ""
+	require.NoError(t, cfg.Validate())
+}
+
+// TestValidate_AcceptsHTTPAndHTTPSDocbuilderBaseURL pins
+// the only two schemes we accept. Anything else (ftp, file,
+// javascript, etc.) is rejected — see the Rejects tests
+// below.
+func TestValidate_AcceptsHTTPAndHTTPSDocbuilderBaseURL(t *testing.T) {
+	for _, url := range []string{
+		"http://docs.example.com",
+		"https://docs.example.com",
+		"https://docs.example.com/",
+		"https://docs.example.com:8443",
+		"https://docs.example.com:8443/",
+		"https://docs.example.com/docs",
+		"https://docs.example.com/docs/",
+	} {
+		t.Run(url, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Ragabast.DocbuilderBaseURL = url
+			require.NoError(t, cfg.Validate(), "should accept %q", url)
+		})
+	}
+}
+
+// TestValidate_AcceptsIPv6DocbuilderBaseURL: IPv6 hosts
+// use bracket notation and url.Parse handles them
+// correctly, so the validator must too.
+func TestValidate_AcceptsIPv6DocbuilderBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ragabast.DocbuilderBaseURL = "http://[::1]:8080/"
+	require.NoError(t, cfg.Validate())
+}
+
+// TestValidate_TrimsWhitespaceAroundDocbuilderBaseURL:
+// operators routinely paste URLs from chat messages and
+// end up with a stray space. We trim and accept, AND we
+// must persist the trimmed value so the synthesized
+// permalinks don't have the stray space either.
+func TestValidate_TrimsWhitespaceAroundDocbuilderBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ragabast.DocbuilderBaseURL = "  https://docs.example.com/  "
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, "https://docs.example.com/", cfg.Ragabast.DocbuilderBaseURL,
+		"trimmed URL must be persisted")
+}
+
+// TestValidate_RejectsTypoDocbuilderBaseURL: a scheme
+// typo is the canonical config bug this issue exists to
+// catch. Without validation, the typo silently produces
+// broken permalinks for every search result.
+func TestValidate_RejectsTypoDocbuilderBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ragabast.DocbuilderBaseURL = "htttp://docs.example.com"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "docbuilder_base_url")
+	assert.Contains(t, err.Error(), "htttp://")
+}
+
+// TestValidate_RejectsMissingHostDocbuilderBaseURL:
+// "http://" alone parses fine under url.Parse but the
+// Host field is empty, so it must be rejected.
+func TestValidate_RejectsMissingHostDocbuilderBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ragabast.DocbuilderBaseURL = "http://"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "docbuilder_base_url")
+}
+
+// TestValidate_RejectsGarbageDocbuilderBaseURL: anything
+// url.Parse can't even interpret must be rejected.
+func TestValidate_RejectsGarbageDocbuilderBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ragabast.DocbuilderBaseURL = "not a url at all"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "docbuilder_base_url")
+}
+
+// TestValidate_RejectsNonHTTPSchemeDocbuilderBaseURL:
+// scheme must be exactly http or https. ftp://, file://,
+// javascript:, etc. all fall under this rule. The threat
+// model is broken permalinks — a javascript: scheme would
+// be worse than broken.
+func TestValidate_RejectsNonHTTPSchemeDocbuilderBaseURL(t *testing.T) {
+	for _, url := range []string{
+		"ftp://docs.example.com",
+		"file:///etc/passwd",
+		"javascript:alert(1)",
+		"ws://docs.example.com",
+	} {
+		t.Run(url, func(t *testing.T) {
+			cfg := DefaultConfig()
+			cfg.Ragabast.DocbuilderBaseURL = url
+			require.Error(t, cfg.Validate(), "should reject %q", url)
+		})
+	}
+}
+
+// TestValidate_RejectsWhitespaceOnlyDocbuilderBaseURL:
+// trimming an all-whitespace string yields empty, which
+// is the "no permalinks" mode — and empty is already
+// accepted. So this case must be accepted after trim.
+func TestValidate_RejectsWhitespaceOnlyDocbuilderBaseURL(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ragabast.DocbuilderBaseURL = "   "
+	require.NoError(t, cfg.Validate(), "whitespace-only trims to empty (valid)")
+	assert.Equal(t, "", cfg.Ragabast.DocbuilderBaseURL,
+		"trimmed value must be persisted as empty")
 }
 
 func TestEffectiveAPIKeys_DefaultsToGlobal(t *testing.T) {
