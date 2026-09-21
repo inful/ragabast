@@ -199,7 +199,29 @@ type ServerConfig struct {
 	// Wire format: clients send `Authorization: Bearer <token>`.
 	// Comparison uses constant-time equality (subtle.ConstantTimeCompare)
 	// so the endpoint cannot be used as a timing oracle.
+	//
+	// Kept for backward compatibility; operators running a
+	// fleet of internal consumers should prefer AuthTokens
+	// (the modern list form) which supports rotation without
+	// coordinated outages and per-consumer attribution
+	// labels. EffectiveAuthTokens() merges both forms with
+	// dedup so an existing single-token config continues to
+	// work after the operator adds AuthTokens.
 	AuthToken string `env:"SERVER_AUTH_TOKEN" yaml:"auth_token,omitempty"`
+
+	// AuthTokens is the modern list of accepted bearer
+	// tokens. Each entry may be a bare string (the common
+	// case — no label) or a {value, label} struct when the
+	// operator wants per-consumer attribution in the access
+	// log. Label has no security meaning — it is purely
+	// operational attribution.
+	//
+	// Token rotation: list both old and new during a grace
+	// window, then remove the old once all consumers have
+	// migrated. EffectiveAuthTokens handles dedup so adding
+	// the same token to both this list and AuthToken (the
+	// singular form) does not double-count.
+	AuthTokens []AuthToken `env:"SERVER_AUTH_TOKENS" yaml:"auth_tokens,omitempty"`
 
 	// RateLimitPerMinute is the per-client-IP token-bucket
 	// rate applied to the LLM-backed endpoints. Zero
@@ -591,6 +613,21 @@ func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv("SERVER_AUTH_TOKEN"); v != "" {
 		c.Server.AuthToken = v
 	}
+	if v := os.Getenv("SERVER_AUTH_TOKENS"); v != "" {
+		// Comma-separated list of bare tokens. Labels are
+		// not expressible in env vars — operators needing
+		// per-token labels should set them via YAML or
+		// mount a config file from a secret manager.
+		parts := strings.Split(v, ",")
+		out := make([]AuthToken, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, AuthToken{Value: p})
+			}
+		}
+		c.Server.AuthTokens = out
+	}
 	if v := os.Getenv("SERVER_RATE_LIMIT_PER_MINUTE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			c.Server.RateLimitPerMinute = n
@@ -700,6 +737,74 @@ func validateAndTrimDocbuilderBaseURL(c *Config) error {
 	}
 	c.Ragabast.DocbuilderBaseURL = trimmed
 	return nil
+}
+
+// AuthToken is one configured bearer credential. Value is
+// the opaque secret compared (constant-time) against the
+// Authorization header; Label is optional human-readable
+// attribution surfaced in the access log under auth_label.
+//
+// Label has no security meaning — it does not grant any
+// privilege, and two tokens may share a label. A blank
+// label is allowed.
+//
+// UnmarshalYAML accepts both the bare-string form
+// (`auth_tokens: ["secret-a", "secret-b"]`) and the
+// explicit value+label form (`auth_tokens: [{value: ...,
+// label: ...}]`) so operators can mix per-token in the
+// same list — useful during a rotation grace window where
+// new tokens are labeled and old ones aren't.
+type AuthToken struct {
+	Value string `yaml:"value,omitempty"`
+	Label string `yaml:"label,omitempty"`
+}
+
+// UnmarshalYAML accepts both the scalar form (`"secret"`) and
+// the mapping form (`{value: "secret", label: "x"}`) for
+// AuthToken. Operators are expected to mix both freely; this
+// is the documented behavior in the config docs.
+func (t *AuthToken) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		t.Value = node.Value
+		return nil
+	}
+	var r struct {
+		Value string `yaml:"value"`
+		Label string `yaml:"label"`
+	}
+	if err := node.Decode(&r); err != nil {
+		return fmt.Errorf("auth_token entry: %w", err)
+	}
+	if r.Value == "" {
+		return errors.New("auth_token entry: value is required")
+	}
+	t.Value = r.Value
+	t.Label = r.Label
+	return nil
+}
+
+// EffectiveAuthTokens returns the union of AuthToken
+// (singular, kept for backward compatibility) and
+// AuthTokens (the modern list form). Tokens are deduped
+// by Value so an operator who lists the same token in
+// both places (typically during a rotation grace window)
+// gets exactly one match and the constant-time compare
+// loop does not double-bill.
+func (s ServerConfig) EffectiveAuthTokens() []AuthToken {
+	out := make([]AuthToken, 0, len(s.AuthTokens)+1)
+	seen := make(map[string]bool, len(out))
+	if s.AuthToken != "" {
+		out = append(out, AuthToken{Value: s.AuthToken})
+		seen[s.AuthToken] = true
+	}
+	for _, t := range s.AuthTokens {
+		if t.Value == "" || seen[t.Value] {
+			continue
+		}
+		out = append(out, t)
+		seen[t.Value] = true
+	}
+	return out
 }
 
 func validateOllamaOptions(opts map[string]any) error {
