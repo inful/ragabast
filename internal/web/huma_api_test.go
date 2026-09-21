@@ -17,8 +17,8 @@ import (
 )
 
 func TestHumaAPI_Health(t *testing.T) {
-	_, api := humatest.New(t)
-	registerHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	router, api := humatest.New(t)
+	registerHumaOperations(router, api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/health")
 	require.Equal(t, 200, w.Code)
@@ -26,19 +26,19 @@ func TestHumaAPI_Health(t *testing.T) {
 }
 
 func TestHumaAPI_Ingest_ValidatesContent(t *testing.T) {
-	_, api := humatest.New(t)
-	registerHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	router, api := humatest.New(t)
+	registerHumaOperations(router, api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/ingest", map[string]any{"content": ""})
 	require.Equal(t, 400, w.Code)
 }
 
 func TestHumaAPI_IngestRaw_AcceptsMarkdownBody(t *testing.T) {
-	h, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
 	body := []byte("---\nuid: a\nurls:\n  - https://example.com\n---\n\n# Title\nHi\n")
@@ -54,11 +54,11 @@ func TestHumaAPI_IngestRaw_AcceptsMarkdownBody(t *testing.T) {
 }
 
 func TestHumaAPI_IngestFile_AcceptsMultipartUpload(t *testing.T) {
-	h, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 
 	fileBytes := []byte("---\nuid: a\nurls:\n  - https://example.com\n---\n\n# Title\nHi\n")
@@ -83,9 +83,9 @@ func TestHumaAPI_IngestFile_AcceptsMultipartUpload(t *testing.T) {
 }
 
 func TestHumaAPI_Query_ReturnsLinks(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{debug: &service.QueryDebugInfo{Results: []models.SearchResult{{DocumentURLs: []string{"https://example.com/a"}}}}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/query", map[string]any{"query": "what is ragabast?", "top_k": 5})
 	require.Equal(t, 200, w.Code)
@@ -94,9 +94,9 @@ func TestHumaAPI_Query_ReturnsLinks(t *testing.T) {
 }
 
 func TestHumaAPI_Query_ForwardsHistory(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{debug: &service.QueryDebugInfo{Results: []models.SearchResult{{DocumentURLs: []string{"https://example.com/a"}}}}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/query", map[string]any{
 		"query": "How do I deploy it?",
@@ -113,10 +113,10 @@ func TestHumaAPI_Query_ForwardsHistory(t *testing.T) {
 }
 
 func TestHumaAPI_Ingest_Returns429WithRetryAfterWhenSaturated(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	limiter := NewIngestLimiter(1, 2*time.Second)
 	require.True(t, limiter.TryAcquire())
-	registerHumaOperations(api, &fakeHumaService{}, limiter, 0, nil)
+	registerHumaOperations(router, api, &fakeHumaService{}, limiter, 0, nil)
 
 	w := api.Post("/api/ingest", map[string]any{"content": "---\nuid: a\n---\n\n# Title\nHi\n"})
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
@@ -124,13 +124,13 @@ func TestHumaAPI_Ingest_Returns429WithRetryAfterWhenSaturated(t *testing.T) {
 }
 
 func TestHumaAPI_LinkSuggestions_DedupesAndLimits(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{searchResults: []models.SearchResult{
 		{Similarity: 0.9, DocumentURLs: []string{"https://example.com/a", "https://example.com/b"}},
 		{Similarity: 0.8, DocumentURLs: []string{"https://example.com/b", "https://example.com/c"}},
 		{Similarity: 0.7, DocumentURLs: []string{"https://example.com/d"}},
 	}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/link-suggestions", map[string]any{
 		"text":      "some section text",
@@ -148,12 +148,12 @@ func TestHumaAPI_LinkSuggestions_DedupesAndLimits(t *testing.T) {
 }
 
 func TestHumaAPI_LinkSuggestions_RespectsMinScore(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{searchResults: []models.SearchResult{
 		{Similarity: 0.9, DocumentURLs: []string{"https://example.com/a"}},
 		{Similarity: 0.4, DocumentURLs: []string{"https://example.com/b"}},
 	}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/link-suggestions", map[string]any{
 		"text":      "some section text",
@@ -169,17 +169,17 @@ func TestHumaAPI_LinkSuggestions_RespectsMinScore(t *testing.T) {
 }
 
 func TestHumaAPI_LinkSuggestions_ValidatesText(t *testing.T) {
-	_, api := humatest.New(t)
-	registerHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	router, api := humatest.New(t)
+	registerHumaOperations(router, api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/link-suggestions", map[string]any{"text": ""})
 	require.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 func TestHumaAPI_DeleteDocument_DeletesKnownDocument(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Delete("/api/documents/doc-1")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -187,9 +187,9 @@ func TestHumaAPI_DeleteDocument_DeletesKnownDocument(t *testing.T) {
 }
 
 func TestHumaAPI_DeleteDocument_Returns404ForUnknownDocument(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Delete("/api/documents/missing")
 	require.Equal(t, http.StatusNotFound, w.Code)
@@ -207,9 +207,9 @@ func TestHumaAPI_DeleteDocument_Returns404ForUnknownDocument(t *testing.T) {
 // With this fix, deleting K documents from a corpus of
 // N costs O(K) total vector-DB calls instead of O(N·K).
 func TestHumaAPI_DeleteDocument_NoListDocumentsPreCheck(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	before := svc.listCalls
 	w := api.Delete("/api/documents/doc-1")
@@ -228,9 +228,9 @@ func TestHumaAPI_DeleteDocument_NoListDocumentsPreCheck(t *testing.T) {
 // the miss. The vector layer's ErrNotFound is the
 // single source of truth.
 func TestHumaAPI_DeleteDocument_NoListDocumentsOn404(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	before := svc.listCalls
 	w := api.Delete("/api/documents/missing")
@@ -244,13 +244,13 @@ func TestHumaAPI_DeleteDocument_NoListDocumentsOn404(t *testing.T) {
 }
 
 func TestHumaAPI_PruneDocuments_DeletesEverythingExceptKeptUIDs(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: []models.DocumentInfo{
 		{ID: "doc-1", UID: "keep"},
 		{ID: "doc-2", UID: "drop"},
 		{ID: "doc-3", UID: "drop"},
 	}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/documents/prune", map[string]any{"keep_uids": []string{"keep"}})
 	require.Equal(t, http.StatusOK, w.Code)
@@ -258,9 +258,9 @@ func TestHumaAPI_PruneDocuments_DeletesEverythingExceptKeptUIDs(t *testing.T) {
 }
 
 func TestHumaAPI_PruneDocuments_DryRunDoesNotDelete(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/documents/prune", map[string]any{"delete_document_ids": []string{"doc-1"}, "dry_run": true})
 	require.Equal(t, http.StatusOK, w.Code)
@@ -268,14 +268,14 @@ func TestHumaAPI_PruneDocuments_DryRunDoesNotDelete(t *testing.T) {
 }
 
 func TestHumaAPI_FrontmatterSuggest_MergesAndGuards(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{frontmatterSug: service.FrontmatterSuggestion{
 		Description: "Suggested description.",
 		Categories:  []string{"Guides", "INVALID"},
 		Tags:        []string{"go", "rag"},
 		CustomTags:  []string{"custom-tag"},
 	}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/frontmatter/suggest", map[string]any{
 		"content":            "---\nuid: u-1\ndescription: existing desc\ntags:\n  - existing\nother: keepme\n---\n\n# Title\nHello\n",
@@ -314,14 +314,14 @@ func TestHumaAPI_FrontmatterSuggest_MergesAndGuards(t *testing.T) {
 }
 
 func TestHumaAPI_FrontmatterSuggest_MergesExistingWithAllowed(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{frontmatterSug: service.FrontmatterSuggestion{
 		Description: "New description.",
 		Categories:  []string{"guides"},
 		Tags:        []string{"go", "newtag"},
 		CustomTags:  nil,
 	}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	// The service should receive merged allowed lists that include existing tags/categories
 	// This test verifies that existing tags and categories are added to the allowed lists
@@ -352,8 +352,8 @@ func TestHumaAPI_FrontmatterSuggest_MergesExistingWithAllowed(t *testing.T) {
 }
 
 func TestHumaAPI_FrontmatterSuggest_ValidatesInputs(t *testing.T) {
-	_, api := humatest.New(t)
-	registerHumaOperations(api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	router, api := humatest.New(t)
+	registerHumaOperations(router, api, &fakeHumaService{}, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/frontmatter/suggest", map[string]any{
 		"content":            "# Hi",
@@ -364,14 +364,14 @@ func TestHumaAPI_FrontmatterSuggest_ValidatesInputs(t *testing.T) {
 }
 
 func TestHumaAPI_FrontmatterSuggest_CanonicalizesAllowedAndKeepsCustomTags(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{frontmatterSug: service.FrontmatterSuggestion{
 		Description: "",
 		Categories:  []string{"guides"},
 		Tags:        []string{"RAG", "NewTag"},
 		CustomTags:  nil,
 	}}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/frontmatter/suggest", map[string]any{
 		"content":            "---\nuid: u-1\n---\n\n# Title\nHello\n",
@@ -396,9 +396,9 @@ func TestHumaAPI_FrontmatterSuggest_CanonicalizesAllowedAndKeepsCustomTags(t *te
 }
 
 func TestHumaAPI_GetTags_ReturnsNormalizedTags(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/tags")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -411,9 +411,9 @@ func TestHumaAPI_GetTags_ReturnsNormalizedTags(t *testing.T) {
 }
 
 func TestHumaAPI_GetCategories_ReturnsNormalizedCategories(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/categories")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -426,9 +426,9 @@ func TestHumaAPI_GetCategories_ReturnsNormalizedCategories(t *testing.T) {
 }
 
 func TestHumaAPI_GetTagsAndCategories_ReturnsBoth(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/tags-categories")
 	require.Equal(t, http.StatusOK, w.Code)

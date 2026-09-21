@@ -122,7 +122,7 @@ func asyncIngestFixture(t *testing.T) (humatest.TestAPI, *fakeHumaService, *jobs
 	}
 	q.Start(jobsServiceAdapter{svc: svc}, nil)
 
-	_, api := humatest.New(t, huma.Config{
+	router, api := humatest.New(t, huma.Config{
 		OpenAPI: &huma.OpenAPI{
 			OpenAPI: "3.1.0",
 			Info:    &huma.Info{Title: "test", Version: "1.0.0"},
@@ -133,7 +133,7 @@ func asyncIngestFixture(t *testing.T) (humatest.TestAPI, *fakeHumaService, *jobs
 		},
 		DefaultFormat: "application/json",
 	})
-	registerIngestJobsOperations(api, q)
+	registerIngestJobsOperations(api, router, q)
 
 	return api, svc, q
 }

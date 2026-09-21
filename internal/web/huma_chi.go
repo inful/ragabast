@@ -23,6 +23,6 @@ func registerHumaAPI(router chi.Router, cfg *config.Config, svc serviceAPI, inge
 	// been retired.
 	limiter := NewIngestLimiter(5, 1*time.Second)
 
-	registerHumaOperations(api, svc, limiter, cfg.Server.MaxIngestDocumentBytes, ingestQueue)
+	registerHumaOperations(router, api, svc, limiter, cfg.Server.MaxIngestDocumentBytes, ingestQueue)
 	return api
 }

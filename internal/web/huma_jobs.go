@@ -50,6 +50,104 @@ type ingestJobsListResponseBody struct {
 	Total int                     `json:"total"`
 }
 
+// batchIngestMuxRegistrar is the slice of mux methods
+// we need from the http.Handler passed to
+// registerIngestJobsOperations. The interface covers the
+// chi.HandleFunc signature (no method filter); we do the
+// POST check in the handler itself so this single
+// signature works for both chi (used by NewServer in
+// production) and flow.Mux (used by humatest.New).
+type batchIngestMuxRegistrar interface {
+	HandleFunc(pattern string, fn http.HandlerFunc)
+}
+
+// batchIngestMuxWithMethodFilter is the wider signature
+// used by huma's flow.Mux. If the router matches this
+// shape we use it to register POST-only at the mux level
+// (cheaper than a per-request method check).
+type batchIngestMuxWithMethodFilter interface {
+	HandleFunc(pattern string, fn http.HandlerFunc, methods ...string)
+}
+
+// registerIngestBatchHandler mounts POST /api/ingest/batch
+// on the given mux (the chi router underneath huma). It's
+// NOT registered via huma.Register because the body can
+// be either a JSON array OR NDJSON — huma's body binding
+// expects a single fixed schema and can't represent the
+// "either shape" dispatch we need.
+//
+// The dispatch happens in parseIngestBatchBody, which
+// looks at the first non-whitespace byte ('[' for array,
+// '{' for NDJSON). Content-Type isn't required; the body
+// shape is the source of truth.
+func registerIngestBatchHandler(router http.Handler, q *jobs.Queue) {
+	// Try the wider signature first (huma flow.Mux). If
+	// that fails, fall back to the narrower one (chi).
+	// This keeps the batch endpoint POST-only under flow
+	// and method-checked under chi without two divergent
+	// handler bodies.
+	if mux, ok := router.(batchIngestMuxWithMethodFilter); ok {
+		mux.HandleFunc("/api/ingest/batch", func(w http.ResponseWriter, r *http.Request) {
+			handleIngestBatch(w, r, q)
+		}, http.MethodPost)
+		return
+	}
+	if mux, ok := router.(batchIngestMuxRegistrar); ok {
+		mux.HandleFunc("/api/ingest/batch", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			handleIngestBatch(w, r, q)
+		})
+		return
+	}
+	panic("registerIngestBatchHandler: router does not support HandleFunc")
+}
+
+// ingestBatchItem is one entry in a batch POST body.
+// Mirrors ingestAsyncRequestBody but in array/NDJSON form.
+type ingestBatchItem struct {
+	Content string `json:"content" required:"true"`
+}
+
+// ingestBatchRequest was the planned huma input struct
+// for POST /api/ingest/batch. The endpoint ended up
+// registered on the chi mux directly (see
+// registerIngestBatchHandler) because huma's body
+// binding couldn't represent the JSON-array-vs-NDJSON
+// dispatch we need, so the struct is no longer used.
+// Kept as a placeholder so a future refactor that goes
+// back to huma.Register has a starting point — but
+// unused for now.
+type ingestBatchRequest struct { //nolint:unused
+	RawBody []byte `body:"raw"`
+}
+
+// ingestBatchItemResponse is one element of the batch
+// response array. status is \`queued\` for accepted docs
+// (with a non-empty job_id) or \`error\` for rejected
+// ones (with a non-empty error). Callers iterate the
+// items array to learn which documents queued and which
+// failed.
+type ingestBatchItemResponse struct {
+	Status     string `doc:"queued on success, error on failure" json:"status"`
+	JobID      string `doc:"Set when status=queued" json:"job_id,omitempty"`
+	DocumentID string `doc:"Set when status=queued" json:"document_id,omitempty"`
+	Error      string `doc:"Set when status=error" json:"error,omitempty"`
+}
+
+// ingestBatchResponseBody is the envelope returned from
+// POST /api/ingest/batch. items[i] corresponds to the
+// i-th item in the request body, in order. The HTTP
+// status is always 200 (or 4xx for batch-level errors
+// like 413 for the whole batch exceeding the per-doc
+// cap); per-document failures are reported as
+// status=\"error\" in the items array.
+type ingestBatchResponseBody struct {
+	Items []ingestBatchItemResponse `json:"items"`
+}
+
 // registerIngestJobsOperations wires the async ingest
 // endpoints. These complement (do NOT replace) the
 // synchronous /api/ingest family: callers that need an
@@ -61,13 +159,22 @@ type ingestJobsListResponseBody struct {
 // (server.async_ingest_queue_dir is empty), the async
 // endpoints return 503 — the synchronous path remains
 // available regardless.
-func registerIngestJobsOperations(api huma.API, q *jobs.Queue) {
+func registerIngestJobsOperations(api huma.API, router http.Handler, q *jobs.Queue) {
 	if q == nil {
 		// Async ingest disabled — register no-op handlers
 		// that return 503 so callers get a clear error.
 		registerIngestJobsDisabled(api)
 		return
 	}
+
+	// POST /api/ingest/batch is mounted on the chi router
+	// directly (not via huma.Register) because it needs raw
+	// body access for both JSON-array AND NDJSON formats.
+	// huma's body binding expects a single JSON shape — it
+	// can't represent "either an array or newline-delimited
+	// objects". The dispatch happens here on body shape, so
+	// Content-Type isn't required.
+	registerIngestBatchHandler(router, q)
 
 	huma.Register(api, huma.Operation{
 		OperationID:   "ingest-async",
