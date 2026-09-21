@@ -471,16 +471,24 @@ func (db *VectorDB) DeleteChunk(ctx context.Context, chunkID string) error {
 }
 
 // DeleteDocument removes all chunks for a specific document.
+//
+// Returns vector.ErrNotFound when no chunks match the
+// document_id. The HTTP layer relies on this to map the
+// delete-on-missing-ID case to 404 without an extra
+// existence-check round trip — see issue #9 (the N+1 fix).
+// The sentinel is matched with errors.Is so wrapped errors
+// propagate correctly.
 func (db *VectorDB) DeleteDocument(ctx context.Context, documentID string) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
 	count := db.collection.Count()
 	if count == 0 {
-		return nil
+		// Whole collection is empty — nothing matches.
+		return ErrNotFound
 	}
 
-	// Get all chunks for this document first
+	// Get all chunks for this document first.
 	dummyEmbedding := make([]float32, db.embeddingDimension)
 	options := chromem.QueryOptions{
 		QueryEmbedding: dummyEmbedding,
@@ -491,6 +499,12 @@ func (db *VectorDB) DeleteDocument(ctx context.Context, documentID string) error
 	results, err := db.collection.QueryWithOptions(ctx, options)
 	if err != nil {
 		return fmt.Errorf("failed to find document chunks: %w", err)
+	}
+
+	// No rows matched the document_id filter — the document
+	// doesn't exist in this collection.
+	if len(results) == 0 {
+		return ErrNotFound
 	}
 
 	// Delete each chunk

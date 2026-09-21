@@ -2,11 +2,13 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/vector"
 )
 
 type documentsResponseBody struct {
@@ -64,22 +66,17 @@ func registerDocumentsOperations(api huma.API, svc serviceAPI) {
 			return nil, huma.Error400BadRequest("document_id is required")
 		}
 
-		docs, err := svc.ListDocuments(ctx)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("list documents failed")
-		}
-		found := false
-		for _, d := range docs {
-			if d.ID == documentID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, huma.Error404NotFound("document not found")
-		}
-
+		// Issue #9 (N+1 fix): the previous implementation
+		// called svc.ListDocuments(ctx) just to check
+		// existence, then called DeleteDocument. That made
+		// every delete a full-collection scan. The vector
+		// layer now returns vector.ErrNotFound when no
+		// chunks match the document_id, so the pre-check
+		// is redundant — one call does both jobs.
 		if err := svc.DeleteDocument(ctx, documentID); err != nil {
+			if errors.Is(err, vector.ErrNotFound) {
+				return nil, huma.Error404NotFound("document not found")
+			}
 			return nil, huma.Error500InternalServerError("delete document failed")
 		}
 
