@@ -54,6 +54,7 @@ type OpenAIEmbeddingClient struct {
 	apiKey            string
 	httpClient        *http.Client
 	expectedDimension int // 0 = unset; when >0, request body includes `dimensions: N` and the response is length-checked
+	concurrency       int // 1 = sequential; >1 = parallel sub-batches per GenerateChunkEmbeddings
 
 	dimWarnOnce sync.Once
 }
@@ -70,7 +71,21 @@ type OpenAIEmbeddingClient struct {
 // vector to N. The client also checks the actual response length
 // and logs a one-shot DIMENSION MISMATCH warning if the server
 // ignored the request.
-func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout time.Duration, dimensions int) *OpenAIEmbeddingClient {
+//
+// concurrency controls the parallel-worker pool used by
+// GenerateChunkEmbeddings: chunks are split into
+// min(concurrency, len(chunks)) sub-batches and processed
+// concurrently. concurrency <= 1 disables the pool (the call
+// runs sequentially, one sub-batch at a time). The default
+// for the pool is 4 — a reasonable match for Ollama's
+// OLLAMA_NUM_PARALLEL default.
+//
+// Operators match this to the embedding server's own
+// parallelism headroom. Setting it higher than the server
+// can handle trades CPU on the ragabast side for queue depth
+// on the server side; setting it lower leaves server capacity
+// unused.
+func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout time.Duration, dimensions int, concurrency int) *OpenAIEmbeddingClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -80,12 +95,16 @@ func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout 
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
 
 	return &OpenAIEmbeddingClient{
 		baseURL:           normalizeOpenAIBaseURL(baseURL),
 		model:             model,
 		apiKey:            apiKey,
 		expectedDimension: dimensions,
+		concurrency:       concurrency,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -133,7 +152,103 @@ func (c *OpenAIEmbeddingClient) generateEmbeddingsBatch(ctx context.Context, tex
 	if len(texts) == 0 {
 		return nil, models.ErrEmbeddingFailed
 	}
-	return c.embed(ctx, texts, nil)
+
+	// Concurrency=1 (or empty config) preserves the historical
+	// single-request behavior. Useful on small ingests and on
+	// servers without a parallel pipeline.
+	concurrency := max(c.concurrency, 1)
+	if concurrency == 1 || len(texts) == 1 {
+		return c.embed(ctx, texts, nil)
+	}
+
+	// Split into at-most-`concurrency` sub-batches of roughly
+	// equal size. Each sub-batch is processed by one HTTP
+	// request via the existing embed(); the worker pool
+	// stitches the results back in input order.
+	subBatches := splitTexts(texts, concurrency)
+
+	type result struct {
+		start int
+		vecs  [][]float32
+		err   error
+	}
+	results := make([]result, len(subBatches))
+	var wg sync.WaitGroup
+
+	// errOnce collapses the first error from any worker into
+	// a single return value. We don't cancel sibling workers
+	// when one fails because the underlying HTTP client has
+	// its own timeout; just abandon their results.
+	var errOnce sync.Once
+	var firstErr error
+
+	for i, sb := range subBatches {
+		start := sumLengthsUpTo(subBatches, i)
+		wg.Add(1)
+		go func(idx int, batch []string, sbStart int) {
+			defer wg.Done()
+			vecs, err := c.embed(ctx, batch, nil)
+			if err != nil {
+				errOnce.Do(func() { firstErr = err })
+				return
+			}
+			results[idx] = result{start: sbStart, vecs: vecs}
+		}(i, sb, start)
+	}
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+
+	// Stitch per-sub-batch results back into input order. Each
+	// result.start is the index in the original `texts` slice
+	// where that sub-batch begins.
+	out := make([][]float32, len(texts))
+	for _, r := range results {
+		if r.err != nil || r.vecs == nil {
+			continue
+		}
+		copy(out[r.start:], r.vecs)
+	}
+	return out, nil
+}
+
+// splitTexts divides texts into at most n sub-batches of roughly
+// equal size. The result length is min(n, len(texts)). The last
+// sub-batch is the short one when len(texts) doesn't divide
+// evenly; the worker pool handles unequal splits fine.
+func splitTexts(texts []string, n int) [][]string {
+	if n < 1 {
+		n = 1
+	}
+	if n > len(texts) {
+		n = len(texts)
+	}
+	out := make([][]string, n)
+	base := len(texts) / n
+	extra := len(texts) % n
+	idx := 0
+	for i := range n {
+		size := base
+		if i < extra {
+			size++
+		}
+		out[i] = texts[idx : idx+size]
+		idx += size
+	}
+	return out
+}
+
+// sumLengthsUpTo returns the total length of subBatches[0..i].
+// Used to compute the input-slice offset each worker should
+// write into when stitching results back together.
+func sumLengthsUpTo(subBatches [][]string, i int) int {
+	n := 0
+	for j := range i {
+		n += len(subBatches[j])
+	}
+	return n
 }
 
 // modelName returns the model name configured on the client.

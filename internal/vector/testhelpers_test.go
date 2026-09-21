@@ -71,7 +71,7 @@ func stubEmbeddings(t *testing.T) *OpenAIEmbeddingClient {
 	const dim = 4
 	srv := stubEmbeddingsServer(t, dim)
 	t.Cleanup(srv.Close)
-	return NewOpenAIEmbeddingClientWithOptions(srv.URL, "stub-embed", "", 5*time.Second, dim)
+	return NewOpenAIEmbeddingClientWithOptions(srv.URL, "stub-embed", "", 5*time.Second, dim, 1)
 }
 
 // testDoc builds a *models.Document with a single chunk whose
