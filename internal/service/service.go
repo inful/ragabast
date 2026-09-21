@@ -52,7 +52,12 @@ func (s *Service) buildDocbuilderURL(uid string) string {
 
 // NewService creates a new service instance.
 func NewService(cfg *config.Config) (*Service, error) {
-	db, err := vector.NewVectorDB(cfg.VectorDB.CollectionName, cfg.VectorDB.EmbeddingDimension, cfg.VectorDB.PersistenceDir)
+	db, err := vector.NewVectorDB(
+		cfg.VectorDB.CollectionName,
+		cfg.VectorDB.EmbeddingDimension,
+		cfg.VectorDB.PersistenceDir,
+		cfg.Ollama.EmbeddingModel,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize vector DB: %w", err)
 	}

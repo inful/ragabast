@@ -14,7 +14,7 @@ import (
 // the stale-data check entirely ("store is empty, nothing to
 // verify") instead of warning about a zero-length mismatch.
 func TestSampleEmbeddingLength_EmptyStoreReturnsNotFound(t *testing.T) {
-	db, err := NewVectorDB("test", 768, "")
+	db, err := NewVectorDB("test", 768, "", "test-model")
 	require.NoError(t, err)
 
 	length, found, err := db.SampleEmbeddingLength(context.Background())
@@ -28,7 +28,7 @@ func TestSampleEmbeddingLength_EmptyStoreReturnsNotFound(t *testing.T) {
 // reports that dim back. doctor uses this to compare against the
 // configured dim and warn on mismatch.
 func TestSampleEmbeddingLength_NonEmptyStoreReturnsActualDim(t *testing.T) {
-	db, err := NewVectorDB("test", 768, "")
+	db, err := NewVectorDB("test", 768, "", "test-model")
 	require.NoError(t, err)
 
 	chunk := &models.Chunk{

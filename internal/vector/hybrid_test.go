@@ -256,7 +256,7 @@ func TestSearchHybrid_FilterPreappliedToBothRankings(t *testing.T) {
 func TestSearchHybrid_NoKeywordIndexIsSemanticOnly(t *testing.T) {
 	t.Parallel()
 
-	db, err := NewVectorDB("test-"+t.Name(), 4, "")
+	db, err := NewVectorDB("test-"+t.Name(), 4, "", "test-model")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 

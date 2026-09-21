@@ -171,8 +171,17 @@ func (c *DoctorCmd) checkStoreEmbeddingDimension(cfg *config.Config) {
 		cfg.VectorDB.CollectionName,
 		cfg.VectorDB.EmbeddingDimension,
 		dir,
+		cfg.Ollama.EmbeddingModel,
 	)
 	if err != nil {
+		// A model-mismatch error deserves a louder, more
+		// actionable message than a generic open-failed
+		// warning. The error from NewVectorDB already names
+		// both models and the recovery command.
+		if errors.Is(err, vector.ErrModelMismatch) {
+			log.Printf("⚠ %v\n", err)
+			return
+		}
 		log.Printf("⚠ could not open vector store at %s: %v\n", dir, err)
 		return
 	}
