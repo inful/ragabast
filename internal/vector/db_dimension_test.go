@@ -26,7 +26,7 @@ import (
 //     and the user sees a 500.
 func TestAddChunksBatch_RejectsMismatchedDimension(t *testing.T) {
 	// Collection is configured for 768 dims (e.g. nomic-embed-text-v1.5).
-	db, err := NewVectorDB("test", 768, "")
+	db, err := NewVectorDB("test", 768, "", "test-model")
 	require.NoError(t, err)
 
 	// Pretend the embeddings server returned a 256-dim vector
@@ -65,7 +65,7 @@ func TestAddChunksBatch_RejectsMismatchedDimension(t *testing.T) {
 // the happy path (all vectors match the configured dimension)
 // must still succeed.
 func TestAddChunksBatch_AcceptsMatchingDimension(t *testing.T) {
-	db, err := NewVectorDB("test", 4, "")
+	db, err := NewVectorDB("test", 4, "", "test-model")
 	require.NoError(t, err)
 
 	vec1 := []float32{1, 2, 3, 4}
@@ -83,7 +83,7 @@ func TestAddChunksBatch_AcceptsMatchingDimension(t *testing.T) {
 // what `ragabast ingest` of a single small file hits; both paths
 // must guard.
 func TestAddChunk_RejectsMismatchedDimension(t *testing.T) {
-	db, err := NewVectorDB("test", 16, "")
+	db, err := NewVectorDB("test", 16, "", "test-model")
 	require.NoError(t, err)
 
 	wrong := make([]float32, 8) // half the expected size

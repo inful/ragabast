@@ -65,7 +65,7 @@ func TestService_QueryDebugWithOptions_EnrichesResultsWithDocbuilderURL(t *testi
 	cfg.VectorDB.EmbeddingDimension = testDim
 	cfg.VectorDB.PersistenceDir = tmp
 
-	db, err := vector.NewVectorDB("test", testDim, tmp)
+	db, err := vector.NewVectorDB("test", testDim, tmp, "test-model")
 	require.NoError(t, err)
 
 	embeddings := vector.NewOpenAIEmbeddingClientWithOptions(

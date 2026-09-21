@@ -188,7 +188,7 @@ func TestDoctor_StoreStateMismatchWarns(t *testing.T) {
 	// data from a previous model. We bypass the
 	// checkEmbeddingDimension guard by constructing a VectorDB
 	// whose configured dim matches what we're about to write.
-	seedDB, err := newSeedVectorDB(persistDir, 3072)
+	seedDB, err := newSeedVectorDBWithModel(persistDir, 3072, "nomic-embed-text:v1.5")
 	require.NoError(t, err)
 	seedChunk := &chunkForSeed{ID: "c1", DocumentID: "d1"}
 	seedVec := make([]float32, 3072)
@@ -228,7 +228,7 @@ func TestDoctor_StoreStateMatchOk(t *testing.T) {
 	dataDir := filepath.Join(tmp, "data")
 
 	// Seed with 768-dim chunks.
-	seedDB, err := newSeedVectorDB(persistDir, 768)
+	seedDB, err := newSeedVectorDBWithModel(persistDir, 768, "nomic-embed-text:v1.5")
 	require.NoError(t, err)
 	seedVec := make([]float32, 768)
 	require.NoError(t, seedDB.addChunkForSeed(&chunkForSeed{ID: "c1", DocumentID: "d1"}, seedVec))
@@ -465,12 +465,10 @@ type chunkForSeed struct {
 
 // newSeedVectorDB opens (or creates) a VectorDB at the given
 // path with the given embedding dimension and seeds one chunk.
-// It is used by the doctor tests to construct the "store
-// already has data" scenario without going through the full
-// service layer.
-func newSeedVectorDB(persistDir string, dim int) (*seedVectorDB, error) {
-	return newSeedVectorDBAt(persistDir, dim)
-}
+// (newSeedVectorDB is defined in doctor_seed_test.go so the
+// test helpers can be co-located; the legacy single-model form
+// delegates to newSeedVectorDBAt with a fixed "seed-model"
+// name.)
 
 // addChunkForSeed injects a chunk with the given embedding into
 // the seed store. The seed chunk is a minimal models.Chunk

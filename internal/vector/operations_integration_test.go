@@ -15,7 +15,7 @@ import (
 // inspection, and a cleanup func.
 func fixtureVO(t *testing.T) (*VectorOperations, *VectorDB, *SearchIndex) {
 	t.Helper()
-	db, err := NewVectorDB("test-"+t.Name(), 4, "")
+	db, err := NewVectorDB("test-"+t.Name(), 4, "", "test-model")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 
@@ -174,7 +174,7 @@ func TestVectorOperations_DeleteChunk_ClearsBothStores(t *testing.T) {
 func TestVectorOperations_IngestDocument_NoSearchIndexIsGraceful(t *testing.T) {
 	t.Parallel()
 
-	db, err := NewVectorDB("test-"+t.Name(), 4, "")
+	db, err := NewVectorDB("test-"+t.Name(), 4, "", "test-model")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 

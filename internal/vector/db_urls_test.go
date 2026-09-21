@@ -11,7 +11,7 @@ import (
 func TestVectorDB_Search_ReturnsDocumentURLs(t *testing.T) {
 	t.Parallel()
 
-	db, err := NewVectorDB("test", 3, "")
+	db, err := NewVectorDB("test", 3, "", "test-model")
 	require.NoError(t, err)
 
 	chunk := &models.Chunk{

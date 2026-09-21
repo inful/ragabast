@@ -10,7 +10,7 @@ import (
 )
 
 func TestVectorDB_GetUniqueDocuments_PopulatesMetadata(t *testing.T) {
-	db, err := NewVectorDB("test", 3, "")
+	db, err := NewVectorDB("test", 3, "", "test-model")
 	require.NoError(t, err)
 
 	createdAt := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)

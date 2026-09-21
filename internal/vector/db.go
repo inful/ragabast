@@ -2,9 +2,11 @@ package vector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,23 +19,88 @@ import (
 type VectorDB struct {
 	collection         *chromem.Collection
 	embeddingDimension int
+	embeddingModel     string
+	persistenceDir     string
 	mu                 sync.RWMutex
 }
 
-// NewVectorDB creates a new vector database instance with optional persistence.
-func NewVectorDB(name string, embeddingDimension int, persistenceDir string) (*VectorDB, error) {
+// Options is the constructor input for NewVectorDBWithOptions.
+// The simpler NewVectorDB(name, dim, dir, model) helper builds
+// an Options under the hood for the common case; Options
+// exists so callers can flip FailOnModelMismatch without
+// growing the positional-argument list further.
+type Options struct {
+	Name               string
+	EmbeddingDimension int
+	PersistenceDir     string
+	EmbeddingModel     string
+
+	// FailOnModelMismatch controls what happens when the
+	// persisted model's marker file carries a different
+	// model name than EmbeddingModel. True (the default)
+	// returns an error from the constructor; false logs a
+	// warning and proceeds. The override is intended for
+	// operators who have manually migrated the data (or who
+	// accept the risk during a phased rollout).
+	FailOnModelMismatch bool
+}
+
+// modelMarkerFile is the on-disk marker that records which
+// embedding model produced the vectors in this persistence
+// directory. Read on every constructor call; written on the
+// first successful AddChunk / AddChunksBatch.
+//
+// Lives at the persistence root (next to chromem-go's own
+// files) so a single ls of the directory answers the
+// "what model is this?" question.
+const modelMarkerFile = ".embedding_model"
+
+// ErrModelMismatch is returned (wrapped) by NewVectorDB when
+// the persisted marker carries a different model name than the
+// configured one and FailOnModelMismatch is true. Callers
+// can errors.Is(err, ErrModelMismatch) to detect.
+var ErrModelMismatch = errors.New("vector DB embedding model mismatch")
+
+// NewVectorDB creates a new vector database instance. It is
+// shorthand for NewVectorDBWithOptions with FailOnModelMismatch
+// set to true (the safe default).
+//
+// The persistence directory, when non-empty, must contain
+// vectors from EmbeddingModel. A model swap requires wiping
+// the directory (`ragabast vector reset --force`) or setting
+// FailOnModelMismatch=false in the Options form.
+func NewVectorDB(name string, embeddingDimension int, persistenceDir, embeddingModel string) (*VectorDB, error) {
+	return NewVectorDBWithOptions(Options{
+		Name:                name,
+		EmbeddingDimension:  embeddingDimension,
+		PersistenceDir:      persistenceDir,
+		EmbeddingModel:      embeddingModel,
+		FailOnModelMismatch: true,
+	})
+}
+
+// NewVectorDBWithOptions constructs the DB with full control
+// over the failure mode. See Options for the field meanings.
+func NewVectorDBWithOptions(opts Options) (*VectorDB, error) {
 	var db *chromem.DB
 
 	// Create DB with persistence if directory is provided
-	if persistenceDir != "" {
+	if opts.PersistenceDir != "" {
 		// Ensure the directory exists
-		if err := os.MkdirAll(persistenceDir, 0o755); err != nil {
+		if err := os.MkdirAll(opts.PersistenceDir, 0o755); err != nil {
 			return nil, fmt.Errorf("failed to create persistence directory: %w", err)
+		}
+
+		// Check the model marker before opening chromem-go.
+		// We do this first so a mismatch returns the cleanest
+		// error path (no chromem-go state to clean up).
+		if err := checkModelMarker(opts.PersistenceDir, opts.EmbeddingModel, opts.FailOnModelMismatch); err != nil {
+			return nil, err
 		}
 
 		// Create persistent DB (compress=true for space efficiency)
 		var err error
-		db, err = chromem.NewPersistentDB(persistenceDir, true)
+		db, err = chromem.NewPersistentDB(opts.PersistenceDir, true)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create persistent DB: %w", err)
 		}
@@ -47,15 +114,15 @@ func NewVectorDB(name string, embeddingDimension int, persistenceDir string) (*V
 	// The actual embeddings will be provided when adding documents
 	embeddingFunc := func(ctx context.Context, text string) ([]float32, error) {
 		// This is a placeholder - embeddings should be provided externally
-		return make([]float32, embeddingDimension), nil
+		return make([]float32, opts.EmbeddingDimension), nil
 	}
 
 	// Try to get existing collection first, create if it doesn't exist
-	collection := db.GetCollection(name, embeddingFunc)
+	collection := db.GetCollection(opts.Name, embeddingFunc)
 	if collection == nil {
 		// Collection doesn't exist, create it
 		var err error
-		collection, err = db.CreateCollection(name, nil, embeddingFunc)
+		collection, err = db.CreateCollection(opts.Name, nil, embeddingFunc)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create collection: %w", err)
 		}
@@ -63,8 +130,79 @@ func NewVectorDB(name string, embeddingDimension int, persistenceDir string) (*V
 
 	return &VectorDB{
 		collection:         collection,
-		embeddingDimension: embeddingDimension,
+		embeddingDimension: opts.EmbeddingDimension,
+		embeddingModel:     opts.EmbeddingModel,
+		persistenceDir:     opts.PersistenceDir,
 	}, nil
+}
+
+// checkModelMarker reads the on-disk marker file at persistDir
+// and compares its contents to configuredModel. Behavior:
+//
+//   - Marker missing: nothing to check. Return nil. The first
+//     AddChunk call will write the marker.
+//   - Marker present, matches configured: return nil.
+//   - Marker present, differs: if failOnMismatch is true,
+//     return an error wrapping ErrModelMismatch with both
+//     names. Otherwise log a warning and return nil so the
+//     constructor succeeds.
+func checkModelMarker(persistDir, configuredModel string, failOnMismatch bool) error {
+	path := filepath.Join(persistDir, modelMarkerFile)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read model marker at %s: %w", path, err)
+	}
+	persisted := strings.TrimSpace(string(data))
+	if persisted == configuredModel {
+		return nil
+	}
+	msg := fmt.Sprintf(
+		"persisted embedding model %q differs from configured %q; "+
+			"vectors from %q cannot be searched safely under %q",
+		persisted, configuredModel, persisted, configuredModel)
+	if failOnMismatch {
+		return fmt.Errorf("%w: %s; recover with `ragabast vector reset --force` "+
+			"then `ragabast ingest` to rebuild from source documents", ErrModelMismatch, msg)
+	}
+	log.Printf("⚠ %s; proceeding because FailOnModelMismatch=false", msg)
+	return nil
+}
+
+// writeModelMarkerIfMissing stamps the embedding model on the
+// persistence directory the first time data is written.
+// Idempotent: subsequent calls observe the existing file and
+// do not re-write. The marker is only written when a chunk
+// successfully lands in the collection — a failed write
+// must not commit a model claim on data that isn't there.
+//
+// Does NOT take db.mu — the caller (AddChunk / AddChunksBatch)
+// already holds it, and the os.Stat + os.WriteFile sequence
+// is atomic enough on every supported filesystem for the
+// first-writer-wins property we need here.
+func (db *VectorDB) writeModelMarkerIfMissing() {
+	if db == nil || db.embeddingModel == "" {
+		return
+	}
+	if db.persistenceDir == "" {
+		return
+	}
+	path := filepath.Join(db.persistenceDir, modelMarkerFile)
+	if _, err := os.Stat(path); err == nil {
+		// Marker already exists — model claim already
+		// recorded. Don't re-write; the caller's intent is
+		// only "make sure there's a marker".
+		return
+	}
+	data := []byte(db.embeddingModel)
+	// 0644: readable by the operator running `ls`; not
+	// world-writable because the marker is integrity
+	// information, not a shared resource.
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		log.Printf("vector: failed to write model marker at %s: %v", path, err)
+	}
 }
 
 // AddChunk adds a chunk to the vector database.
@@ -96,6 +234,10 @@ func (db *VectorDB) AddChunk(ctx context.Context, chunk *models.Chunk, embedding
 		return fmt.Errorf("failed to add chunk to vector DB: %w", err)
 	}
 
+	// Stamp the embedding model on the persistence dir the
+	// first time data lands. The marker survives across
+	// restarts so subsequent opens can verify the model.
+	db.writeModelMarkerIfMissing()
 	return nil
 }
 

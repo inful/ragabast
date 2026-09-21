@@ -9,7 +9,7 @@ import (
 )
 
 func TestVectorDB_DocumentNeedsUpdate(t *testing.T) {
-	db, err := NewVectorDB("test", 3, "")
+	db, err := NewVectorDB("test", 3, "", "test-model")
 	require.NoError(t, err)
 
 	needsUpdate, exists, err := db.DocumentNeedsUpdate(context.Background(), "doc-1", "fp-1")
