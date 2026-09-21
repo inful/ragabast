@@ -32,12 +32,14 @@ type fallbackTemplates struct {
 
 // chatFallbackData is the data shape for the chat landing page.
 type chatFallbackData struct {
-	Title string
+	Title     string
+	CsrfToken string
 }
 
 // ingestFallbackData is the data shape for the GET /ingest page.
 type ingestFallbackData struct {
-	Title string
+	Title     string
+	CsrfToken string
 }
 
 // ingestSuccessFallbackData is the data shape for POST /ingest's
@@ -143,6 +145,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 	</div>
 
 	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input" hx-on::before-request="document.getElementById('chat-send')?.classList.add('is-loading')" hx-on::after-request="this.reset(); document.getElementById('chat-send')?.classList.remove('is-loading'); document.getElementById('chat-input')?.focus()" hx-on::response-error="document.getElementById('chat-send')?.classList.remove('is-loading')">
+		<input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
 		<div class="field">
 			<label class="label">Message</label>
 			<div class="control">
@@ -171,6 +174,7 @@ const ingestFallbackBody = `<!DOCTYPE html>
 <body class="container mt-4">
     <h1 class="title">Ingest Document</h1>
     <form method="post" action="/ingest">
+        <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
         <div class="field">
             <label class="label">Docbuilder Content</label>
             <div class="control">

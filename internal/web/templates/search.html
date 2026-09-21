@@ -24,6 +24,7 @@
           hx-target="#search-results"
           hx-swap="innerHTML"
           hx-push-url="true">
+        <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
         <div class="field">
             <label class="label" for="query">Query</label>
             <div class="control">

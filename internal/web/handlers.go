@@ -112,9 +112,15 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data any) {
 	switch templateName {
 	case "chat.html":
-		s.renderFallback(w, "chat.html", chatFallbackData{Title: titleFromMap(data, "RAGabast - Chat")})
+		s.renderFallback(w, "chat.html", chatFallbackData{
+			Title:     titleFromMap(data, "RAGabast - Chat"),
+			CsrfToken: stringFromMap(data, "CsrfToken"),
+		})
 	case "ingest.html":
-		s.renderFallback(w, "ingest.html", ingestFallbackData{Title: titleFromMap(data, "RAGabast - Ingest")})
+		s.renderFallback(w, "ingest.html", ingestFallbackData{
+			Title:     titleFromMap(data, "RAGabast - Ingest"),
+			CsrfToken: stringFromMap(data, "CsrfToken"),
+		})
 	case "ingest_success.html":
 		s.renderFallback(w, "ingest_success.html", ingestSuccessFallbackData{
 			Title:      titleFromMap(data, "Ingest Successful"),
@@ -255,12 +261,14 @@ func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 		"Title":      "Search",
 		"Tags":       tags,
 		"Categories": categories,
+		"CsrfToken":  CsrfTokenFromContext(r.Context()),
 	})
 }
 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "chat.html", map[string]any{
-		"Title": "RAGabast - Chat",
+		"Title":     "RAGabast - Chat",
+		"CsrfToken": CsrfTokenFromContext(r.Context()),
 	})
 }
 
@@ -430,7 +438,8 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleIngestPage(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "ingest.html", map[string]any{
-		"Title": "RAGabast - Ingest",
+		"Title":     "RAGabast - Ingest",
+		"CsrfToken": CsrfTokenFromContext(r.Context()),
 	})
 }
 
