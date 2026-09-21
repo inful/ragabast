@@ -1,9 +1,7 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -216,9 +214,9 @@ func TestSearchResult_DateFieldsJSON(t *testing.T) {
 	data2, err := json.Marshal(r2)
 	require.NoError(t, err)
 	s2 := string(data2)
-	require.False(t, strings.Contains(s2, "document_created_at"),
+	require.NotContains(t, s2, "document_created_at",
 		"nil DocumentCreatedAt must be omitted from JSON")
-	require.False(t, strings.Contains(s2, "document_updated_at"),
+	require.NotContains(t, s2, "document_updated_at",
 		"nil DocumentUpdatedAt must be omitted from JSON")
 }
 
