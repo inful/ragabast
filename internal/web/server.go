@@ -59,6 +59,13 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// headers land on every response — including error
 	// responses from middleware deeper in the chain.
 	router.Use(securityHeadersMiddleware)
+	// requestIDMiddleware runs second so every downstream
+	// middleware, log line, and handler can read the ID via
+	// RequestIDFromContext. Placing it before the access
+	// logger and recoverer means panic logs and access lines
+	// are correlated; placing it after securityHeaders
+	// keeps the defense-header layer dependency-free.
+	router.Use(requestIDMiddleware())
 	// redactAccessLogMiddleware MUST run before
 	// middleware.Logger so chi sees the rewritten URL when
 	// it formats the access line. The middleware mutates

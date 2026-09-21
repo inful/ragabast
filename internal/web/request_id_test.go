@@ -11,13 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// requestIDHeader is the HTTP header the middleware reads on
-// incoming requests and sets on outgoing responses. The value
-// comes from issue #11; matches the convention used by AWS, GCP,
-// and other cloud providers so operators can reuse existing
-// tracing IDs without translation.
-const requestIDHeader = "X-Request-ID"
-
 // TestRequestIDMiddleware_GeneratesUUIDWhenAbsent verifies the
 // happy path for clients that do not send their own correlation
 // ID: the middleware mints one, stores it on the request context,
@@ -28,7 +21,7 @@ func TestRequestIDMiddleware_GeneratesUUIDWhenAbsent(t *testing.T) {
 		ctxID = RequestIDFromContext(r.Context())
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
@@ -49,7 +42,7 @@ func TestRequestIDMiddleware_EchoesClientSuppliedID(t *testing.T) {
 			"context value matches the echoed header")
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Header.Set(requestIDHeader, supplied)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -66,7 +59,7 @@ func TestRequestIDMiddleware_EchoesClientSuppliedID(t *testing.T) {
 func TestRequestIDMiddleware_RejectsEmptyHeader(t *testing.T) {
 	h := requestIDMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Header.Set(requestIDHeader, "   ")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -85,7 +78,7 @@ func TestRequestIDMiddleware_RejectsTooLong(t *testing.T) {
 	h := requestIDMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
 	long := strings.Repeat("a", 200)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Header.Set(requestIDHeader, long)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -101,7 +94,7 @@ func TestRequestIDMiddleware_RejectsTooLong(t *testing.T) {
 func TestRequestIDMiddleware_RejectsControlChars(t *testing.T) {
 	h := requestIDMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.Header.Set(requestIDHeader, "id\nINJECTED LOG LINE")
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -118,7 +111,7 @@ func TestRequestIDMiddleware_RejectsControlChars(t *testing.T) {
 // fabricated value. Useful for code paths that run both inside
 // and outside the HTTP server (CLI commands, async workers).
 func TestRequestIDFromContext_EmptyWhenAbsent(t *testing.T) {
-	assert.Equal(t, "", RequestIDFromContext(context.Background()))
+	assert.Empty(t, RequestIDFromContext(context.Background()))
 }
 
 // TestRequestIDFromContext_ReturnsSet pins the round-trip: a
