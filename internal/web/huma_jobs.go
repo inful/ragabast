@@ -11,15 +11,15 @@ import (
 )
 
 // ingestAsyncRequestBody is the JSON shape POSTed to
-// /api/ingest/async.
+// /api/ingest/async. Content is the docbuilder document,
+// including its YAML frontmatter.
 type ingestAsyncRequestBody struct {
-	Content string `doc:"Docbuilder document content (including YAML frontmatter)." json:"content"`
+	Content string `doc:"Docbuilder document content (including YAML frontmatter)." json:"content" required:"true"`
 }
 
-// ingestAsyncResponseBody is the JSON shape returned from
-// /api/ingest/async. Status is always "pending" at this
-// point — the actual processing happens in a background
-// worker and the caller polls the status endpoint.
+// ingestAsyncResponseBody is the 202-Accepted shape returned
+// from /api/ingest/async. status_url points operators at the
+// per-job polling endpoint.
 type ingestAsyncResponseBody struct {
 	JobID     string `json:"job_id"`
 	Status    string `json:"status"`
@@ -39,6 +39,15 @@ type ingestJobResponseBody struct {
 	CreatedAt   string  `json:"created_at"`
 	StartedAt   *string `json:"started_at,omitempty"`
 	CompletedAt *string `json:"completed_at,omitempty"`
+}
+
+// ingestJobsListResponseBody is the envelope returned from
+// GET /api/ingest/jobs. total reflects every job matching
+// the status filter (not just the page), so callers can
+// compute page counts for their UI.
+type ingestJobsListResponseBody struct {
+	Jobs  []ingestJobResponseBody `json:"jobs"`
+	Total int                     `json:"total"`
 }
 
 // registerIngestJobsOperations wires the async ingest
@@ -80,14 +89,11 @@ func registerIngestJobsOperations(api huma.API, q *jobs.Queue) {
 					Detail: "document exceeds server.max_ingest_document_bytes",
 				}
 			}
-			return nil, huma.Error500InternalServerError("failed to submit job")
+			return nil, huma.Error500InternalServerError("failed to submit job: " + err.Error())
 		}
-
-		// 202 Accepted — return immediately, the worker
-		// pool picks the job up asynchronously.
 		return &struct{ Body ingestAsyncResponseBody }{Body: ingestAsyncResponseBody{
 			JobID:     j.ID,
-			Status:    string(jobs.StatusPending),
+			Status:    string(j.Status),
 			StatusURL: "/api/ingest/jobs/" + j.ID,
 		}}, nil
 	})
@@ -101,23 +107,14 @@ func registerIngestJobsOperations(api huma.API, q *jobs.Queue) {
 		JobID string `path:"job_id"`
 	},
 	) (*struct{ Body ingestJobResponseBody }, error) {
-		j, err := q.Get(input.JobID)
-		if err != nil {
-			if errors.Is(err, jobs.ErrJobNotFound) {
+		j, gerr := q.Get(input.JobID)
+		if gerr != nil {
+			if errors.Is(gerr, jobs.ErrJobNotFound) {
 				return nil, huma.Error404NotFound("job not found")
 			}
-			return nil, huma.Error500InternalServerError("failed to read job")
+			return nil, huma.Error500InternalServerError("failed to read job: " + gerr.Error())
 		}
-
-		resp := &struct{ Body ingestJobResponseBody }{Body: ingestJobResponseBody{
-			JobID:     j.ID,
-			Status:    string(j.Status),
-			Error:     j.Error,
-			CreatedAt: j.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
-		}}
-		if j.DocumentID != "" {
-			resp.Body.DocumentID = j.DocumentID
-		}
+		resp := &struct{ Body ingestJobResponseBody }{Body: buildJobResponseBody(j)}
 		if j.Chunks > 0 {
 			resp.Body.Chunks = j.Chunks
 		}
@@ -131,6 +128,83 @@ func registerIngestJobsOperations(api huma.API, q *jobs.Queue) {
 		}
 		return resp, nil
 	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "ingest-jobs-list",
+		Method:      http.MethodGet,
+		Path:        "/api/ingest/jobs",
+		Summary:     "List async ingest jobs",
+		Description: "Returns up to `limit` jobs (default 50) starting at `offset`, filtered by `status` if supplied. The `total` field reflects the count of all matching jobs, not just the page.",
+	}, func(ctx context.Context, input *struct {
+		Status string `enum:"pending,processing,completed,failed,all" query:"status,omitempty"`
+		Limit  int    `maximum:"1000" minimum:"1" query:"limit,omitempty"`
+		Offset int    `minimum:"0" query:"offset,omitempty"`
+	},
+	) (*struct{ Body ingestJobsListResponseBody }, error) {
+		limit := input.Limit
+		if limit == 0 {
+			limit = 50
+		}
+		offset := input.Offset
+
+		filter := jobs.Status(input.Status)
+		// "all" or empty means no filter.
+		if filter == "all" || filter == "" {
+			filter = ""
+		}
+
+		all, err := q.List(filter)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(
+				"failed to list jobs: " + err.Error())
+		}
+
+		// Page the slice. all is already filtered by status;
+		// limit/offset just slice the result.
+		total := len(all)
+		if offset > total {
+			offset = total
+		}
+		end := min(offset+limit, total)
+		page := all[offset:end]
+
+		out := make([]ingestJobResponseBody, len(page))
+		for i, j := range page {
+			out[i] = buildJobResponseBody(j)
+		}
+		return &struct{ Body ingestJobsListResponseBody }{
+			Body: ingestJobsListResponseBody{Jobs: out, Total: total},
+		}, nil
+	})
+}
+
+// buildJobResponseBody converts a *jobs.Job to the wire-shape
+// returned by /api/ingest/jobs/{job_id} and /api/ingest/jobs.
+// Extracted from the per-job status handler so both endpoints
+// stay in sync; a future field change here touches both
+// callers automatically.
+func buildJobResponseBody(j *jobs.Job) ingestJobResponseBody {
+	resp := ingestJobResponseBody{
+		JobID:     j.ID,
+		Status:    string(j.Status),
+		Error:     j.Error,
+		CreatedAt: j.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if j.DocumentID != "" {
+		resp.DocumentID = j.DocumentID
+	}
+	if j.Chunks > 0 {
+		resp.Chunks = j.Chunks
+	}
+	if j.StartedAt != nil {
+		s := j.StartedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.StartedAt = &s
+	}
+	if j.CompletedAt != nil {
+		s := j.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
+		resp.CompletedAt = &s
+	}
+	return resp
 }
 
 // registerIngestJobsDisabled wires the same endpoints but
@@ -158,6 +232,15 @@ func registerIngestJobsDisabled(api huma.API) {
 		JobID string `path:"job_id"`
 	},
 	) (*struct{ Body ingestJobResponseBody }, error) {
+		return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "ingest-jobs-list",
+		Method:      http.MethodGet,
+		Path:        "/api/ingest/jobs",
+		Summary:     "List async ingest jobs (disabled)",
+	}, func(_ context.Context, _ *struct{}) (*struct{ Body ingestJobsListResponseBody }, error) {
 		return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
 	})
 }
