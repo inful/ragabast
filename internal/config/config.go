@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -651,6 +652,56 @@ func (c *Config) ApplyEnvOverrides() {
 	}
 }
 
+// validateDocbuilderBaseURL checks that the configured
+// docbuilder base URL is either empty (the "no permalinks"
+// mode) or a syntactically valid http/https URL with a
+// non-empty host.
+//
+// The field is trimmed before validation AND persisted
+// back trimmed so synthesized permalinks never carry a
+// stray space. Trim-and-mutate is intentional: the only
+// legitimate whitespace around a URL is from copy/paste,
+// and silently passing " http://x.com/ " through would
+// produce " http://x.com/_uid/abc/" links in the chat
+// UI — broken and visibly wrong.
+//
+// A specific scheme allow-list (http, https) protects
+// against a more dangerous silent failure than a typo:
+// a javascript: or file:// scheme would render the
+// permalink as either an XSS vector or a path disclosure.
+// validateAndTrimDocbuilderBaseURL validates the configured
+// docbuilder base URL AND persists the trimmed form back
+// onto the config. The mutation is intentional: the only
+// legitimate whitespace around a URL is from copy/paste,
+// and silently passing " http://x.com/ " through would
+// produce " http://x.com/_uid/abc/" links in the chat
+// UI — broken and visibly wrong.
+//
+// The scheme allow-list (http, https) protects against a
+// more dangerous silent failure than a typo: a javascript:
+// or file:// scheme would render the permalink as either
+// an XSS vector or a path disclosure.
+func validateAndTrimDocbuilderBaseURL(c *Config) error {
+	raw := c.Ragabast.DocbuilderBaseURL
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		c.Ragabast.DocbuilderBaseURL = ""
+		return nil
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return fmt.Errorf("ragabast.docbuilder_base_url %q is not a valid URL: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("ragabast.docbuilder_base_url %q must use http or https scheme (got %q)", raw, u.Scheme)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("ragabast.docbuilder_base_url %q must include a host", raw)
+	}
+	c.Ragabast.DocbuilderBaseURL = trimmed
+	return nil
+}
+
 func validateOllamaOptions(opts map[string]any) error {
 	if len(opts) == 0 {
 		return nil
@@ -803,6 +854,11 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.AsyncIngestWorkers < 0 {
 		errs = append(errs, "server.async_ingest_workers must be >= 0")
+	}
+
+	// Validate Ragabast config.
+	if err := validateAndTrimDocbuilderBaseURL(c); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	// Validate Processing config.
