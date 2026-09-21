@@ -75,6 +75,8 @@ func TestService_QueryDebugWithOptions_EnrichesResultsWithDocbuilderURL(t *testi
 		cfg.Ollama.Timeout,
 		cfg.Ollama.EmbeddingDimensions,
 		cfg.Ollama.EmbeddingConcurrency,
+		"", // docPrompt — this test exercises the enrichment path, not prompt injection
+		"", // queryPrompt
 	)
 	vectorOps := vector.NewVectorOperations(db, embeddings)
 

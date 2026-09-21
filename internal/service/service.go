@@ -70,6 +70,8 @@ func NewService(cfg *config.Config) (*Service, error) {
 		cfg.Ollama.Timeout,
 		cfg.Ollama.EmbeddingDimensions,
 		cfg.Ollama.EmbeddingConcurrency,
+		cfg.Ollama.EmbeddingDocPrompt,
+		cfg.Ollama.EmbeddingQueryPrompt,
 	)
 
 	vectorOps := vector.NewVectorOperations(db, embeddings)

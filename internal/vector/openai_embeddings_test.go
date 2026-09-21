@@ -50,7 +50,7 @@ func TestOpenAIEmbeddingClient_GenerateEmbedding_PostsToV1Embeddings(t *testing.
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "nomic-embed-text:v1.5", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "nomic-embed-text:v1.5", "", 5*time.Second, 0, 1, "", "")
 
 	vec, err := client.GenerateEmbedding(context.Background(), "hello world")
 	require.NoError(t, err)
@@ -72,7 +72,7 @@ func TestOpenAIEmbeddingClient_GenerateEmbedding_SendsAuthHeader(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "secret-key", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "secret-key", 5*time.Second, 0, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "hi")
 	require.NoError(t, err)
 
@@ -114,7 +114,7 @@ func TestOpenAIEmbeddingClient_generateEmbeddingsBatch_SendsAllInputs(t *testing
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	vecs, err := client.generateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
 	require.NoError(t, err)
 	require.Len(t, vecs, 3)
@@ -126,7 +126,7 @@ func TestOpenAIEmbeddingClient_generateEmbeddingsBatch_SendsAllInputs(t *testing
 func TestOpenAIEmbeddingClient_EmptyTextReturnsError(t *testing.T) {
 	t.Parallel()
 
-	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second, 0, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "")
 	require.ErrorIs(t, err, models.ErrEmbeddingFailed)
 }
@@ -134,7 +134,7 @@ func TestOpenAIEmbeddingClient_EmptyTextReturnsError(t *testing.T) {
 func TestOpenAIEmbeddingClient_EmptyBatchReturnsError(t *testing.T) {
 	t.Parallel()
 
-	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions("http://example.invalid", "m", "", time.Second, 0, 1, "", "")
 	_, err := client.generateEmbeddingsBatch(context.Background(), nil)
 	require.ErrorIs(t, err, models.ErrEmbeddingFailed)
 }
@@ -148,7 +148,7 @@ func TestOpenAIEmbeddingClient_ServerError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "x")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "boom")
@@ -163,7 +163,7 @@ func TestOpenAIEmbeddingClient_ApiErrorInBody(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "x")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "context length exceeded")
@@ -179,7 +179,7 @@ func TestOpenAIEmbeddingClient_MismatchedInputCountReturnsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	_, err := client.generateEmbeddingsBatch(context.Background(), []string{"a", "b", "c"})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "1 vectors for 3 inputs")
@@ -194,7 +194,7 @@ func TestOpenAIEmbeddingClient_EmptyVectorReturnsError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "x")
 	require.ErrorIs(t, err, models.ErrEmbeddingFailed)
 }
@@ -217,7 +217,7 @@ func TestOpenAIEmbeddingClient_GenerateChunkEmbedding_UsesFullPath(t *testing.T)
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	chunk := models.NewChunk()
 	chunk.Content = "body"
 	chunk.HeaderPath = "H1/H2"
@@ -239,7 +239,7 @@ func TestOpenAIEmbeddingClient_ValidateConnection_Success(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	require.NoError(t, client.ValidateConnection(context.Background()))
 }
 
@@ -265,7 +265,7 @@ func TestOpenAIEmbeddingClient_ValidateConnection_FallsBackToUnversionedPath(t *
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	require.NoError(t, client.ValidateConnection(context.Background()))
 
 	mu.Lock()
@@ -282,7 +282,7 @@ func TestOpenAIEmbeddingClient_ValidateConnection_BothPathsFail(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	err := client.ValidateConnection(context.Background())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "did not respond")
@@ -303,7 +303,7 @@ func TestOpenAIEmbeddingClient_SingleInputBatch_SendsArrayOfOne(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "only one")
 	require.NoError(t, err)
 	require.Len(t, got.Input, 1)
@@ -314,7 +314,7 @@ func TestOpenAIEmbeddingClient_DefaultsAreLocal(t *testing.T) {
 	t.Parallel()
 
 	// No API key, no base URL, no model -> defaults are local-friendly.
-	client := NewOpenAIEmbeddingClientWithOptions("", "", "", 0, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions("", "", "", 0, 0, 1, "", "")
 	require.Equal(t, "http://localhost:11434", client.baseURLString())
 	require.NotEmpty(t, client.modelName())
 }
@@ -338,7 +338,7 @@ func TestOpenAIEmbeddingClient_SendsDimensionsInRequestBody(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "hi")
 	require.NoError(t, err)
 
@@ -364,7 +364,7 @@ func TestOpenAIEmbeddingClient_OmitsDimensionsWhenZero(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "m", "", 5*time.Second, 0, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "hi")
 	require.NoError(t, err)
 
@@ -402,7 +402,7 @@ func TestOpenAIEmbeddingClient_WarnsOnDimensionMismatch(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256, 1, "", "")
 	vec, err := client.GenerateEmbedding(context.Background(), "hi")
 	require.NoError(t, err)
 	require.Len(t, vec, 768, "we store whatever the server returns; the warning is the user signal")
@@ -438,7 +438,7 @@ func TestOpenAIEmbeddingClient_NoWarningOnMatch(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256, 1)
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "jina-embeddings-v5-text-small", "k", 5*time.Second, 256, 1, "", "")
 	_, err := client.GenerateEmbedding(context.Background(), "hi")
 	require.NoError(t, err)
 

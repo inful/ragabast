@@ -110,6 +110,29 @@ type OllamaConfig struct {
 	// matches Ollama's default. Set to 1 to disable the pool.
 	EmbeddingConcurrency int `env:"OLLAMA_EMBEDDING_CONCURRENCY" yaml:"embedding_concurrency"`
 
+	// EmbeddingDocPrompt is prepended to every chunk text
+	// before the OpenAIEmbeddingClient POSTs to /v1/embeddings
+	// on the doc side (GenerateEmbedding, GenerateChunkEmbedding,
+	// GenerateChunkEmbeddings). Default empty — preserves the
+	// historical raw-text behavior for nomic-embed-text and
+	// other prompt-free models. Operators switching to
+	// Google's EmbeddingGemma (or another task-prompted
+	// model) should set this to Google's recommended
+	// `title: none | text:` so the model produces
+	// retrieval-optimized document vectors.
+	EmbeddingDocPrompt string `env:"OLLAMA_EMBEDDING_DOC_PROMPT" yaml:"embedding_doc_prompt,omitempty"`
+
+	// EmbeddingQueryPrompt is prepended to the user query
+	// before the OpenAIEmbeddingClient POSTs to /v1/embeddings
+	// on the query side (EmbedQuery). Same default-empty
+	// behavior as EmbeddingDocPrompt. For EmbeddingGemma,
+	// the recommended value is
+	// `task: search result | query:`. The doc and query
+	// prompts are independent — operators can tune them
+	// separately, including setting one and clearing the
+	// other.
+	EmbeddingQueryPrompt string `env:"OLLAMA_EMBEDDING_QUERY_PROMPT" yaml:"embedding_query_prompt,omitempty"`
+
 	// ChatBaseURL is the OpenAI-compatible chat completions server endpoint.
 	// Defaults to the same local Ollama instance (which exposes
 	// /v1/chat/completions from 0.5+), but can point at vLLM, llama.cpp
@@ -582,6 +605,19 @@ func (c *Config) ApplyEnvOverrides() {
 		if v, err := strconv.ParseFloat(strings.TrimSpace(temp), 64); err == nil {
 			c.Ollama.Temperature = &v
 		}
+	}
+	if v, ok := os.LookupEnv("OLLAMA_EMBEDDING_DOC_PROMPT"); ok {
+		// LookupEnv (not Getenv) so an explicitly-empty env
+		// var clears the field — operators can disable the
+		// prompt by exporting the variable to "" without
+		// unsetting it. This matches how every other
+		// config knob in this codebase behaves: presence
+		// of the env var means "the operator chose this
+		// value", absence means "use the YAML / default".
+		c.Ollama.EmbeddingDocPrompt = v
+	}
+	if v, ok := os.LookupEnv("OLLAMA_EMBEDDING_QUERY_PROMPT"); ok {
+		c.Ollama.EmbeddingQueryPrompt = v
 	}
 	if raw := os.Getenv("OLLAMA_OPTIONS_JSON"); strings.TrimSpace(raw) != "" {
 		var m map[string]any

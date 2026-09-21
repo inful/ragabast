@@ -59,7 +59,7 @@ func TestGenerateChunkEmbeddings_ConcurrentCalls(t *testing.T) {
 
 	client := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "test-model", "", 5*time.Second, 3, concurrency,
-	)
+		"", "")
 
 	chunks := make([]*models.Chunk, chunkCount)
 	for i := range chunks {
@@ -141,7 +141,7 @@ func TestGenerateChunkEmbeddings_PreservesOrder(t *testing.T) {
 
 	client := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "test-model", "", 5*time.Second, 4, 3,
-	)
+		"", "")
 
 	chunks := []*models.Chunk{
 		{ID: "c0", DocumentID: "doc-1", Content: "alpha"},
@@ -187,7 +187,7 @@ func TestGenerateChunkEmbeddings_ErrorFromOneFailsAll(t *testing.T) {
 
 	client := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "test-model", "", 5*time.Second, 3, 3,
-	)
+		"", "")
 
 	chunks := []*models.Chunk{
 		{ID: "c0", DocumentID: "doc-1"},
@@ -250,7 +250,7 @@ func TestGenerateChunkEmbeddings_ConcurrencyOneIsSequential(t *testing.T) {
 
 	client := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "test-model", "", 5*time.Second, 3, 1,
-	)
+		"", "")
 
 	chunks := make([]*models.Chunk, 6)
 	for i := range chunks {
@@ -285,7 +285,7 @@ func TestGenerateChunkEmbeddings_ContextCanceled(t *testing.T) {
 
 	client := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "test-model", "", 5*time.Second, 3, 2,
-	)
+		"", "")
 
 	chunks := []*models.Chunk{{ID: "c0", DocumentID: "doc-1"}}
 
