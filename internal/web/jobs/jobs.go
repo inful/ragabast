@@ -125,6 +125,18 @@ type Queue struct {
 	// times safely.
 	stopOnce sync.Once
 	stopped  chan struct{}
+
+	// workerCtx + workerCtxCancel back the cancelable
+	// context handed to in-flight processOne calls. Stop
+	// triggers workerCtxCancel so slow IngestDocument
+	// calls observe ctx.Done() and return promptly. Both
+	// fields are populated by Start and read by worker
+	// goroutines only after Start has returned, so no
+	// synchronization is needed.
+	//
+	//nolint:containedctx // standard pattern for cancelable worker pools
+	workerCtx       context.Context
+	workerCtxCancel context.CancelFunc
 }
 
 // Service is the subset of the service layer the worker
@@ -274,15 +286,17 @@ func (q *Queue) List(statusFilter Status) ([]*Job, error) {
 // recovery can be enqueued twice: once by Submit's channel
 // send (after Start returns) and again by recovery (which
 // sees the .json file Submit just wrote). With two workers in
-// the pool, each receives one ID and processes the same job —
-// IngestDocument is invoked twice and the audit log reports
-// two completed runs for one user request.
+// the pool, each receives one of the duplicate IDs and processes
+// the same job — IngestDocument is invoked twice and the audit
+// log reports two completed runs for one user request.
 //
-// The recovery scan is bounded by the directory size, so
-// blocking Start briefly is acceptable. Production directories
-// are small (bounded by the queue's normal throughput); tests
-// use t.TempDir with at most a handful of seeded files.
+// Stop will cancel workerCtx, which in-flight processOne
+// goroutines observe via the context handed to IngestDocument.
+// Slow ingest calls therefore abort promptly at shutdown
+// rather than running to completion. See issue #31.
 func (q *Queue) Start(svc Service, audit AuditFunc) {
+	q.workerCtx, q.workerCtxCancel = context.WithCancel(context.Background())
+
 	for range q.workers {
 		go q.worker(svc, audit)
 	}
@@ -299,12 +313,26 @@ func (q *Queue) Start(svc Service, audit AuditFunc) {
 // Workers finish whatever job they are currently processing;
 // subsequent Submits return an error immediately.
 //
+// Issue #31: in-flight IngestDocument calls observe the
+// workerCtx cancellation this method triggers. Slow ingest
+// calls therefore abort promptly at shutdown rather than
+// running to completion. The worker pool itself still drains
+// via the closed stopped channel — the cancel is for the
+// slow call, the close is for the select loop.
+//
 // We do NOT close pending: closing would panic any concurrent
 // sender (Submit, recover) that races with Stop. Instead the
 // workers' select-loop pattern watches the stopped channel,
 // which is closed exactly once via stopOnce.
 func (q *Queue) Stop() {
 	q.stopOnce.Do(func() {
+		// 1. Cancel the worker context so in-flight
+		//    processOne calls observe ctx.Done().
+		if q.workerCtx != nil {
+			q.workerCtxCancel()
+		}
+		// 2. Close the stopped channel so the worker
+		//    select loop exits at the next iteration.
 		close(q.stopped)
 	})
 }
@@ -445,12 +473,12 @@ func (q *Queue) worker(svc Service, audit AuditFunc) {
 			if !ok {
 				return
 			}
-			q.processOne(id, svc, audit)
+			q.processOne(id, q.workerCtx, svc, audit)
 		}
 	}
 }
 
-func (q *Queue) processOne(id string, svc Service, audit AuditFunc) {
+func (q *Queue) processOne(id string, ctx context.Context, svc Service, audit AuditFunc) {
 	// Read the job from the canonical .json path BEFORE we
 	// claim it; if it doesn't exist there it might exist at
 	// .processing.json (a prior worker was interrupted, or
@@ -508,7 +536,7 @@ func (q *Queue) processOne(id string, svc Service, audit AuditFunc) {
 	}
 
 	// Run the ingest.
-	docID, chunks, err := svc.IngestDocument(contextFromJob(j), j.Content)
+	docID, chunks, err := svc.IngestDocument(ctx, j.Content)
 	done := time.Now().UTC()
 	j.CompletedAt = &done
 	if err != nil {
@@ -776,24 +804,3 @@ func (q *Queue) getFromPath(path string) (*Job, error) {
 	}
 	return &j, nil
 }
-
-// contextFromJob returns a fresh background context for a
-// job's ingest call. The job's lifetime is bounded by the
-// worker pool; we don't tie it to the HTTP request that
-// submitted it (which has long since returned).
-//
-// Package-private so the queue package does not import
-// "context" — but it does, via this helper.
-func contextFromJob(_ *Job) ctx {
-	return backgroundCtx()
-}
-
-// ctx is a tiny alias for context.Context so the helper
-// signatures stay readable. Declared in this file rather than
-// imported wholesale to keep the dependency surface small.
-type ctx = context.Context
-
-// backgroundCtx is a context.Background equivalent kept as a
-// function so future telemetry (otel, propagation) can be
-// added at one site without touching every caller.
-func backgroundCtx() ctx { return context.Background() }
