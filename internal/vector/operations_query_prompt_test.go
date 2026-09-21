@@ -13,6 +13,41 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// captureEmbedInputs returns an httptest server that
+// captures the input field from each /v1/embeddings
+// body, normalizes it to []string regardless of whether
+// the client sent an array (OpenAI spec) or a single
+// string (Ollama spec), and returns the slice through
+// the channel.
+func captureEmbedInputs(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
+	var mu sync.Mutex
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var got map[string]any
+		_ = json.Unmarshal(body, &got)
+		switch v := got["input"].(type) {
+		case []any:
+			for _, in := range v {
+				if s, ok := in.(string); ok {
+					mu.Lock()
+					seen = append(seen, s)
+					mu.Unlock()
+				}
+			}
+		case string:
+			mu.Lock()
+			seen = append(seen, v)
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}],"model":"m"}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &seen
+}
+
 // TestVectorOperations_Search_PrependsQueryPrompt pins
 // the operations-layer wiring: when the embedding
 // client is configured with a query prompt, the
@@ -22,35 +57,14 @@ import (
 // embed the query as a free-form string — silently
 // losing the model's retrieval-quality optimization.
 //
-// Test setup mirrors TestVectorOperations_DeleteDocument_*
-// in operations_integration_test.go: a stub
-// /v1/embeddings server records the body, the search
-// side asserts on the recorded input. The VectorDB
-// doesn't need real chromem-go state because Search
-// fails fast on empty collection (and we only care
-// about the embedding request, not the search result).
+// Uses a real in-memory VectorDB (via fixtureVO) so
+// Search can run end-to-end without nil-pointer panics;
+// the assertion only cares about the embedding request,
+// not the search results.
 func TestVectorOperations_Search_PrependsQueryPrompt(t *testing.T) {
 	t.Parallel()
 
-	var mu sync.Mutex
-	var seenInputs []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var got map[string]any
-		_ = json.Unmarshal(body, &got)
-		if inputs, ok := got["input"].([]any); ok {
-			for _, in := range inputs {
-				if s, ok := in.(string); ok {
-					mu.Lock()
-					seenInputs = append(seenInputs, s)
-					mu.Unlock()
-				}
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}],"model":"m"}`))
-	}))
-	t.Cleanup(srv.Close)
+	srv, seen := captureEmbedInputs(t)
 
 	embeddings := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "embeddinggemma", "", 5*time.Second, 0, 1,
@@ -58,17 +72,15 @@ func TestVectorOperations_Search_PrependsQueryPrompt(t *testing.T) {
 		"task: search result | query:", // queryPrompt
 	)
 
-	// Search hits the embeddings server for the query
-	// vector; the actual vector DB call returns empty
-	// (no documents) but we only assert the embedding
-	// request shape.
-	vo := NewVectorOperations(nil, embeddings)
+	vo, _, _ := fixtureVO(t)
+	// Swap the nil embeddings the fixture wired for
+	// the one with prompts configured.
+	vo.embeddings = embeddings
+
 	_, _ = vo.Search(context.Background(), "what is ragabast", 5, nil)
 
-	mu.Lock()
-	defer mu.Unlock()
-	require.NotEmpty(t, seenInputs, "Search must POST to /v1/embeddings")
-	require.Equal(t, "task: search result | query:what is ragabast", seenInputs[0],
+	require.NotEmpty(t, *seen, "Search must POST to /v1/embeddings")
+	require.Equal(t, "task: search result | query:what is ragabast", (*seen)[0],
 		"Search must use the query prompt, not the doc prompt")
 }
 
@@ -80,25 +92,7 @@ func TestVectorOperations_Search_PrependsQueryPrompt(t *testing.T) {
 func TestVectorOperations_HybridSearch_PrependsQueryPrompt(t *testing.T) {
 	t.Parallel()
 
-	var mu sync.Mutex
-	var seenInputs []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var got map[string]any
-		_ = json.Unmarshal(body, &got)
-		if inputs, ok := got["input"].([]any); ok {
-			for _, in := range inputs {
-				if s, ok := in.(string); ok {
-					mu.Lock()
-					seenInputs = append(seenInputs, s)
-					mu.Unlock()
-				}
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.1,0.2,0.3]}],"model":"m"}`))
-	}))
-	t.Cleanup(srv.Close)
+	srv, seen := captureEmbedInputs(t)
 
 	embeddings := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "embeddinggemma", "", 5*time.Second, 0, 1,
@@ -106,17 +100,12 @@ func TestVectorOperations_HybridSearch_PrependsQueryPrompt(t *testing.T) {
 		"task: search result | query:",
 	)
 
-	vo := NewVectorOperations(nil, embeddings)
-	// SearchHybrid without a keyword index falls into
-	// searchSemanticOnly (same code path that calls the
-	// embeddings client). We don't care about the
-	// returned hits — only that the embedding request
-	// carries the query prompt.
-	_, _ = vo.SearchHybrid(context.Background(), "what is ragabast", 5, SearchFilters{}, SearchModeHybrid)
+	vo, _, _ := fixtureVO(t)
+	vo.embeddings = embeddings
 
-	mu.Lock()
-	defer mu.Unlock()
-	require.NotEmpty(t, seenInputs, "SearchHybrid must POST to /v1/embeddings")
-	require.Equal(t, "task: search result | query:what is ragabast", seenInputs[0],
+	_, _ = vo.SearchHybrid(context.Background(), "what is ragabast", 5, SearchFilters{}, ModeHybrid)
+
+	require.NotEmpty(t, *seen, "SearchHybrid must POST to /v1/embeddings")
+	require.Equal(t, "task: search result | query:what is ragabast", (*seen)[0],
 		"SearchHybrid must use the query prompt")
 }

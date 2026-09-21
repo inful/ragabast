@@ -31,7 +31,7 @@ func TestApplyEnvOverrides_EmbeddingDocPrompt_EmptyClearsField(t *testing.T) {
 
 	t.Setenv("OLLAMA_EMBEDDING_DOC_PROMPT", "")
 	cfg.ApplyEnvOverrides()
-	require.Equal(t, "", cfg.Ollama.EmbeddingDocPrompt,
+	require.Empty(t, cfg.Ollama.EmbeddingDocPrompt,
 		"empty env var must overwrite the field with \"\"")
 }
 

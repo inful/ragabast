@@ -76,7 +76,7 @@ func TestEmbed_DocPromptPrependedToChunkInput(t *testing.T) {
 
 	client := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "embeddinggemma", "", 5*time.Second, 0, 1,
-		"title: none | text:", // docPrompt
+		"title: none | text:",          // docPrompt
 		"task: search result | query:", // queryPrompt
 	)
 
@@ -139,7 +139,7 @@ func TestEmbedQuery_UsesQueryPrompt(t *testing.T) {
 
 	body := <-captured
 	inputs, _ := inputsOf(body)
-	require.Equal(t, []string{"task: search result | query:what is ragabast"}, inputs[0])
+	require.Equal(t, "task: search result | query:what is ragabast", inputs[0])
 }
 
 // TestEmbedQuery_EmptyQueryPromptIsNoOp mirrors the
@@ -226,11 +226,11 @@ func TestEmbed_PromptsPersistAcrossBatchCalls(t *testing.T) {
 		"task: search result | query:",
 	)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := client.GenerateEmbedding(context.Background(), "x")
 		require.NoError(t, err)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, err := client.EmbedQuery(context.Background(), "y")
 		require.NoError(t, err)
 	}
@@ -240,14 +240,14 @@ func TestEmbed_PromptsPersistAcrossBatchCalls(t *testing.T) {
 	require.Len(t, captured, 6, "every call must produce one server request")
 
 	// First three: doc prompt. Last three: query prompt.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		inputs, _ := inputsOf(captured[i])
 		require.True(t, len(inputs[0]) > len("title: none | text:") && inputs[0][:len("title: none | text:")] == "title: none | text:",
 			"call %d must use doc prompt: %q", i, inputs[0])
 	}
 	for i := 3; i < 6; i++ {
 		inputs, _ := inputsOf(captured[i])
-		require.True(t, inputs[0][:len("task: search result | query:")] == "task: search result | query:",
+		require.Equal(t, "task: search result | query:", inputs[0][:len("task: search result | query:")],
 			"call %d must use query prompt: %q", i, inputs[0])
 	}
 }

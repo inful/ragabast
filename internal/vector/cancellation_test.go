@@ -47,7 +47,7 @@ func TestGenerateChunkEmbeddings_CancellationAbortsInFlight(t *testing.T) {
 
 	client := NewOpenAIEmbeddingClientWithOptions(
 		srv.URL, "test-model", "", 5*time.Second, 3, 4,
-	)
+		"", "")
 
 	// 16 chunks × ~5s latency each, 4-way parallel = the
 	// sequential total would be ~80s; with parallelism and

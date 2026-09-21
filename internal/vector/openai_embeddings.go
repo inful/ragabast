@@ -53,8 +53,10 @@ type OpenAIEmbeddingClient struct {
 	model             string
 	apiKey            string
 	httpClient        *http.Client
-	expectedDimension int // 0 = unset; when >0, request body includes `dimensions: N` and the response is length-checked
-	concurrency       int // 1 = sequential; >1 = parallel sub-batches per GenerateChunkEmbeddings
+	expectedDimension int    // 0 = unset; when >0, request body includes `dimensions: N` and the response is length-checked
+	concurrency       int    // 1 = sequential; >1 = parallel sub-batches per GenerateChunkEmbeddings
+	docPrompt         string // prepended to chunk text on the doc side; empty = no prepend
+	queryPrompt       string // prepended to user query on the query side; empty = no prepend
 
 	dimWarnOnce sync.Once
 }
@@ -85,7 +87,7 @@ type OpenAIEmbeddingClient struct {
 // can handle trades CPU on the ragabast side for queue depth
 // on the server side; setting it lower leaves server capacity
 // unused.
-func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout time.Duration, dimensions int, concurrency int) *OpenAIEmbeddingClient {
+func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout time.Duration, dimensions int, concurrency int, docPrompt string, queryPrompt string) *OpenAIEmbeddingClient {
 	if baseURL == "" {
 		baseURL = "http://localhost:11434"
 	}
@@ -105,6 +107,8 @@ func NewOpenAIEmbeddingClientWithOptions(baseURL, model, apiKey string, timeout 
 		apiKey:            apiKey,
 		expectedDimension: dimensions,
 		concurrency:       concurrency,
+		docPrompt:         docPrompt,
+		queryPrompt:       queryPrompt,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -125,12 +129,18 @@ func (c *OpenAIEmbeddingClient) checkDimension(actual int) {
 	})
 }
 
-// GenerateEmbedding generates an embedding for the given text.
+// GenerateEmbedding generates an embedding for the given
+// text on the doc side: the configured docPrompt (if any)
+// is prepended before POSTing. Use EmbedQuery for user
+// queries — sending a query through this method would
+// prepend the doc prompt and the model would embed it as
+// if it were an indexed document, measurably worse
+// retrieval quality with embedding-gemma.
 func (c *OpenAIEmbeddingClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	if text == "" {
 		return nil, models.ErrEmbeddingFailed
 	}
-	resp, err := c.embed(ctx, []string{text}, nil)
+	resp, err := c.embed(ctx, []string{c.applyDocPrompt(text)}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +148,43 @@ func (c *OpenAIEmbeddingClient) GenerateEmbedding(ctx context.Context, text stri
 		return nil, models.ErrEmbeddingFailed
 	}
 	return resp[0], nil
+}
+
+// EmbedQuery generates an embedding for a user query.
+// The configured queryPrompt (if any) is prepended before
+// POSTing. This is the embedding-gemma optimization —
+// doc-side and query-side prompts differ, and using the
+// wrong one silently degrades retrieval quality.
+func (c *OpenAIEmbeddingClient) EmbedQuery(ctx context.Context, query string) ([]float32, error) {
+	if query == "" {
+		return nil, models.ErrEmbeddingFailed
+	}
+	resp, err := c.embed(ctx, []string{c.applyQueryPrompt(query)}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) == 0 || len(resp[0]) == 0 {
+		return nil, models.ErrEmbeddingFailed
+	}
+	return resp[0], nil
+}
+
+// applyDocPrompt returns text with the doc prompt prepended.
+// Empty prompt = identity (no prepend, no allocation
+// thrash on the hot path).
+func (c *OpenAIEmbeddingClient) applyDocPrompt(text string) string {
+	if c.docPrompt == "" {
+		return text
+	}
+	return c.docPrompt + text
+}
+
+// applyQueryPrompt mirrors applyDocPrompt for queries.
+func (c *OpenAIEmbeddingClient) applyQueryPrompt(query string) string {
+	if c.queryPrompt == "" {
+		return query
+	}
+	return c.queryPrompt + query
 }
 
 // generateEmbeddingsBatch generates embeddings for multiple texts
@@ -294,6 +341,9 @@ func (c *OpenAIEmbeddingClient) ValidateConnection(ctx context.Context) error {
 }
 
 // GenerateChunkEmbeddings generates embeddings for a batch of chunks.
+// The configured docPrompt (if any) is prepended to every
+// chunk text before the POST. Empty prompt = identity (the
+// historical raw-text behavior).
 func (c *OpenAIEmbeddingClient) GenerateChunkEmbeddings(ctx context.Context, chunks []*models.Chunk) ([][]float32, error) {
 	if len(chunks) == 0 {
 		return nil, models.ErrEmbeddingFailed
@@ -301,8 +351,7 @@ func (c *OpenAIEmbeddingClient) GenerateChunkEmbeddings(ctx context.Context, chu
 
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
-		// Use the full hierarchical path for better context
-		texts[i] = chunk.GetFullPath()
+		texts[i] = c.applyDocPrompt(chunk.GetFullPath())
 	}
 
 	return c.generateEmbeddingsBatch(ctx, texts)
@@ -317,6 +366,10 @@ func (c *OpenAIEmbeddingClient) GenerateChunkEmbedding(ctx context.Context, chun
 	return c.GenerateEmbedding(ctx, chunk.GetFullPath())
 }
 
+// // — kept in the signature for callers that may want to
+// // inject per-request fields in the future.
+//
+//nolint:unparam // options is part of the function's documented contract
 func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, options map[string]any) ([][]float32, error) {
 	// Inject `dimensions: N` when Matryoshka truncation is requested.
 	// The Options map is merged into the top-level JSON body, so this

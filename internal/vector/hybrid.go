@@ -163,7 +163,7 @@ func (vo *VectorOperations) searchSemanticOnly(
 	limit int,
 	filters SearchFilters,
 ) ([]models.SearchResult, error) {
-	embedding, err := vo.embeddings.GenerateEmbedding(ctx, query)
+	embedding, err := vo.embeddings.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
@@ -231,7 +231,7 @@ func (vo *VectorOperations) searchHybridRRF(
 	// on a transient embeddings-server hiccup.
 	semanticIDs := []string{}
 	if vo.embeddings != nil {
-		embedding, err := vo.embeddings.GenerateEmbedding(ctx, query)
+		embedding, err := vo.embeddings.EmbedQuery(ctx, query)
 		if err == nil {
 			results, err := vo.db.Search(ctx, embedding, limit*headroom, filters.ToWhere())
 			if err == nil {

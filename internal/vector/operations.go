@@ -145,8 +145,12 @@ func (vo *VectorOperations) Search(ctx context.Context, query string, limit int,
 		return nil, models.ErrSearchFailed
 	}
 
-	// Generate query embedding
-	embedding, err := vo.embeddings.GenerateEmbedding(ctx, query)
+	// Generate query embedding. EmbedQuery (not
+	// GenerateEmbedding) is the dedicated query-side
+	// entry point — it uses the queryPrompt instead of
+	// the docPrompt, which matters for models like
+	// embedding-gemma where the two prompts differ.
+	embedding, err := vo.embeddings.EmbedQuery(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
