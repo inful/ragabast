@@ -2,13 +2,16 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/ragabast/internal/config"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // TestAuthMiddleware_RequiresBearerToken pins the C-1 fix:
@@ -107,6 +110,235 @@ func TestAuthMiddleware_RejectsWrongToken(t *testing.T) {
 	s.router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestAuthMiddleware_MultiTokenListForm_AnyMatch verifies
+// the modern auth_tokens: [a, b, c] list form accepts any
+// of the configured tokens. This is the migration path from
+// the singular auth_token: "x" form for operators who run a
+// fleet of internal consumers and need rotation without
+// coordinated outages.
+func TestAuthMiddleware_MultiTokenListForm_AnyMatch(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.AuthToken = ""
+	cfg.Server.AuthTokens = []config.AuthToken{
+		{Value: "first-token"},
+		{Value: "second-token"},
+		{Value: "third-token"},
+	}
+
+	s := NewServer(cfg, &fakeHumaService{})
+
+	for _, tok := range []string{"first-token", "second-token", "third-token"} {
+		t.Run(tok, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/health", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code,
+				"token %q must be accepted (got %d)", tok, w.Code)
+		})
+	}
+
+	// And a wrong token still gets 401.
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer unknown-token")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestAuthMiddleware_MultiTokenStructForm pins the
+// {value: "...", label: "..."} YAML form. Labels are
+// operational attribution only — they don't grant any
+// privilege, but they MUST round-trip so the access log
+// can attribute traffic to a specific consumer.
+func TestAuthMiddleware_MultiTokenStructForm(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.AuthToken = ""
+	cfg.Server.AuthTokens = []config.AuthToken{
+		{Value: "importer-secret", Label: "docbuilder-importer"},
+		{Value: "admin-secret", Label: "ops-admin"},
+	}
+
+	s := NewServer(cfg, &fakeHumaService{})
+
+	// Wrong token still rejected.
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer unknown")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+// TestAuthMiddleware_BothSingularAndList_BothWork pins
+// the no-breaking-change migration: an operator who has
+// `auth_token: "x"` can add `auth_tokens: [y]` without
+// removing the singular form. Both must work.
+func TestAuthMiddleware_BothSingularAndList_BothWork(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.AuthToken = "legacy-token"
+	cfg.Server.AuthTokens = []config.AuthToken{
+		{Value: "new-token"},
+	}
+
+	s := NewServer(cfg, &fakeHumaService{})
+
+	for _, tok := range []string{"legacy-token", "new-token"} {
+		t.Run(tok, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/health", nil)
+			req.Header.Set("Authorization", "Bearer "+tok)
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code,
+				"token %q must be accepted (got %d)", tok, w.Code)
+		})
+	}
+}
+
+// TestAuthMiddleware_DuplicateTokenValuesDedup verifies
+// the dedup rule: if the same token appears in both
+// auth_token and auth_tokens, the EffectiveAuthTokens list
+// still contains it exactly once. Otherwise the constant-
+// time compare runs the same input twice for no reason,
+// and the "rotation grace window" pattern (operator adds
+// the same new token to both forms) accidentally
+// double-bills the comparison loop.
+func TestAuthMiddleware_DuplicateTokenValuesDedup(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.AuthToken = "shared"
+	cfg.Server.AuthTokens = []config.AuthToken{
+		{Value: "shared"}, // intentional duplicate
+		{Value: "other"},
+	}
+
+	effective := cfg.Server.EffectiveAuthTokens()
+	require.Len(t, effective, 2, "shared must appear exactly once")
+	assert.Equal(t, "shared", effective[0].Value)
+	assert.Equal(t, "other", effective[1].Value)
+}
+
+// TestAuthMiddleware_LabelStashedInContext pins the
+// access-log attribution contract: when a labeled token
+// matches, AuthLabelFromContext returns the label so the
+// access-log middleware can stamp it on every line.
+// Empty-label tokens return "" — that's fine and
+// intentionally not an error.
+func TestAuthMiddleware_LabelStashedInContext(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.AuthToken = ""
+	cfg.Server.AuthTokens = []config.AuthToken{
+		{Value: "no-label"},
+		{Value: "with-label", Label: "docbuilder-importer"},
+	}
+
+	s := NewServer(cfg, &fakeHumaService{})
+
+	// Register a probe endpoint that captures the request
+	// context — that's where the auth label is stashed.
+	probeCh := make(chan context.Context, 4)
+	s.router.Get("/_test/probe", func(w http.ResponseWriter, r *http.Request) {
+		probeCh <- r.Context()
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Labeled token → label in context.
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/_test/probe", nil)
+	req.Header.Set("Authorization", "Bearer with-label")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	ctx := <-probeCh
+	assert.Equal(t, "docbuilder-importer", AuthLabelFromContext(ctx),
+		"labeled token must surface label in request context")
+
+	// Unlabeled token → empty label in context.
+	req2 := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/_test/probe", nil)
+	req2.Header.Set("Authorization", "Bearer no-label")
+	w2 := httptest.NewRecorder()
+	s.router.ServeHTTP(w2, req2)
+	require.Equal(t, http.StatusOK, w2.Code)
+	ctx2 := <-probeCh
+	assert.Equal(t, "", AuthLabelFromContext(ctx2),
+		"unlabeled token must produce empty label in context")
+}
+
+// TestAuthToken_UnmarshalYAML_BareString pins the
+// `auth_tokens: ["secret1", "secret2"]` shorthand form.
+// Bare strings are the common case — operators shouldn't
+// have to spell out {value: ...} for tokens they don't
+// need to label.
+func TestAuthToken_UnmarshalYAML_BareString(t *testing.T) {
+	yml := `
+- bare-secret-a
+- bare-secret-b
+`
+	var got []config.AuthToken
+	require.NoError(t, yaml.Unmarshal([]byte(yml), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "bare-secret-a", got[0].Value)
+	assert.Empty(t, got[0].Label)
+	assert.Equal(t, "bare-secret-b", got[1].Value)
+	assert.Empty(t, got[1].Label)
+}
+
+// TestAuthToken_UnmarshalYAML_StructForm pins the
+// `auth_tokens: [{value: "...", label: "..."}]` form.
+// Labels are optional in this form too — a struct with
+// just `value:` should also parse.
+func TestAuthToken_UnmarshalYAML_StructForm(t *testing.T) {
+	yml := `
+- value: secret-a
+  label: docbuilder-importer
+- value: secret-b
+- value: secret-c
+  label: ops-admin
+`
+	var got []config.AuthToken
+	require.NoError(t, yaml.Unmarshal([]byte(yml), &got))
+	require.Len(t, got, 3)
+	assert.Equal(t, "secret-a", got[0].Value)
+	assert.Equal(t, "docbuilder-importer", got[0].Label)
+	assert.Equal(t, "secret-b", got[1].Value)
+	assert.Empty(t, got[1].Label)
+	assert.Equal(t, "secret-c", got[2].Value)
+	assert.Equal(t, "ops-admin", got[2].Label)
+}
+
+// TestAuthToken_UnmarshalYAML_MixedForm pins the
+// operational reality: operators often mix bare-string
+// and struct-form tokens in the same list, especially
+// during a rotation grace window where new tokens are
+// labeled and old tokens aren't.
+func TestAuthToken_UnmarshalYAML_MixedForm(t *testing.T) {
+	yml := `
+- legacy-bare
+- value: new-labeled
+  label: docbuilder-importer
+`
+	var got []config.AuthToken
+	require.NoError(t, yaml.Unmarshal([]byte(yml), &got))
+	require.Len(t, got, 2)
+	assert.Equal(t, "legacy-bare", got[0].Value)
+	assert.Empty(t, got[0].Label)
+	assert.Equal(t, "new-labeled", got[1].Value)
+	assert.Equal(t, "docbuilder-importer", got[1].Label)
+}
+
+// TestApplyEnvOverrides_AuthTokensCommaSeparated pins the
+// env-var path. SERVER_AUTH_TOKENS=tok1,tok2,tok3 must
+// populate AuthTokens as three bare entries. Labels aren't
+// expressible in env vars — operators needing labels
+// should set them via YAML config or use a config file
+// mounted from a secret manager.
+func TestApplyEnvOverrides_AuthTokensCommaSeparated(t *testing.T) {
+	t.Setenv("SERVER_AUTH_TOKENS", "env-tok-a,env-tok-b,env-tok-c")
+	cfg := config.DefaultConfig()
+	cfg.ApplyEnvOverrides()
+	require.Len(t, cfg.Server.AuthTokens, 3)
+	assert.Equal(t, "env-tok-a", cfg.Server.AuthTokens[0].Value)
+	assert.Equal(t, "env-tok-b", cfg.Server.AuthTokens[1].Value)
+	assert.Equal(t, "env-tok-c", cfg.Server.AuthTokens[2].Value)
 }
 
 // TestAuthMiddleware_NoTokenConfigured_OpenAccess confirms
