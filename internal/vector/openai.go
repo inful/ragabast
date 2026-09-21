@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"maps"
 	"net/http"
 	"strings"
@@ -97,11 +97,15 @@ func chatDebugLine(ctx context.Context, label, body string) string {
 	return fmt.Sprintf("[chat-debug] %s: %s", label, body)
 }
 
-// writeChatDebugLog emits a single chat-debug line at the
-// standard logger, truncating the body if it exceeds the cap.
-// Pulled out so the call sites in client.do are uniform.
+// writeChatDebugLog emits a single chat-debug line via slog at
+// Debug level. Operators enable chat-debug logging by running
+// with RAGABAST_LOG_LEVEL=debug; the default Info level drops
+// these lines entirely. The level change (was log.Print → now
+// slog.Debug) is intentional: chat-debug is diagnostic-only,
+// and an Info-level chat-debug line would silently ship large
+// prompt bodies to every JSON log shipper in production.
 func writeChatDebugLog(ctx context.Context, label, body string) {
-	log.Print(chatDebugLine(ctx, label, body))
+	slog.Debug(chatDebugLine(ctx, label, body))
 }
 
 // NewOpenAILLMClientWithOptions is the fully-configurable constructor.
