@@ -2,10 +2,22 @@ package web
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
 )
+
+// vectorErrNotFound mirrors vector.ErrNotFound for the fake
+// service. The web package doesn't currently import vector
+// (the production code only talks to it through the
+// serviceAPI interface), so importing it just for tests
+// would create a coupling that doesn't exist in the
+// production code path. Keeping a local copy of the
+// sentinel keeps the test self-contained; the production
+// handler will use errors.Is(err, vector.ErrNotFound) to
+// detect the real one once it's wired up.
+var vectorErrNotFound = errors.New("document not found")
 
 // fakeHumaService is a richer fake used by the Huma API tests.
 // In addition to the per-method response overrides fakeService
@@ -28,6 +40,7 @@ type fakeHumaService struct {
 	documents         []models.DocumentInfo
 	deleteErr         error
 	deletedIDs        []string
+	listCalls         int
 	answer            string
 	debug             *service.QueryDebugInfo
 	queryErr          error
@@ -80,6 +93,7 @@ func (f *fakeHumaService) HybridSearch(_ context.Context, _ string, _ int, _ ser
 }
 
 func (f *fakeHumaService) ListDocuments(_ context.Context) ([]models.DocumentInfo, error) {
+	f.listCalls++
 	return f.documents, nil
 }
 
@@ -87,8 +101,18 @@ func (f *fakeHumaService) DeleteDocument(_ context.Context, documentID string) e
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	f.deletedIDs = append(f.deletedIDs, documentID)
-	return nil
+	// Mirror the real vector behavior: when the document
+	// isn't in the list, return ErrNotFound rather than
+	// silently succeeding. Lets the delete-path test
+	// exercise both 200 (known ID) and 404 (unknown ID)
+	// without standing up a real chromem-go collection.
+	for _, d := range f.documents {
+		if d.ID == documentID {
+			f.deletedIDs = append(f.deletedIDs, documentID)
+			return nil
+		}
+	}
+	return vectorErrNotFound
 }
 
 func (f *fakeHumaService) QueryDebugWithOptions(_ context.Context, _ string, _ int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
