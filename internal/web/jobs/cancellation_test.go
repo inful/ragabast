@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,10 +27,6 @@ func TestQueue_StopAbortsInFlightWorker(t *testing.T) {
 	q, err := New(dir, 1<<20, 2)
 	require.NoError(t, err)
 
-	// Track whether the service's IngestDocument saw the
-	// cancellation. With the fix, the worker observes ctx
-	// cancellation and bails; the service's select sees
-	// ctx.Done() and returns context.Canceled.
 	var sawCancel atomic.Bool
 	svc := &slowServiceCancel{
 		delay:  5 * time.Second,
@@ -36,10 +34,9 @@ func TestQueue_StopAbortsInFlightWorker(t *testing.T) {
 	}
 
 	q.Start(svc, nil)
-	defer q.Stop()
 
 	// Submit one job so the pool has something to chew on.
-	j, err := q.Submit("slow", "127.0.0.1:0", "")
+	jobID, err := q.Submit("slow", "127.0.0.1:0", "")
 	require.NoError(t, err)
 
 	// Give the worker a moment to claim and start the job.
@@ -49,10 +46,10 @@ func TestQueue_StopAbortsInFlightWorker(t *testing.T) {
 	// Stop should abort the in-flight worker promptly.
 	start := time.Now()
 	q.Stop()
-	elapsed := time.Since(start)
+	stopElapsed := time.Since(start)
 
-	assert.Less(t, elapsed, 500*time.Millisecond,
-		"Stop must abort in-flight workers; elapsed=%s", elapsed)
+	assert.Less(t, stopElapsed, 500*time.Millisecond,
+		"Stop must abort in-flight workers; elapsed=%s", stopElapsed)
 
 	// The cancel signal fires synchronously inside Stop; the
 	// worker observes it asynchronously. Poll briefly so the
@@ -61,7 +58,30 @@ func TestQueue_StopAbortsInFlightWorker(t *testing.T) {
 		return sawCancel.Load()
 	}, 1*time.Second, 5*time.Millisecond,
 		"the slow service must observe the ctx cancellation after Stop")
-	_ = j // suppress unused warning
+
+	// Wait for the worker to fully exit processOne so the
+	// t.TempDir cleanup doesn't race the file writes (the
+	// #46 cleanup-race family). The audit hook fires
+	// jobs.failed BEFORE the rename-back to .json, so we
+	// can't use it for synchronization. Instead we poll for the
+	// job's final on-disk state: .json with status=failed
+	// exists at the canonical path. This is the last file
+	// op the worker performs.
+	assert.Eventually(t, func() bool {
+		got, gerr := q.Get(jobID.ID)
+		if gerr != nil || got == nil {
+			return false
+		}
+		return got.Status == StatusFailed
+	}, 1*time.Second, 5*time.Millisecond,
+		"worker must complete processOne (status=failed) after ctx cancellation")
+
+	// Belt-and-suspenders: also assert no .processing.json
+	// remains. After the rename, that's the canonical signal
+	// that the worker is done with disk I/O.
+	_, statErr := os.Stat(filepath.Join(dir, jobID.ID+".processing.json"))
+	require.True(t, os.IsNotExist(statErr),
+		"the worker must rename .processing.json back to .json before returning; got err=%v", statErr)
 }
 
 // slowServiceCancel is a fake jobs.Service that blocks on
