@@ -1,10 +1,31 @@
 package web
 
 import (
+	"context"
 	"crypto/subtle"
 	"net/http"
 	"strings"
+
+	"github.com/ragabast/internal/config"
 )
+
+// authLabelKey is the unexported context key under which
+// authMiddleware stashes the matched token's label (when
+// the operator configured one). AccessLogMiddleware and
+// any other audit-log code reads it via AuthLabelFromContext.
+type authLabelKey struct{}
+
+// AuthLabelFromContext returns the auth_label attributed to
+// the bearer credential that authenticated the request, or
+// "" when no label was configured for the matching token
+// (or when auth is disabled and no comparison ran).
+//
+// The label is operational attribution only — it does not
+// grant any privilege. Two tokens may share a label.
+func AuthLabelFromContext(ctx context.Context) string {
+	v, _ := ctx.Value(authLabelKey{}).(string)
+	return v
+}
 
 // authMiddleware enforces a shared-secret bearer token on the
 // API and form-mounted endpoints.
@@ -40,7 +61,28 @@ import (
 // time independent of which byte differs. A naive `==` would
 // leak the first-differing-byte position through response
 // latency and let an attacker recover the token byte-by-byte.
-func authMiddleware(token string) func(http.Handler) http.Handler {
+// authMiddleware enforces a bearer-token check on the API
+// and form-mounted endpoints. tokens is the merged list of
+// effective tokens (see ServerConfig.EffectiveAuthTokens):
+// the singular AuthToken plus the AuthTokens list, deduped.
+//
+// When tokens is empty (the default), the middleware is a
+// no-op — every request passes through. This keeps the
+// single-user local install working without configuration
+// and matches the historical "no auth" behavior.
+//
+// When tokens is non-empty, every request to a protected
+// route MUST carry `Authorization: Bearer <token>` matching
+// one of the configured values via constant-time comparison.
+// Requests that fail are rejected with 401 + WWW-Authenticate:
+// Bearer so curl/clients can retry correctly.
+//
+// If the matched token has a label configured, the label is
+// stashed on the request context (AuthLabelFromContext) so
+// the access log can attribute traffic to a specific
+// consumer. Labels are operational attribution only — they
+// do not grant any privilege.
+func authMiddleware(tokens []config.AuthToken) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Public routes are always open. Listing them
@@ -55,10 +97,15 @@ func authMiddleware(token string) func(http.Handler) http.Handler {
 				return
 			}
 
-			if !bearerMatches(r.Header.Get("Authorization"), token) {
+			label, ok := matchBearer(r.Header.Get("Authorization"), tokens)
+			if !ok {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="ragabast"`)
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
+			}
+			if label != "" {
+				ctx := context.WithValue(r.Context(), authLabelKey{}, label)
+				r = r.WithContext(ctx)
 			}
 
 			next.ServeHTTP(w, r)
@@ -98,39 +145,44 @@ func isPublicRoute(method, path string) bool {
 	return false
 }
 
-// bearerMatches reports whether the Authorization header
-// carries the configured token in `Bearer <token>` form.
+// matchBearer reports whether the Authorization header carries
+// any of the configured tokens in `Bearer <token>` (or the
+// legacy `Token <token>`) form, returning the matched
+// token's label and true on success.
 //
-// Comparison is constant-time so the request latency does not
-// leak the first-differing-byte position. The function also
-// accepts "Token <token>" because some clients send that
-// form by mistake; both forms work as long as the body is the
-// configured token.
-func bearerMatches(header, token string) bool {
-	if token == "" {
-		return true // auth disabled — never block
+// Comparison is constant-time per token so the request
+// latency does not leak the first-differing-byte position.
+// Each configured token is compared in turn; the loop is
+// short (typically 1-3 entries, capping at the operator's
+// fleet size) so timing-based attacks against the number of
+// configured tokens are out of scope.
+func matchBearer(header string, tokens []config.AuthToken) (label string, ok bool) {
+	if len(tokens) == 0 {
+		return "", true // auth disabled — never block
 	}
 	const (
-		bearerPrefix  = "Bearer "
-		tokenPrefix   = "Token "
-		caseSensitive = false // tokens are configured as opaque strings; case them as such
+		bearerPrefix = "Bearer "
+		tokenPrefix  = "Token "
 	)
-	_ = caseSensitive
-
 	if len(header) <= len(bearerPrefix) {
-		return false
+		return "", false
 	}
 	scheme := header[:len(bearerPrefix)]
-	if !strings.EqualFold(scheme, bearerPrefix) {
-		// Allow the legacy "Token <token>" form too.
-		if len(header) <= len(tokenPrefix) || !strings.EqualFold(header[:len(tokenPrefix)], tokenPrefix) {
-			return false
-		}
-		presented := header[len(tokenPrefix):]
-		return subtleCompare(presented, token)
+	var presented string
+	if strings.EqualFold(scheme, bearerPrefix) {
+		presented = header[len(bearerPrefix):]
+	} else if len(header) > len(tokenPrefix) && strings.EqualFold(header[:len(tokenPrefix)], tokenPrefix) {
+		// Legacy "Token <token>" form.
+		presented = header[len(tokenPrefix):]
+	} else {
+		return "", false
 	}
-	presented := header[len(bearerPrefix):]
-	return subtleCompare(presented, token)
+	for _, t := range tokens {
+		if subtleCompare(presented, t.Value) {
+			return t.Label, true
+		}
+	}
+	return "", false
 }
 
 // subtleCompare is a small wrapper around

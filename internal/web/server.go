@@ -99,7 +99,12 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// to auth-failed requests too. With auth_token empty
 	// (the default) the middleware is a no-op so the
 	// single-user local install keeps working.
-	router.Use(authMiddleware(cfg.Server.AuthToken))
+	// EffectiveAuthTokens merges the singular AuthToken
+	// (backward-compatible shortcut) with the modern
+	// AuthTokens list, deduping by Value. NewServer is the
+	// only call site for authMiddleware — keep it that way
+	// so the security boundary is easy to audit.
+	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens()))
 
 	// Rate-limit middleware for the LLM-backed endpoints. The
 	// middleware is path-aware (see rate_limit.go) and a no-op

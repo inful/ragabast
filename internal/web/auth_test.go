@@ -259,7 +259,7 @@ func TestAuthMiddleware_LabelStashedInContext(t *testing.T) {
 	s.router.ServeHTTP(w2, req2)
 	require.Equal(t, http.StatusOK, w2.Code)
 	ctx2 := <-probeCh
-	assert.Equal(t, "", AuthLabelFromContext(ctx2),
+	assert.Empty(t, AuthLabelFromContext(ctx2),
 		"unlabeled token must produce empty label in context")
 }
 
