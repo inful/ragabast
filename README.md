@@ -120,6 +120,15 @@ The keyword index lives at `<vectordb.persistence_dir>/search/` next to
 the vector DB. `ragabast vector reset --force` wipes both stores in one
 go; the next `ragabast ingest` rebuilds them from source documents.
 
+> **Filesystem note:** both stores assume a local filesystem with
+> sub-second clock skew. bleve uses mmap for reads, which performs
+> poorly or fails outright on NFS — and `jobs.Queue` uses a 5-second
+> mtime threshold to fence live workers from crashed ones, which NFS
+> clock drift can defeat. If `vectordb.persistence_dir` is on a shared
+> mount, set `vectordb.keyword_index_dir` (env `VECTOR_DB_KEYWORD_INDEX_DIR`)
+> to a local SSD so the bleve index can mmap safely while the vector DB
+> stays on the shared volume.
+
 ### Why hybrid
 
 Pure embedding search paraphrases ("how do I configure TLS" matches

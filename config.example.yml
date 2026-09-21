@@ -62,6 +62,13 @@ ollama:
 
 vectordb:
   persistence_dir: data/vectors
+  # Optional: override the bleve keyword index path. Leave empty
+  # (the default) to keep the index at <persistence_dir>/search.
+  # Set this when the persistence_dir is on a remote filesystem
+  # (NFS, shared mount) — bleve uses mmap for reads and does not
+  # play well with network filesystems. The two stores can
+  # legitimately live on different volumes.
+  keyword_index_dir: ""
   collection_name: ragabast
 
   # MUST match the dimension of the embeddings that land in the
