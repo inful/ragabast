@@ -58,6 +58,11 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters S
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}
+	// Post-filter by date range (issue #38). chromem-go's
+	// Where filter is equality-only, so range comparisons
+	// happen here against the document-level dates that
+	// VectorDB.Search populates from chunk metadata.
+	results = applyDateFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
 	return results, nil
 }
@@ -94,6 +99,11 @@ func (s *Service) HybridSearch(
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}
+	// Post-filter by date range (issue #38). Same code
+	// path as Search; the filter applies regardless of
+	// mode (keyword, semantic, hybrid) so operators don't
+	// have to think about which endpoint honors it.
+	results = applyDateFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
 	return results, nil
 }

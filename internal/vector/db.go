@@ -407,6 +407,18 @@ func (db *VectorDB) Search(ctx context.Context, queryEmbedding []float32, limit 
 			Fingerprint:        result.Metadata["fingerprint"],
 			UID:                result.Metadata["uid"],
 		}
+		// Document-level timestamps for date-range filtering
+		// (#38). parseRFC3339 returns the zero time on a
+		// missing or malformed field; only assign to the
+		// result when the timestamp is actually parseable, so
+		// a result with a missing field has nil dates
+		// (post-filter treats nil as "no constraint").
+		if created := parseRFC3339(result.Metadata["document_created_at"]); !created.IsZero() {
+			searchResults[i].DocumentCreatedAt = &created
+		}
+		if updated := parseRFC3339(result.Metadata["document_updated_at"]); !updated.IsZero() {
+			searchResults[i].DocumentUpdatedAt = &updated
+		}
 	}
 
 	return searchResults, nil

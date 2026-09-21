@@ -130,4 +130,19 @@ type SearchResult struct {
 	Similarity         float32  `json:"similarity"`
 	Fingerprint        string   `json:"fingerprint,omitempty"`
 	UID                string   `json:"uid,omitempty"`
+
+	// DocumentCreatedAt and DocumentUpdatedAt carry the
+	// document-level timestamps from the chunk metadata.
+	// They're populated from `document_created_at` /
+	// `document_updated_at` (RFC3339) by VectorDB.Search
+	// and used by the service-layer post-filter for the
+	// date-range filter feature (#38). nil means the
+	// underlying chunk metadata didn't include the field
+	// — typically because the document was ingested before
+	// the field was added, or because chromem-go didn't
+	// return it. Either way, the post-filter treats nil as
+	// "no constraint applies on this side" so old corpora
+	// keep working.
+	DocumentCreatedAt *time.Time `json:"document_created_at,omitempty"`
+	DocumentUpdatedAt *time.Time `json:"document_updated_at,omitempty"`
 }

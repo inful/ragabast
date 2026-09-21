@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	goregexp "regexp"
+	"time"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis"
@@ -45,10 +46,25 @@ import (
 // term queries against the multi-value fields; a chunk matches
 // when its tag set contains the filter value (exact match, not
 // substring — bleve's term query gives us that for free).
+//
+// Date-range fields (CreatedAfter, CreatedBefore, UpdatedAfter,
+// UpdatedBefore) are applied as a post-filter at the service
+// layer because chromem-go's Where filter is equality-only —
+// it can't do range comparisons. The service reads each
+// result's DocumentCreatedAt / DocumentUpdatedAt (populated
+// from chunk metadata in VectorDB.Search) and drops anything
+// outside the requested range.
+//
+// A nil pointer on any date filter means "no constraint on
+// this side" — the post-filter is a no-op for that side.
 type SearchFilters struct {
-	DocumentID string
-	Tag        string
-	Category   string
+	DocumentID    string
+	Tag           string
+	Category      string
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+	UpdatedAfter  *time.Time
+	UpdatedBefore *time.Time
 }
 
 // SearchHit is one ranked result from a SearchIndex.Search.

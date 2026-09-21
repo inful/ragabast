@@ -57,13 +57,17 @@ type queryHit struct {
 // for callers who want to see everything the ranking
 // produced.
 type searchRequestBody struct {
-	Query      string   `doc:"Search query" json:"query"`
-	Limit      int      `default:"5" doc:"Number of results" json:"limit" minimum:"1"`
-	MinScore   *float64 `doc:"Minimum relevance score in [0,1]. Omit for no minimum." json:"min_score,omitempty" maximum:"1" minimum:"0"`
-	Mode       string   `doc:"Search mode: hybrid (default), semantic, or keyword" enum:"hybrid,semantic,keyword" json:"mode,omitempty"`
-	DocumentID string   `doc:"Restrict results to one document" json:"document_id,omitempty"`
-	Tag        string   `doc:"Restrict results to chunks whose document has this tag" json:"tag,omitempty"`
-	Category   string   `doc:"Restrict results to chunks whose document has this category" json:"category,omitempty"`
+	Query         string   `doc:"Search query" json:"query"`
+	Limit         int      `default:"5" doc:"Number of results" json:"limit" minimum:"1"`
+	MinScore      *float64 `doc:"Minimum relevance score in [0,1]. Omit for no minimum." json:"min_score,omitempty" maximum:"1" minimum:"0"`
+	Mode          string   `doc:"Search mode: hybrid (default), semantic, or keyword" enum:"hybrid,semantic,keyword" json:"mode,omitempty"`
+	DocumentID    string   `doc:"Restrict results to one document" json:"document_id,omitempty"`
+	Tag           string   `doc:"Restrict results to chunks whose document has this tag" json:"tag,omitempty"`
+	Category      string   `doc:"Restrict results to chunks whose document has this category" json:"category,omitempty"`
+	CreatedAfter  *string  `doc:"Restrict to chunks whose document was created at-or-after this RFC3339 timestamp (issue #38)" json:"created_after,omitempty"`
+	CreatedBefore *string  `doc:"Restrict to chunks whose document was created at-or-before this RFC3339 timestamp (issue #38)" json:"created_before,omitempty"`
+	UpdatedAfter  *string  `doc:"Restrict to chunks whose document was updated at-or-after this RFC3339 timestamp (issue #38)" json:"updated_after,omitempty"`
+	UpdatedBefore *string  `doc:"Restrict to chunks whose document was updated at-or-before this RFC3339 timestamp (issue #38)" json:"updated_before,omitempty"`
 }
 
 type searchResultBody struct {
@@ -158,10 +162,14 @@ func registerSearchOperation(api huma.API, svc serviceAPI) {
 		}
 
 		mode := parseSearchMode(input.Body.Mode)
-		filters := service.SearchFilters{
+		filters, err := parseSearchFilters(service.SearchFilters{
 			DocumentID: input.Body.DocumentID,
 			Tag:        input.Body.Tag,
 			Category:   input.Body.Category,
+		}, input.Body.CreatedAfter, input.Body.CreatedBefore,
+			input.Body.UpdatedAfter, input.Body.UpdatedBefore)
+		if err != nil {
+			return nil, huma.Error400BadRequest("invalid date filter: " + err.Error())
 		}
 
 		results, err := svc.HybridSearch(ctx, q, limit, filters, mode)
