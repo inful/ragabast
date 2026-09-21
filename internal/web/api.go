@@ -25,3 +25,12 @@ type serviceAPI interface {
 	GetNormalizedCategories(ctx context.Context) ([]string, error)
 	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)
 }
+
+// Compile-time assertion that *service.Service satisfies serviceAPI.
+// Without this, adding a method to serviceAPI that *service.Service
+// does not implement would compile fine and only blow up at runtime
+// when web.NewServer is handed the wrong type. With this, drift is
+// caught at `go build` time. The same check applied via reflection
+// (e.g. in a test) would miss the next divergence; the compiler
+// check survives indefinitely.
+var _ serviceAPI = (*service.Service)(nil)
