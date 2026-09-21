@@ -155,6 +155,12 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// IngestDocument without reaching back into the
 	// web-package's internals.
 	var ingestQueue *jobs.Queue
+	// Reset the package-scope queue reference so a server
+	// constructed without async ingest sees ingest_queue.enabled
+	// = false in /api/health/full. Without this reset, a
+	// previous test that enabled the queue would leak its
+	// state into the next test's /api/health/full response.
+	globalIngestQueue = nil
 	if cfg.Server.AsyncIngestQueueDir != "" {
 		q, qerr := jobs.New(
 			cfg.Server.AsyncIngestQueueDir,
@@ -165,6 +171,12 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 			log.Printf("web: failed to create ingest queue at %s: %v; async ingest disabled", cfg.Server.AsyncIngestQueueDir, qerr)
 		} else {
 			ingestQueue = q
+			// Stash the queue handle at package scope so the
+			// /api/health/full handler can read counters
+			// without crossing the serviceAPI boundary twice.
+			// Set before Start so the health handler sees the
+			// post-Start state once the cleanup loop is up.
+			globalIngestQueue = q
 			ingestQueue.Start(jobsServiceAdapter{svc: svc}, auditFunc(log.Printf))
 			// Background cleanup sweep. Operates on the same
 			// audit hook as the worker pool so the operator's

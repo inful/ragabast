@@ -182,6 +182,123 @@ func (q *Queue) MaxBytes() int { return q.maxBytes }
 // Workers returns the configured worker count.
 func (q *Queue) Workers() int { return q.workers }
 
+// QueueStats is a snapshot of the async-ingest queue's per-status
+// counters, returned by Depth for the /api/health/full endpoint.
+// All fields default to zero on an empty queue.
+type QueueStats struct {
+	// Pending is the count of jobs at <id>.json with
+	// status=pending — the worker pool hasn't picked them up
+	// yet, either because workers are busy or because no
+	// worker has started yet.
+	Pending int
+
+	// Processing is the count of jobs currently at
+	// <id>.processing.json — workers have claimed them and are
+	// mid-ingest. This is a transient state; sustained growth
+	// here indicates slow ingest or stuck workers.
+	Processing int
+
+	// Completed is the count of jobs that finished
+	// successfully. Useful for confirming that the pipeline
+	// is making progress; not actionable on its own.
+	Completed int
+
+	// Failed is the count of jobs at <id>.json with
+	// status=failed. Operators usually want to triage these
+	// first when investigating slowdowns.
+	Failed int
+}
+
+// Depth walks the persistence directory once and tallies the
+// job counts by status. It is the cheap counter source for
+// /api/health/full — a single os.ReadDir + a JSON header
+// decode per file is in the low-millisecond range even for
+// thousands of jobs, and the call is bounded by the size of
+// the directory.
+//
+// .processing.json and .tmp files are NOT counted: they
+// represent in-flight or partial-write state, not finished
+// jobs. The worker count is the more useful signal for the
+// in-flight case; the next /api/health surface will surface
+// it alongside these totals.
+func (q *Queue) Depth() QueueStats {
+	var s QueueStats
+	if q.dir == "" {
+		return s
+	}
+	entries, err := os.ReadDir(q.dir)
+	if err != nil {
+		return s
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".processing.json") {
+			continue
+		}
+		id := strings.TrimSuffix(name, ".json")
+		j, gerr := q.getFromPath(q.path(id))
+		if gerr != nil {
+			continue
+		}
+		switch j.Status {
+		case StatusPending:
+			s.Pending++
+		case StatusProcessing:
+			s.Processing++
+		case StatusCompleted:
+			s.Completed++
+		case StatusFailed:
+			s.Failed++
+		}
+	}
+	return s
+}
+
+// OldestPendingAge returns the wall-clock duration between now
+// and the mtime of the oldest pending job. Returns nil when
+// no jobs are pending (the operator's question "how stale is
+// the queue?" has no answer when the queue is empty).
+//
+// Called from /api/health/full. Cheap — walks pending files
+// only and bails as soon as it finds the oldest one (since
+// files older than the queue itself aren't relevant).
+func (q *Queue) OldestPendingAge() *time.Duration {
+	if q.dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(q.dir)
+	if err != nil {
+		return nil
+	}
+	now := time.Now()
+	var oldest time.Time
+	found := false
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".processing.json") {
+			continue
+		}
+		id := strings.TrimSuffix(name, ".json")
+		j, gerr := q.getFromPath(q.path(id))
+		if gerr != nil || j.Status != StatusPending {
+			continue
+		}
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue
+		}
+		if !found || info.ModTime().Before(oldest) {
+			oldest = info.ModTime()
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	d := now.Sub(oldest)
+	return &d
+}
+
 // Submit creates a pending job on disk and enqueues its ID for
 // a worker. Returns the assigned job ID.
 //
