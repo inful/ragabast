@@ -253,6 +253,21 @@ func (q *Queue) List(statusFilter Status) ([]*Job, error) {
 //
 // Start must be called exactly once. It is idempotent: a second
 // call is a no-op (the worker pool only spins up once).
+//
+// Recovery runs synchronously — Start does not return until
+// recoverUnfinished has scanned the directory and re-enqueued
+// any unfinished jobs. Without this, a Submit that races with
+// recovery can be enqueued twice: once by Submit's channel
+// send (after Start returns) and again by recovery (which
+// sees the .json file Submit just wrote). With two workers in
+// the pool, each receives one ID and processes the same job —
+// IngestDocument is invoked twice and the audit log reports
+// two completed runs for one user request.
+//
+// The recovery scan is bounded by the directory size, so
+// blocking Start briefly is acceptable. Production directories
+// are small (bounded by the queue's normal throughput); tests
+// use t.TempDir with at most a handful of seeded files.
 func (q *Queue) Start(svc Service, audit AuditFunc) {
 	for range q.workers {
 		go q.worker(svc, audit)
@@ -261,8 +276,9 @@ func (q *Queue) Start(svc Service, audit AuditFunc) {
 	// Re-enqueue any unfinished jobs found on disk. This is
 	// the persistence path: a restart that lost the
 	// in-memory pending channel still picks up every
-	// pending or processing job.
-	go q.recoverUnfinished(audit)
+	// pending or processing job. Synchronous so the
+	// caller's first Submit cannot race with recovery.
+	q.recoverUnfinished(audit)
 }
 
 // Stop signals workers and the recovery goroutine to exit.
