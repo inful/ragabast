@@ -135,6 +135,75 @@ func (f *fakeHumaService) DeleteDocument(_ context.Context, documentID string) e
 	return vector.ErrNotFound
 }
 
+// BulkUpdateDocuments applies each patch to f.documents and
+// returns a per-item result. Missing documents produce a
+// per-item error rather than aborting the batch — mirrors
+// the real service.BulkUpdateDocuments behavior. Empty
+// document_ids surface as per-item errors (the real service
+// rejects them upfront with ErrInvalidInput; the fake's
+// per-item path is the most faithful test).
+func (f *fakeHumaService) BulkUpdateDocuments(_ context.Context, patches []vector.DocumentMetadataPatch, mode string) ([]service.BulkUpdateDocumentsResult, error) {
+	if len(patches) == 0 {
+		return nil, models.ErrInvalidInput
+	}
+	out := make([]service.BulkUpdateDocumentsResult, len(patches))
+	for i, patch := range patches {
+		out[i].DocumentID = patch.DocumentID
+		if patch.DocumentID == "" {
+			out[i].Status = "error"
+			out[i].Error = "empty document_id"
+			continue
+		}
+		found := false
+		applyPatch := func(j int, d models.DocumentInfo) bool {
+			found = true
+			if patch.Tags != nil {
+				if mode == "replace" {
+					f.documents[j].Tags = append([]string{}, patch.Tags...)
+				} else {
+					f.documents[j].Tags = mergeStrings(d.Tags, patch.Tags)
+				}
+			}
+			if patch.Categories != nil {
+				f.documents[j].Categories = append([]string{}, patch.Categories...)
+			}
+			if patch.URLs != nil {
+				f.documents[j].URLs = append([]string{}, patch.URLs...)
+			}
+			out[i].Status = "ok"
+			return true
+		}
+		for j, d := range f.documents {
+			if d.ID == patch.DocumentID {
+				if applyPatch(j, d) {
+					break
+				}
+			}
+		}
+		if !found {
+			out[i].Status = "error"
+			out[i].Error = "document not found"
+		}
+	}
+	return out, nil
+}
+
+// mergeStrings dedupes a union of two string slices.
+// Local to the fake so the production code path stays
+// free of test-only helpers.
+func mergeStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range append(append([]string{}, a...), b...) {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
 func (f *fakeHumaService) QueryDebugWithOptions(_ context.Context, _ string, _ int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
 	f.lastQueryOpts = opts
 	if f.queryErr != nil {
@@ -294,6 +363,13 @@ func (f *fakeService) ListDocumentsPaged(context.Context, int, int) ([]models.Do
 
 func (f *fakeService) DeleteDocument(context.Context, string) error {
 	return nil
+}
+
+// BulkUpdateDocuments satisfies serviceAPI for the
+// legacy fake (used by older tests). No-op: tests that
+// exercise the bulk-update path use fakeHumaService.
+func (f *fakeService) BulkUpdateDocuments(context.Context, []vector.DocumentMetadataPatch, string) ([]service.BulkUpdateDocumentsResult, error) {
+	return nil, nil
 }
 
 func (f *fakeService) SuggestFrontmatter(context.Context, string, map[string]any, []string, []string) (service.FrontmatterSuggestion, error) {

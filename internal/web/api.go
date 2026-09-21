@@ -5,6 +5,7 @@ import (
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/vector"
 )
 
 // serviceAPI is the slice of *service.Service that the web layer
@@ -20,6 +21,7 @@ type serviceAPI interface {
 	ListDocuments(ctx context.Context) ([]models.DocumentInfo, error)
 	ListDocumentsPaged(ctx context.Context, limit, offset int) (docs []models.DocumentInfo, total int, err error)
 	DeleteDocument(ctx context.Context, documentID string) error
+	BulkUpdateDocuments(ctx context.Context, patches []vector.DocumentMetadataPatch, mode string) ([]service.BulkUpdateDocumentsResult, error)
 	SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error)
 	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
 	QueryCacheStats() service.QueryCacheStats
