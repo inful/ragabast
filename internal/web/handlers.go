@@ -130,8 +130,15 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 		})
 	case "documents.html":
 		s.renderFallback(w, "documents.html", documentsFallbackData{
-			Title:     titleFromMap(data, "RAGabast - Documents"),
-			Documents: docsRowsFromMap(data),
+			Title:        titleFromMap(data, "RAGabast - Documents"),
+			Documents:    docsRowsFromMap(data),
+			Total:        intFromMap(data, "Total"),
+			Limit:        intFromMap(data, "Limit"),
+			Offset:       intFromMap(data, "Offset"),
+			PrevOffset:   intFromMap(data, "PrevOffset"),
+			NextOffset:   intFromMap(data, "NextOffset"),
+			StartShowing: intFromMap(data, "StartShowing"),
+			EndShowing:   intFromMap(data, "EndShowing"),
 		})
 	default:
 		http.NotFound(w, nil)
@@ -481,15 +488,58 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {
-	docs, err := s.service.ListDocuments(r.Context())
+	// Parse pagination from query string (?limit=&offset=).
+	// Same clamping rules as the JSON endpoint: default
+	// limit 25, cap 1000, offset clamped to [0, total].
+	limit := 25
+	offset := 0
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	docs, total, err := s.service.ListDocumentsPaged(r.Context(), limit, offset)
 	if err != nil {
 		internalError(w, r, "list documents", err)
 		return
 	}
 
+	// Pre-compute pagination helpers so the template
+	// stays free of arithmetic funcs (html/template
+	// doesn't ship add/sub — pulling in sprig just for
+	// this is overkill). -1 sentinel means "no
+	// previous/next link" — the template suppresses the
+	// link for that case.
+	prevOffset := offset - limit
+	if prevOffset < 0 {
+		prevOffset = -1
+	}
+	nextOffset := offset + limit
+	if nextOffset >= total {
+		nextOffset = -1
+	}
+	startShowing := min(offset+1, total)
+	endShowing := min(offset+len(docs), total)
+
 	s.renderTemplate(w, "documents.html", map[string]any{
-		"Title":     "RAGabast - Documents",
-		"Documents": docs,
+		"Title":        "RAGabast - Documents",
+		"Documents":    docs,
+		"Total":        total,
+		"Limit":        limit,
+		"Offset":       offset,
+		"PrevOffset":   prevOffset,
+		"NextOffset":   nextOffset,
+		"StartShowing": startShowing,
+		"EndShowing":   endShowing,
 	})
 }
 
