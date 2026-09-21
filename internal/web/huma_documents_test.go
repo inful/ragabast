@@ -36,9 +36,9 @@ func makeDocs(n int) []models.DocumentInfo {
 // to serialize every row on every page load — which
 // is exactly what #14 is supposed to fix.
 func TestHumaAPI_ListDocuments_DefaultLimit_25(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(50)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -61,9 +61,9 @@ func TestHumaAPI_ListDocuments_DefaultLimit_25(t *testing.T) {
 // Total stays at the full corpus size so the client can
 // compute page counts.
 func TestHumaAPI_ListDocuments_LimitOffset(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(200)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents?limit=50&offset=100")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -87,9 +87,9 @@ func TestHumaAPI_ListDocuments_LimitOffset(t *testing.T) {
 // pins the boundary: when offset >= total, the page is
 // empty but total still reports the full corpus size.
 func TestHumaAPI_ListDocuments_OffsetBeyondTotal_ReturnsEmpty(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(10)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents?limit=10&offset=100")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -110,9 +110,9 @@ func TestHumaAPI_ListDocuments_OffsetBeyondTotal_ReturnsEmpty(t *testing.T) {
 // the upper boundary: a limit that exceeds the corpus
 // size returns what's left, not a 400.
 func TestHumaAPI_ListDocuments_LimitClampsToTotal(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(10)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents?limit=100&offset=0")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -133,9 +133,9 @@ func TestHumaAPI_ListDocuments_LimitClampsToTotal(t *testing.T) {
 // HTTP layer never sees a 400 for malformed paging args
 // — clamp at the boundary, return what's available.
 func TestHumaAPI_ListDocuments_NegativeOffsetTreatedAsZero(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(30)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents?limit=10&offset=-5")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -156,9 +156,9 @@ func TestHumaAPI_ListDocuments_NegativeOffsetTreatedAsZero(t *testing.T) {
 // when offset > total (no 400). The spec is "clamp to
 // total", not "reject".
 func TestHumaAPI_ListDocuments_ExcessiveOffset(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(10)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents?limit=10&offset=1000")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -167,9 +167,9 @@ func TestHumaAPI_ListDocuments_ExcessiveOffset(t *testing.T) {
 // TestHumaAPI_ListDocuments_EmptyCorpus pins the
 // zero-corpus case: empty list, total 0, 200 (not 404).
 func TestHumaAPI_ListDocuments_EmptyCorpus(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: nil}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -190,9 +190,9 @@ func TestHumaAPI_ListDocuments_EmptyCorpus(t *testing.T) {
 // Without a deterministic sort, "doc-00100" at offset 100
 // could be different rows on different requests.
 func TestHumaAPI_ListDocuments_DeterministicOrdering(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(50)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	first := api.Get("/api/documents?limit=10&offset=20")
 	second := api.Get("/api/documents?limit=10&offset=20")
@@ -218,9 +218,9 @@ func TestHumaAPI_ListDocuments_DeterministicOrdering(t *testing.T) {
 // can't pin the server to a 10k-row response. Clamp to
 // 1000 (the same cap the ingest search uses).
 func TestHumaAPI_ListDocuments_LimitTooLarge_ClampsTo1000(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(500)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Get("/api/documents?limit=10000&offset=0")
 	require.Equal(t, http.StatusOK, w.Code)
@@ -242,9 +242,9 @@ func TestHumaAPI_ListDocuments_LimitTooLarge_ClampsTo1000(t *testing.T) {
 // refactor that swaps ListDocuments for the paginated
 // version inside the prune handler.
 func TestHumaAPI_ListDocuments_PruneStillSeesAllDocuments(t *testing.T) {
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	svc := &fakeHumaService{documents: makeDocs(100)}
-	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
 
 	w := api.Post("/api/documents/prune", map[string]any{
 		"keep_uids": []string{"u-00000"},

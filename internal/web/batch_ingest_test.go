@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +44,7 @@ type batchIngestResponseBody struct {
 func batchIngestQueueFixture(t *testing.T, maxBytes int) (*jobs.Queue, string, func()) {
 	t.Helper()
 	dir := t.TempDir()
-	q, err := jobs.New(dir, maxBytes, 2)
+	q, err := jobs.New(dir, maxBytes, 100)
 	require.NoError(t, err)
 	cleanup := func() {
 		q.Stop()
@@ -79,10 +80,9 @@ func readDir(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return f.Readdirnames(-1)
 }
-
 
 // readDirCloser is what Readdirnames returns. The slice
 // element type is plain string (matching os.File.Readdirnames)
@@ -104,12 +104,11 @@ type readDirCloser interface {
 func TestBatchIngest_AllAccepted(t *testing.T) {
 	t.Parallel()
 
-	
 	q, dir, cleanup := batchIngestQueueFixture(t, 0)
 	defer cleanup()
 
-	_, api := humatest.New(t)
-	registerIngestJobsOperations(api, q)
+	router, api := humatest.New(t)
+	registerIngestJobsOperations(api, router, q)
 
 	// Three well-formed docs.
 	items := make([]batchIngestEntry, 3)
@@ -136,12 +135,11 @@ func TestBatchIngest_AllAccepted(t *testing.T) {
 func TestBatchIngest_EmptyArrayReturnsEmptyItems(t *testing.T) {
 	t.Parallel()
 
-	
 	q, dir, cleanup := batchIngestQueueFixture(t, 0)
 	defer cleanup()
 
-	_, api := humatest.New(t)
-	registerIngestJobsOperations(api, q)
+	router, api := humatest.New(t)
+	registerIngestJobsOperations(api, router, q)
 
 	w := api.Post("/api/ingest/batch", []batchIngestEntry{})
 	require.Equal(t, http.StatusOK, w.Code)
@@ -161,12 +159,11 @@ func TestBatchIngest_EmptyArrayReturnsEmptyItems(t *testing.T) {
 func TestBatchIngest_PartialFailure_OversizedDoc(t *testing.T) {
 	t.Parallel()
 
-	
 	q, dir, cleanup := batchIngestQueueFixture(t, 100) // 100-byte cap
 	defer cleanup()
 
-	_, api := humatest.New(t)
-	registerIngestJobsOperations(api, q)
+	router, api := humatest.New(t)
+	registerIngestJobsOperations(api, router, q)
 
 	big := strings.Repeat("a", 200)
 	items := []batchIngestEntry{
@@ -202,13 +199,12 @@ func TestBatchIngest_PartialFailure_OversizedDoc(t *testing.T) {
 func TestBatchIngest_RateLimitAppliesToWholeBatch(t *testing.T) {
 	t.Parallel()
 
-	
 	q, _, cleanup := batchIngestQueueFixture(t, 0)
 	defer cleanup()
 
-	_, api := humatest.New(t)
+	router, api := humatest.New(t)
 	limiter := NewIngestLimiter(100, 1*time.Second)
-	registerIngestJobsOperations(api, q)
+	registerIngestJobsOperations(api, router, q)
 	_ = limiter // limiter is installed via NewServer; this test
 	//           exercises the batch endpoint directly without it.
 	//           The point is just that the batch itself
@@ -234,12 +230,11 @@ func TestBatchIngest_RateLimitAppliesToWholeBatch(t *testing.T) {
 func TestBatchIngest_NDJSONStream(t *testing.T) {
 	t.Parallel()
 
-	
 	q, dir, cleanup := batchIngestQueueFixture(t, 0)
 	defer cleanup()
 
-	_, api := humatest.New(t)
-	registerIngestJobsOperations(api, q)
+	router, api := humatest.New(t)
+	registerIngestJobsOperations(api, router, q)
 
 	body := bytes.NewBufferString(
 		`{"content":"---\nuid: doc-1\n---\nhello"}
@@ -247,7 +242,7 @@ func TestBatchIngest_NDJSONStream(t *testing.T) {
 {"content":"---\nuid: doc-3\n---\n!"}
 `,
 	)
-	req, err := http.NewRequest(http.MethodPost, "/api/ingest/batch", body)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "/api/ingest/batch", body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/x-ndjson")
 

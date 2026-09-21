@@ -1,6 +1,8 @@
 package web
 
 import (
+	"net/http"
+
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/ragabast/internal/web/jobs"
 )
@@ -23,7 +25,7 @@ import (
 //
 // The signature MUST stay stable — huma_api_test.go and the chi
 // adapter in huma_chi.go both call this exact function.
-func registerHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter, maxIngestDocumentBytes int, ingestQueue *jobs.Queue) {
+func registerHumaOperations(router http.Handler, api huma.API, svc serviceAPI, limiter *IngestLimiter, maxIngestDocumentBytes int, ingestQueue *jobs.Queue) {
 	registerCatalogOperations(api, svc, ingestQueue)
 	registerQueryOperation(api, svc)
 	registerSearchOperation(api, svc)
@@ -31,5 +33,5 @@ func registerHumaOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter
 	registerDocumentsOperations(api, svc)
 	registerLinkSuggestionsOperation(api, svc)
 	registerFrontmatterOperation(api, svc)
-	registerIngestJobsOperations(api, ingestQueue)
+	registerIngestJobsOperations(api, router, ingestQueue)
 }
