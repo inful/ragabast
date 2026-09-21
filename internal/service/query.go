@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/service/querycache"
 	"github.com/ragabast/internal/vector"
 )
 
@@ -42,7 +43,18 @@ type LLMOptions struct {
 // that need pure semantic behavior and for the search-tests
 // that pin v0.3.0 semantics.
 func (s *Service) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
-	results, err := s.vectorOps.Search(ctx, query, limit, filters.ToWhere())
+	key := querycache.KeyOf(querycache.Key{
+		Query:    query,
+		DocID:    filters.DocumentID,
+		Tag:      filters.Tag,
+		Category: filters.Category,
+		Limit:    limit,
+		Mode:     "semantic", // Search is the v0.3.0 semantic-only path
+		Model:    s.embedModel,
+	})
+	results, _, err := s.cache.Get(ctx, key, func(ctx context.Context) ([]models.SearchResult, error) {
+		return s.vectorOps.Search(ctx, query, limit, filters.ToWhere())
+	})
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}
@@ -67,7 +79,18 @@ func (s *Service) HybridSearch(
 	filters SearchFilters,
 	mode SearchMode,
 ) ([]models.SearchResult, error) {
-	results, err := s.vectorOps.SearchHybrid(ctx, query, limit, filters, mode)
+	key := querycache.KeyOf(querycache.Key{
+		Query:    query,
+		DocID:    filters.DocumentID,
+		Tag:      filters.Tag,
+		Category: filters.Category,
+		Limit:    limit,
+		Mode:     mode.String(),
+		Model:    s.embedModel,
+	})
+	results, _, err := s.cache.Get(ctx, key, func(ctx context.Context) ([]models.SearchResult, error) {
+		return s.vectorOps.SearchHybrid(ctx, query, limit, filters, mode)
+	})
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}

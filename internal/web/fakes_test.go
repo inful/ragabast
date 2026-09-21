@@ -176,6 +176,15 @@ func (f *fakeHumaService) GetTagsAndCategories(ctx context.Context) (tags []stri
 	return tags, categories, nil
 }
 
+// QueryCacheStats satisfies serviceAPI for /api/health/full
+// tests. Reports the cache disabled (capacity 0) so existing
+// tests don't have to wire cache plumbing; new tests
+// (TestHealthFull_ReportsCacheStats) configure a real
+// service with a real cache.
+func (f *fakeHumaService) QueryCacheStats() service.QueryCacheStats {
+	return service.QueryCacheStats{}
+}
+
 // fakeService is a shared test double that implements the
 // serviceAPI interface (defined in server.go). It serves every
 // web test: per-test fields are set on the struct and the
@@ -325,6 +334,13 @@ func (f *fakeService) GetTagsAndCategories(ctx context.Context) ([]string, []str
 		return nil, nil, err
 	}
 	return tags, categories, nil
+}
+
+// QueryCacheStats satisfies serviceAPI; reports zero values
+// (cache disabled) so existing tests don't have to wire
+// cache plumbing.
+func (f *fakeService) QueryCacheStats() service.QueryCacheStats {
+	return service.QueryCacheStats{}
 }
 
 // errFakeUnhealthy is the sentinel returned by CheckHealth when

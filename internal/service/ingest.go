@@ -108,5 +108,11 @@ func (s *Service) IngestDocument(ctx context.Context, content string) (*models.D
 	if err := chunkAndIngest(ctx, s.chunker, s.vectorOps, doc); err != nil {
 		return nil, err
 	}
+	// Invalidate the query cache (issue #13): any new
+	// chunk could shift result rankings. Conservative
+	// whole-cache clear — operators see a brief hit-rate
+	// dip during heavy ingest, which is the right
+	// tradeoff vs serving stale rankings.
+	s.cache.Clear()
 	return doc, nil
 }

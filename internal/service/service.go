@@ -7,7 +7,9 @@ import (
 
 	"github.com/ragabast/internal/chunker"
 	"github.com/ragabast/internal/config"
+	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/parser"
+	"github.com/ragabast/internal/service/querycache"
 	"github.com/ragabast/internal/vector"
 )
 
@@ -17,12 +19,20 @@ import (
 // categories), and stats.go (health and counters); this file only
 // holds the type and its constructor so the wiring is visible at
 // a glance.
+//
+// cache holds the bounded LRU query cache (issue #13). nil means
+// "cache disabled" — Search/HybridSearch run every time without
+// touching a cache. Clear() is invoked from the write paths
+// (IngestDocument, DeleteDocument, DeleteChunk) because any
+// state change could shift query result rankings.
 type Service struct {
-	config    *config.Config
-	parser    *parser.DocbuilderParser
-	chunker   *chunker.Chunker
-	vectorOps *vector.VectorOperations
-	llmClient llmChatClient
+	config     *config.Config
+	parser     *parser.DocbuilderParser
+	chunker    *chunker.Chunker
+	vectorOps  *vector.VectorOperations
+	llmClient  llmChatClient
+	cache      *querycache.Cache[[]models.SearchResult]
+	embedModel string // captured at construction so the cache key stays stable
 }
 
 // buildDocbuilderURL returns the synthetic permalink for a
@@ -99,11 +109,22 @@ func NewService(cfg *config.Config) (*Service, error) {
 	docParser := parser.NewDocbuilderParser()
 	docChunker := chunker.NewChunker(cfg.Processing.MaxChunkSize, cfg.Processing.MinChunkSize, cfg.Processing.ChunkOverlap)
 
+	// Query cache wiring (issue #13). size == 0 disables the
+	// cache (every call falls through). The embedModel is
+	// captured at construction time so the cache key stays
+	// stable across the service's lifetime — operators
+	// swapping embedding models will invalidate entries
+	// implicitly because the next Get computes a new key.
+	cacheSize := cfg.Ragabast.QueryCacheSize
+	cacheTTL := cfg.Ragabast.QueryCacheTTL
+
 	return &Service{
-		config:    cfg,
-		parser:    docParser,
-		chunker:   docChunker,
-		vectorOps: vectorOps,
-		llmClient: newLLMChatClient(cfg),
+		config:     cfg,
+		parser:     docParser,
+		chunker:    docChunker,
+		vectorOps:  vectorOps,
+		llmClient:  newLLMChatClient(cfg),
+		cache:      querycache.New[[]models.SearchResult](cacheSize, cacheTTL),
+		embedModel: cfg.Ollama.EmbeddingModel,
 	}, nil
 }

@@ -73,6 +73,25 @@ type RagabastConfig struct {
 	// Bodies larger than 8 KiB are truncated with a
 	// "...[truncated]" marker to keep the log scannable.
 	LogChatRequests bool `env:"RAGABAST_LOG_CHAT_REQUESTS" yaml:"log_chat_requests,omitempty"`
+
+	// QueryCacheSize bounds the LRU query cache (issue #13).
+	// Every /api/search and /api/hybrid call hits the cache
+	// before running the embedding + vector DB pipeline;
+	// setting this > 0 turns the cache on. Default 256 — a
+	// reasonable upper bound for a single-operator
+	// installation. Set to 0 to disable the cache entirely
+	// (every query runs end-to-end; useful for benchmarking
+	// or for operators chasing a suspected stale-result bug).
+	QueryCacheSize int `env:"RAGABAST_QUERY_CACHE_SIZE" yaml:"query_cache_size,omitempty"`
+
+	// QueryCacheTTL bounds entry staleness regardless of
+	// invalidation. Even with the IngestDocument /
+	// DeleteDocument hooks clearing the cache, a paranoid
+	// operator can set this so stale results can never
+	// outlive a fixed window. Default 0 = no TTL (entries
+	// live until evicted by capacity). Format: a Go
+	// duration string (e.g. "5m", "1h").
+	QueryCacheTTL time.Duration `env:"RAGABAST_QUERY_CACHE_TTL" yaml:"query_cache_ttl,omitempty"`
 }
 
 // OllamaConfig holds configuration for the embedding and chat-completions
@@ -561,6 +580,16 @@ func (c *Config) ApplyEnvOverrides() {
 	// Ragabast config.
 	if v := os.Getenv("RAGABAST_DOCBUILDER_BASE_URL"); v != "" {
 		c.Ragabast.DocbuilderBaseURL = v
+	}
+	if v, ok := os.LookupEnv("RAGABAST_QUERY_CACHE_SIZE"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.Ragabast.QueryCacheSize = n
+		}
+	}
+	if v := os.Getenv("RAGABAST_QUERY_CACHE_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Ragabast.QueryCacheTTL = d
+		}
 	}
 	if v := os.Getenv("RAGABAST_LOG_CHAT_REQUESTS"); v != "" {
 		// Accept the common truthy spellings so an operator
