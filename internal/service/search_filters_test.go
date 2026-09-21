@@ -67,9 +67,9 @@ func TestSearchFilters_ToWhere(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.filters.toWhere()
+			got := tc.filters.ToWhere()
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Errorf("toWhere() = %v, want %v", got, tc.want)
+				t.Errorf("ToWhere() = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -91,5 +91,5 @@ func TestSearchFilters_DocumentIDIsAuthoritative(t *testing.T) {
 // integration tests.
 func TestService_SearchFilters_ZeroValueCompiles(t *testing.T) {
 	var f SearchFilters
-	require.Equal(t, map[string]string{}, f.toWhere())
+	require.Equal(t, map[string]string{}, f.ToWhere())
 }

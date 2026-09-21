@@ -13,42 +13,10 @@ import (
 )
 
 // SearchFilters narrows a Search by document-level attributes.
-// Empty fields are ignored. Where multiple fields are set, they
-// combine as AND across distinct metadata keys.
-//
-// Filters are translated to chromem-go's map[string]string Where
-// filter at the service boundary:
-//
-//   - DocumentID -> "document_id"  (exact)
-//   - Tag        -> "document_tags"  (substring against the
-//     "\n"-joined tag list)
-//   - Category   -> "document_categories"
-//
-// Substring matching is intentional: chunk-level metadata stores
-// tags and categories as "\n"-joined values, and a single
-// substring match is what chromem-go can deliver without
-// round-tripping per chunk.
-type SearchFilters struct {
-	DocumentID string
-	Tag        string
-	Category   string
-}
-
-// toWhere converts the struct into the chromem-go Where filter.
-// Returns a fresh map; the caller may mutate it freely.
-func (f SearchFilters) toWhere() map[string]string {
-	where := map[string]string{}
-	if d := strings.TrimSpace(f.DocumentID); d != "" {
-		where["document_id"] = d
-	}
-	if t := strings.TrimSpace(f.Tag); t != "" {
-		where["document_tags"] = t
-	}
-	if c := strings.TrimSpace(f.Category); c != "" {
-		where["document_categories"] = c
-	}
-	return where
-}
+// Re-exported from the vector package so callers do not have to
+// import vector directly. The full docstring lives on
+// vector.SearchFilters — keep changes there.
+type SearchFilters = vector.SearchFilters
 
 // QueryDebugInfo describes what was retrieved and sent to the LLM.
 type QueryDebugInfo struct {
@@ -74,7 +42,7 @@ type LLMOptions struct {
 // that need pure semantic behavior and for the search-tests
 // that pin v0.3.0 semantics.
 func (s *Service) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
-	results, err := s.vectorOps.Search(ctx, query, limit, filters.toWhere())
+	results, err := s.vectorOps.Search(ctx, query, limit, filters.ToWhere())
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}
@@ -88,11 +56,10 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters S
 // in-process Service.Search retains pure-semantic semantics
 // for callers that depend on them.
 //
-// Filters are translated from service.SearchFilters to the
-// vector package's SearchFilters and applied to BOTH rankings
-// (keyword side: term/match query against the document_id /
-// tags / categories fields; semantic side: chromem-go Where
-// filter on the corresponding metadata keys).
+// Filters are applied to BOTH rankings (keyword side: term/match
+// query against the document_id / tags / categories fields;
+// semantic side: chromem-go Where filter on the corresponding
+// metadata keys).
 func (s *Service) HybridSearch(
 	ctx context.Context,
 	query string,
@@ -100,12 +67,7 @@ func (s *Service) HybridSearch(
 	filters SearchFilters,
 	mode SearchMode,
 ) ([]models.SearchResult, error) {
-	vFilters := vector.SearchFilters{
-		DocumentID: filters.DocumentID,
-		Tag:        filters.Tag,
-		Category:   filters.Category,
-	}
-	results, err := s.vectorOps.SearchHybrid(ctx, query, limit, vFilters, mode)
+	results, err := s.vectorOps.SearchHybrid(ctx, query, limit, filters, mode)
 	if err != nil {
 		return nil, wrapCorruptionError(err)
 	}
