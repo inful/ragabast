@@ -209,7 +209,7 @@ func TestValidate_RejectsWhitespaceOnlyDocbuilderBaseURL(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Ragabast.DocbuilderBaseURL = "   "
 	require.NoError(t, cfg.Validate(), "whitespace-only trims to empty (valid)")
-	assert.Equal(t, "", cfg.Ragabast.DocbuilderBaseURL,
+	assert.Empty(t, cfg.Ragabast.DocbuilderBaseURL,
 		"trimmed value must be persisted as empty")
 }
 
