@@ -196,6 +196,53 @@ func TestHumaAPI_DeleteDocument_Returns404ForUnknownDocument(t *testing.T) {
 	require.Empty(t, svc.deletedIDs)
 }
 
+// TestHumaAPI_DeleteDocument_NoListDocumentsPreCheck
+// pins the N+1 fix for issue #9: the handler MUST NOT
+// call ListDocuments before calling DeleteDocument. The
+// old code did so as an existence check, but
+// DeleteDocument already returns ErrNotFound when the
+// ID is missing — so the pre-check was a full-collection
+// scan on every delete.
+//
+// With this fix, deleting K documents from a corpus of
+// N costs O(K) total vector-DB calls instead of O(N·K).
+func TestHumaAPI_DeleteDocument_NoListDocumentsPreCheck(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
+	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+
+	before := svc.listCalls
+	w := api.Delete("/api/documents/doc-1")
+	after := svc.listCalls
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"happy-path delete must still return 200 (got %d)", w.Code)
+	require.Equal(t, before, after,
+		"delete handler must not call ListDocuments as a pre-check "+
+			"(N+1 fix for #9): before=%d after=%d", before, after)
+}
+
+// TestHumaAPI_DeleteDocument_NoListDocumentsOn404 pins
+// the other half: even when the target ID is missing,
+// the handler must NOT call ListDocuments to discover
+// the miss. The vector layer's ErrNotFound is the
+// single source of truth.
+func TestHumaAPI_DeleteDocument_NoListDocumentsOn404(t *testing.T) {
+	_, api := humatest.New(t)
+	svc := &fakeHumaService{documents: []models.DocumentInfo{{ID: "doc-1", UID: "u-1"}}}
+	registerHumaOperations(api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+
+	before := svc.listCalls
+	w := api.Delete("/api/documents/missing")
+	after := svc.listCalls
+
+	require.Equal(t, http.StatusNotFound, w.Code,
+		"missing ID must still return 404 (got %d)", w.Code)
+	require.Equal(t, before, after,
+		"404 path must not call ListDocuments "+
+			"(N+1 fix for #9): before=%d after=%d", before, after)
+}
+
 func TestHumaAPI_PruneDocuments_DeletesEverythingExceptKeptUIDs(t *testing.T) {
 	_, api := humatest.New(t)
 	svc := &fakeHumaService{documents: []models.DocumentInfo{
