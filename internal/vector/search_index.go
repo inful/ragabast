@@ -63,11 +63,40 @@ type SearchHit struct {
 // share a parent dir so a single `vector reset` cleans both up.
 // Returns "" when vectorPersistenceDir is empty so the caller
 // can detect a misconfigured pipeline.
+//
+// Deprecated: new callers should use ResolveKeywordIndexPath,
+// which supports the vectordb.keyword_index_dir override added
+// in issue #30. Kept for compatibility with existing callers
+// (the cmd helper, the doctor probe) that don't have a
+// separate keyword-index-dir config to honor.
 func SearchIndexPathFor(vectorPersistenceDir string) string {
 	if vectorPersistenceDir == "" {
 		return ""
 	}
 	return filepath.Join(vectorPersistenceDir, "search")
+}
+
+// ResolveKeywordIndexPath returns the on-disk path where the
+// keyword index should live.
+//
+// If keywordIndexDir is set (the vectordb.keyword_index_dir
+// config knob), the keyword index goes there. This is the
+// recommended setup when the vector DB persistence dir is on a
+// remote filesystem (NFS, shared mount): bleve uses mmap for
+// reads, which performs poorly or fails outright on NFS, so
+// operators split the two stores — vector DB on NFS, keyword
+// index on a local SSD.
+//
+// Otherwise the keyword index falls back to the historical
+// sibling layout: <vectorPersistenceDir>/search.
+//
+// Returns "" only when both inputs are empty, so a misconfigured
+// pipeline is detectable from the helper alone.
+func ResolveKeywordIndexPath(vectorPersistenceDir, keywordIndexDir string) string {
+	if keywordIndexDir != "" {
+		return keywordIndexDir
+	}
+	return SearchIndexPathFor(vectorPersistenceDir)
 }
 
 // SearchIndex wraps a bleve.Index with chunk-level operations:

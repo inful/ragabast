@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/ragabast/internal/chunker"
@@ -74,10 +75,19 @@ func NewService(cfg *config.Config) (*Service, error) {
 	vectorOps := vector.NewVectorOperations(db, embeddings)
 
 	// Wire the bleve-backed keyword index alongside the
-	// vector DB. The search index lives at a sibling path
-	// of the vector DB's persistence dir so a single
-	// `vector reset` cleans both up.
-	searchDir := vector.SearchIndexPathFor(cfg.VectorDB.PersistenceDir)
+	// vector DB. The keyword index defaults to the sibling
+	// path <PersistenceDir>/search, but operators can
+	// override with vectordb.keyword_index_dir to put it on
+	// local disk while keeping the vector DB on NFS or a
+	// shared mount.
+	searchDir := vector.ResolveKeywordIndexPath(
+		cfg.VectorDB.PersistenceDir,
+		cfg.VectorDB.KeywordIndexDir,
+	)
+	if cfg.VectorDB.KeywordIndexDir != "" {
+		log.Printf("service: keyword index on %s (overriding default <%s>/search layout)",
+			cfg.VectorDB.KeywordIndexDir, cfg.VectorDB.PersistenceDir)
+	}
 	searchIdx, err := vector.LoadSearchIndex(searchDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize search index: %w", err)
