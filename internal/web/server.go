@@ -166,8 +166,22 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 		} else {
 			ingestQueue = q
 			ingestQueue.Start(jobsServiceAdapter{svc: svc}, auditFunc(log.Printf))
-			log.Printf("web: async ingest queue started at %s (workers=%d, max_document_bytes=%d)",
-				q.Dir(), q.Workers(), q.MaxBytes())
+			// Background cleanup sweep. Operates on the same
+			// audit hook as the worker pool so the operator's
+			// log stream is unified. TTL=0 on both knobs
+			// disables cleanup entirely; StartCleanup is a
+			// no-op in that case.
+			ingestQueue.StartCleanup(
+				cfg.Server.AsyncIngestCleanupInterval,
+				cfg.Server.AsyncIngestCompletedJobTTL,
+				cfg.Server.AsyncIngestFailedJobTTL,
+				auditFunc(log.Printf),
+			)
+			log.Printf("web: async ingest queue started at %s (workers=%d, max_document_bytes=%d, cleanup_interval=%s, completed_ttl=%s, failed_ttl=%s)",
+				q.Dir(), q.Workers(), q.MaxBytes(),
+				cfg.Server.AsyncIngestCleanupInterval,
+				cfg.Server.AsyncIngestCompletedJobTTL,
+				cfg.Server.AsyncIngestFailedJobTTL)
 		}
 	}
 
