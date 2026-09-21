@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,21 +14,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// captureLogs redirects the global log package output to a buffer
-// for the duration of fn, then restores the original writer.
-// Tests use this to assert that the chat-debug logging fires
-// (or stays silent) at the right times.
+// captureLogs routes slog output to a buffer for the duration
+// of fn, then restores the previous default logger. The
+// chat-debug writer logs at Debug level, so the handler's
+// minimum level is set to Debug — otherwise the chat-debug
+// lines would be dropped by the default Info floor.
+//
+// Mirrors the helper of the same name in cmd/doctor_test.go;
+// kept separate so the test packages stay decoupled.
 func captureLogs(t *testing.T, fn func()) string {
 	t.Helper()
 	buf := &bytes.Buffer{}
-	oldOut := log.Writer()
-	oldFlags := log.Flags()
-	log.SetOutput(buf)
-	log.SetFlags(0)
-	t.Cleanup(func() {
-		log.SetOutput(oldOut)
-		log.SetFlags(oldFlags)
-	})
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	})))
+	t.Cleanup(func() { slog.SetDefault(oldLogger) })
 	fn()
 	return buf.String()
 }
