@@ -542,6 +542,153 @@ func (q *Queue) path(id string) string {
 	return filepath.Join(q.dir, id+".json")
 }
 
+// RunCleanup walks the queue directory once and removes finished
+// jobs whose age exceeds the configured TTL. Returns the number
+// of files removed.
+//
+// A TTL of 0 disables cleanup entirely (operators use this to
+// pause the feature without removing the config keys). The
+// completed TTL applies to StatusCompleted jobs; the failed TTL
+// applies to StatusFailed jobs. Failed jobs default to a longer
+// retention so operators have time to investigate.
+//
+// Active processing is preserved: files ending in
+// `.processing.json` or `.tmp` are NEVER removed regardless of
+// age, even with TTL=1ns. The cleanup pass would otherwise race
+// with a worker holding a job and corrupt mid-ingest state.
+//
+// The audit hook is nil-safe — callers that don't care about
+// observability can pass nil.
+func (q *Queue) RunCleanup(completedTTL, failedTTL time.Duration) (int, error) {
+	return q.RunCleanupWithAudit(completedTTL, failedTTL, nil)
+}
+
+// RunCleanupWithAudit is the form that emits a summary audit
+// event after the sweep. The single event has event=
+// "jobs.cleanup_completed" with fields removed=<int>,
+// completed_removed=<int>, failed_removed=<int>.
+//
+// Operators rely on this for monitoring: a sudden spike in
+// the removed count, or a sustained zero, both warrant
+// attention.
+func (q *Queue) RunCleanupWithAudit(completedTTL, failedTTL time.Duration, audit AuditFunc) (int, error) {
+	if completedTTL == 0 && failedTTL == 0 {
+		// TTL=0 on both sides means "operator disabled cleanup".
+		// Short-circuit so we don't even walk the dir.
+		return 0, nil
+	}
+
+	now := time.Now()
+	entries, err := os.ReadDir(q.dir)
+	if err != nil {
+		return 0, fmt.Errorf("read queue dir: %w", err)
+	}
+
+	completedRemoved := 0
+	failedRemoved := 0
+	for _, e := range entries {
+		name := e.Name()
+		// Skip active-processing markers and partial writes.
+		// The contract: cleanup never touches anything that
+		// isn't a finished-job canonical file.
+		if strings.HasSuffix(name, ".processing.json") ||
+			strings.HasSuffix(name, ".tmp") ||
+			!strings.HasSuffix(name, ".json") {
+			continue
+		}
+
+		id := strings.TrimSuffix(name, ".json")
+		path := q.path(id)
+		j, gerr := q.getFromPath(path)
+		if gerr != nil {
+			// Unreadable file — skip rather than fail the
+			// whole sweep. A future pass can retry.
+			continue
+		}
+
+		var ttl time.Duration
+		switch j.Status {
+		case StatusCompleted:
+			ttl = completedTTL
+		case StatusFailed:
+			ttl = failedTTL
+		case StatusPending, StatusProcessing:
+			// Pending and Processing are not eligible.
+			// A pending job that age-exceeded TTL is left
+			// alone — recovery owns those. A processing job
+			// is owned by a worker.
+			continue
+		}
+		if ttl == 0 {
+			continue
+		}
+
+		// Eligible for removal: check age.
+		info, ierr := e.Info()
+		if ierr != nil {
+			continue
+		}
+		if now.Sub(info.ModTime()) < ttl {
+			continue
+		}
+
+		if rerr := os.Remove(path); rerr != nil {
+			// Best-effort; a future pass can retry.
+			continue
+		}
+		switch j.Status {
+		case StatusCompleted:
+			completedRemoved++
+		case StatusFailed:
+			failedRemoved++
+		case StatusPending, StatusProcessing:
+			// Unreachable — the eligibility switch above
+			// continued past these. Listed so the
+			// exhaustive linter is satisfied.
+		}
+	}
+
+	total := completedRemoved + failedRemoved
+	if audit != nil {
+		audit("jobs.cleanup_completed",
+			"removed", total,
+			"completed_removed", completedRemoved,
+			"failed_removed", failedRemoved)
+	}
+	return total, nil
+}
+
+// StartCleanup launches a background goroutine that runs
+// RunCleanupWithAudit every interval. Stops when the queue
+// is stopped. Returns immediately; the goroutine exits via
+// the queue's stop channel.
+//
+// interval == 0 disables the background sweep — operators
+// who want to run cleanup manually can call RunCleanup
+// directly. (TTL=0 already disables cleanup entirely.)
+func (q *Queue) StartCleanup(interval, completedTTL, failedTTL time.Duration, audit AuditFunc) {
+	if interval <= 0 {
+		return
+	}
+	if completedTTL == 0 && failedTTL == 0 {
+		return
+	}
+	go q.cleanupLoop(interval, completedTTL, failedTTL, audit)
+}
+
+func (q *Queue) cleanupLoop(interval, completedTTL, failedTTL time.Duration, audit AuditFunc) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-q.stopped:
+			return
+		case <-t.C:
+			_, _ = q.RunCleanupWithAudit(completedTTL, failedTTL, audit)
+		}
+	}
+}
+
 // jobAuditFields returns the standard prefix of every per-job
 // audit line: job_id, remote_addr, and (when present) request_id.
 // Centralizing this keeps the three call sites in processOne
