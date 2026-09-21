@@ -221,6 +221,25 @@ type ServerConfig struct {
 	// embeddings server's request parallelism.
 	AsyncIngestWorkers int `env:"SERVER_ASYNC_INGEST_WORKERS" yaml:"async_ingest_workers,omitempty"`
 
+	// AsyncIngestCompletedJobTTL is the maximum age of a
+	// completed .json file before the cleanup sweep
+	// removes it. Default 168h (7 days). Set to 0 to
+	// disable cleanup entirely.
+	AsyncIngestCompletedJobTTL time.Duration `env:"SERVER_ASYNC_INGEST_COMPLETED_JOB_TTL" yaml:"async_ingest_completed_job_ttl,omitempty"`
+
+	// AsyncIngestFailedJobTTL is the maximum age of a failed
+	// .json file before the cleanup sweep removes it.
+	// Default 720h (30 days) — failed jobs default to longer
+	// retention than completed ones so operators have time
+	// to investigate. Set to 0 to disable.
+	AsyncIngestFailedJobTTL time.Duration `env:"SERVER_ASYNC_INGEST_FAILED_JOB_TTL" yaml:"async_ingest_failed_job_ttl,omitempty"`
+
+	// AsyncIngestCleanupInterval is how often the cleanup
+	// sweep runs in the background. Default 1h. Set to 0
+	// to disable the background sweep (you can still call
+	// RunCleanup manually).
+	AsyncIngestCleanupInterval time.Duration `env:"SERVER_ASYNC_INGEST_CLEANUP_INTERVAL" yaml:"async_ingest_cleanup_interval,omitempty"`
+
 	// ReadTimeout for HTTP requests.
 	ReadTimeout time.Duration `env:"SERVER_READ_TIMEOUT" yaml:"read_timeout"`
 
@@ -312,12 +331,15 @@ func DefaultConfig() *Config {
 			EmbeddingDimension: 768, // nomic-embed-text-v1.5 dimension
 		},
 		Server: ServerConfig{
-			Address:                "0.0.0.0",
-			Port:                   8080,
-			EnableCORS:             true,
-			MaxIngestDocumentBytes: 1 << 20, // 1 MiB
-			ReadTimeout:            15 * time.Second,
-			WriteTimeout:           15 * time.Second,
+			Address:                    "0.0.0.0",
+			Port:                       8080,
+			EnableCORS:                 true,
+			MaxIngestDocumentBytes:     1 << 20, // 1 MiB
+			ReadTimeout:                15 * time.Second,
+			WriteTimeout:               15 * time.Second,
+			AsyncIngestCompletedJobTTL: 168 * time.Hour, // 7 days
+			AsyncIngestFailedJobTTL:    720 * time.Hour, // 30 days
+			AsyncIngestCleanupInterval: 1 * time.Hour,
 		},
 		Processing: ProcessingConfig{
 			MaxChunkSize: 2000,
@@ -570,6 +592,21 @@ func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv("SERVER_ASYNC_INGEST_WORKERS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.Server.AsyncIngestWorkers = n
+		}
+	}
+	if v := os.Getenv("SERVER_ASYNC_INGEST_COMPLETED_JOB_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.AsyncIngestCompletedJobTTL = d
+		}
+	}
+	if v := os.Getenv("SERVER_ASYNC_INGEST_FAILED_JOB_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.AsyncIngestFailedJobTTL = d
+		}
+	}
+	if v := os.Getenv("SERVER_ASYNC_INGEST_CLEANUP_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.AsyncIngestCleanupInterval = d
 		}
 	}
 	if v := os.Getenv("SERVER_CORS_ORIGINS"); v != "" {
