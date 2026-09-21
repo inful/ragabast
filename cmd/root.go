@@ -291,8 +291,10 @@ func (c *DoctorCmd) checkEmbeddingsServer(cfg *config.Config) {
 		cfg.Ollama.EmbeddingModel,
 		cfg.Ollama.EffectiveEmbeddingAPIKey(),
 		cfg.Ollama.Timeout,
-		0, // probe at the model's full dim — we want to see what the server actually returns
-		1, // doctor probe is single-call; concurrency knob is for ingest
+		0,  // probe at the model's full dim — we want to see what the server actually returns
+		1,  // doctor probe is single-call; concurrency knob is for ingest
+		"", // doctor probe uses raw text — no task prompt needed for a connect-check
+		"", // ditto for the query side
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
