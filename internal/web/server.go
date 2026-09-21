@@ -106,6 +106,21 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// so the security boundary is easy to audit.
 	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens()))
 
+	// csrfMiddleware runs after auth so a Bearer-auth POST
+	// (which cannot be made cross-origin by a browser) skips
+	// the CSRF check entirely. It runs before the rate
+	// limiter so a CSRF-failed flood still consumes bucket
+	// tokens — a defense-in-depth choice that keeps a
+	// malicious page from probing token guesses with no
+	// rate-limit cost.
+	// csrfMiddleware is auth-aware: when EffectiveAuthTokens
+	// is empty (the default local-dev install), CSRF is
+	// also bypassed because there is nothing to CSRF.
+	// When auth is configured, CSRF runs after auth so a
+	// Bearer-auth POST (which cannot be made cross-origin
+	// by a browser) skips the CSRF check entirely.
+	router.Use(csrfMiddleware(cfg.Server.EffectiveAuthTokens()))
+
 	// Rate-limit middleware for the LLM-backed endpoints. The
 	// middleware is path-aware (see rate_limit.go) and a no-op
 	// for any non-LLM URL prefix; it is installed at the
