@@ -13,6 +13,9 @@ import (
 
 type documentsResponseBody struct {
 	Documents []models.DocumentInfo `json:"documents"`
+	Total     int                   `json:"total"`
+	Limit     int                   `json:"limit"`
+	Offset    int                   `json:"offset"`
 }
 
 type deleteDocumentResponseBody struct {
@@ -43,12 +46,32 @@ func registerDocumentsOperations(api huma.API, svc serviceAPI) {
 		Method:      http.MethodGet,
 		Path:        "/api/documents",
 		Summary:     "List ingested documents",
-	}, func(ctx context.Context, input *struct{}) (*struct{ Body documentsResponseBody }, error) {
-		docs, err := svc.ListDocuments(ctx)
+		Description: "Returns up to `limit` documents (default 25, max 1000) starting at `offset`, sorted by document ID for stable pagination. The `total` field reflects the count of all matching documents, not just the page.",
+	}, func(ctx context.Context, input *struct {
+		// No minimum/maximum constraints on the query
+		// params: clamping is the handler's job (see
+		// below). Rejecting at the schema layer would
+		// surface as a 400, but the spec is to clamp
+		// silently — operators asking for limit=10000
+		// get the cap, not a rejection.
+		Limit  int `doc:"Page size; default 25, capped at 1000." query:"limit,omitempty"`
+		Offset int `doc:"Zero-based page offset; clamped to [0, total]." query:"offset,omitempty"`
+	},
+	) (*struct{ Body documentsResponseBody }, error) {
+		limit := input.Limit
+		if limit == 0 {
+			limit = 25
+		}
+		docs, total, err := svc.ListDocumentsPaged(ctx, limit, input.Offset)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("list documents failed")
 		}
-		return &struct{ Body documentsResponseBody }{Body: documentsResponseBody{Documents: docs}}, nil
+		return &struct{ Body documentsResponseBody }{Body: documentsResponseBody{
+			Documents: docs,
+			Total:     total,
+			Limit:     limit,
+			Offset:    input.Offset,
+		}}, nil
 	})
 
 	huma.Register(api, huma.Operation{

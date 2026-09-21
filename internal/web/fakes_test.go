@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"sort"
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
@@ -84,6 +85,36 @@ func (f *fakeHumaService) HybridSearch(_ context.Context, _ string, _ int, _ ser
 func (f *fakeHumaService) ListDocuments(_ context.Context) ([]models.DocumentInfo, error) {
 	f.listCalls++
 	return f.documents, nil
+}
+
+// ListDocumentsPaged returns a slice of f.documents (sorted
+// by ID for deterministic ordering across requests) along
+// with the full corpus size. limit <= 0 means "no limit";
+// offset is clamped to [0, total] and negative offsets
+// are treated as 0 — same rules the production handler
+// applies. Sorts a copy so subsequent calls return a
+// fresh slice and the test fixture doesn't accumulate
+// cross-test state.
+func (f *fakeHumaService) ListDocumentsPaged(_ context.Context, limit, offset int) ([]models.DocumentInfo, int, error) {
+	f.listCalls++
+	// Make a sorted copy of f.documents so we don't mutate
+	// the test fixture's input across calls.
+	sorted := make([]models.DocumentInfo, len(f.documents))
+	copy(sorted, f.documents)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+
+	total := len(sorted)
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > total {
+		offset = total
+	}
+	end := total
+	if limit > 0 {
+		end = min(offset+limit, total)
+	}
+	return sorted[offset:end], total, nil
 }
 
 func (f *fakeHumaService) DeleteDocument(_ context.Context, documentID string) error {
@@ -235,6 +266,21 @@ func (f *fakeService) ListDocuments(context.Context) ([]models.DocumentInfo, err
 		return f.documents, nil
 	}
 	return []models.DocumentInfo{}, nil
+}
+
+// ListDocumentsPaged is the pagination-aware companion to
+// ListDocuments on fakeService. Most legacy tests use
+// fakeService — the new huma tests use fakeHumaService —
+// but both must satisfy the serviceAPI interface so the
+// compile-time assertion in api.go holds.
+func (f *fakeService) ListDocumentsPaged(context.Context, int, int) ([]models.DocumentInfo, int, error) {
+	if f.listErr != nil {
+		return nil, 0, f.listErr
+	}
+	if f.documents != nil {
+		return f.documents, len(f.documents), nil
+	}
+	return []models.DocumentInfo{}, 0, nil
 }
 
 func (f *fakeService) DeleteDocument(context.Context, string) error {

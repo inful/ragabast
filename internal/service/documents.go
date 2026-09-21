@@ -6,14 +6,30 @@ import (
 	"github.com/ragabast/internal/models"
 )
 
-// ListDocuments returns all ingested documents.
+// ListDocuments returns every ingested document. Kept as
+// a backward-compatible wrapper for callers that genuinely
+// need the full corpus (the prune endpoint, which has to
+// walk every doc to build its keep/delete plan). New
+// callers that only want a page should use
+// ListDocumentsPaged.
 func (s *Service) ListDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
-	docs, err := s.vectorOps.GetUniqueDocuments(ctx)
+	docs, _, err := s.ListDocumentsPaged(ctx, 0, 0)
+	return docs, err
+}
+
+// ListDocumentsPaged returns a page of ingested documents
+// plus the total corpus size. limit=0 means "no limit"
+// (return everything). offset is clamped to the [0, total]
+// range. The slice is sorted by document ID upstream so
+// the same offset returns the same first row on every
+// request — pagination stability.
+func (s *Service) ListDocumentsPaged(ctx context.Context, limit, offset int) ([]models.DocumentInfo, int, error) {
+	docs, total, err := s.vectorOps.GetUniqueDocumentsPaged(ctx, limit, offset)
 	if err != nil {
-		return nil, wrapCorruptionError(err)
+		return nil, 0, wrapCorruptionError(err)
 	}
 	s.enrichDocInfos(docs)
-	return docs, nil
+	return docs, total, nil
 }
 
 // enrichDocInfos populates the DocbuilderURL field on every

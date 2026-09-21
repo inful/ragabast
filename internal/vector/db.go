@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -629,14 +630,40 @@ func (db *VectorDB) DocumentNeedsUpdate(ctx context.Context, documentID string, 
 }
 
 // GetUniqueDocuments returns a list of unique documents with their metadata.
+// GetUniqueDocuments returns every unique document. It is
+// kept as a backward-compatible wrapper for callers that
+// genuinely need the full list (the prune endpoint, which
+// has to walk every doc to build its keep/delete plan).
+// New callers that only want a page should use
+// GetUniqueDocumentsPaged.
 func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
+	docs, _, err := db.GetUniqueDocumentsPaged(ctx, 0, 0)
+	return docs, err
+}
+
+// GetUniqueDocumentsPaged returns a page of unique
+// documents plus the total corpus size. limit=0 means
+// "no limit" (return everything). offset is clamped to
+// the [0, total] range. Results are sorted by document
+// ID so the same offset returns the same first row on
+// every request — without sorting, pagination would
+// shift every time the map iteration order changed.
+//
+// The full collection walk is unavoidable: chromem-go
+// does not store per-document metadata, so the only way
+// to enumerate unique documents is to scan chunks and
+// dedupe by document_id. The win from pagination is
+// bounded response size (the page slice) and bounded
+// downstream work (enrichment, JSON serialization), not
+// bounded vector-DB work.
+func (db *VectorDB) GetUniqueDocumentsPaged(ctx context.Context, limit, offset int) ([]models.DocumentInfo, int, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 
 	// Get total count first
 	count := db.collection.Count()
 	if count == 0 {
-		return []models.DocumentInfo{}, nil
+		return []models.DocumentInfo{}, 0, nil
 	}
 
 	// Use a dummy embedding with the correct dimension
@@ -648,7 +675,7 @@ func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentIn
 
 	results, err := db.collection.QueryWithOptions(ctx, options)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query documents: %w", err)
+		return nil, 0, fmt.Errorf("failed to query documents: %w", err)
 	}
 
 	// Group by document_id to get unique documents
@@ -713,13 +740,35 @@ func (db *VectorDB) GetUniqueDocuments(ctx context.Context) ([]models.DocumentIn
 		docMap[docID] = info
 	}
 
-	// Convert map to slice
-	docs := make([]models.DocumentInfo, 0, len(docMap))
+	// Convert map to slice and sort by ID. Sorting is the
+	// cheap part (O(D log D) on unique docs, where D ≪ N_chunks);
+	// it's what makes pagination stable.
+	all := make([]models.DocumentInfo, 0, len(docMap))
 	for _, info := range docMap {
-		docs = append(docs, info)
+		all = append(all, info)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+
+	total := len(all)
+
+	// Clamp offset to [0, total]. Negative offsets are
+	// treated as 0 — same input-validation policy as the
+	// HTTP layer will apply upstream.
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > total {
+		offset = total
 	}
 
-	return docs, nil
+	// Compute the page window. limit <= 0 means "no limit".
+	end := total
+	if limit > 0 {
+		end = min(offset+limit, total)
+	}
+
+	page := all[offset:end]
+	return page, total, nil
 }
 
 // splitNonEmptyLines and parseRFC3339 moved to metadata.go.

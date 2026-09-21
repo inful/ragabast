@@ -218,7 +218,17 @@ func (vo *VectorOperations) ValidateConnection(ctx context.Context) error {
 	return nil
 }
 
-// GetUniqueDocuments returns a list of unique documents.
+// GetUniqueDocuments returns every unique document. Kept
+// for backward compatibility; new callers should use
+// GetUniqueDocumentsPaged.
 func (vo *VectorOperations) GetUniqueDocuments(ctx context.Context) ([]models.DocumentInfo, error) {
 	return vo.db.GetUniqueDocuments(ctx)
+}
+
+// GetUniqueDocumentsPaged returns a page of unique
+// documents plus the total corpus size. limit=0 means
+// "no limit" (return everything). See VectorDB for the
+// full rationale on why the chunk walk is unavoidable.
+func (vo *VectorOperations) GetUniqueDocumentsPaged(ctx context.Context, limit, offset int) ([]models.DocumentInfo, int, error) {
+	return vo.db.GetUniqueDocumentsPaged(ctx, limit, offset)
 }

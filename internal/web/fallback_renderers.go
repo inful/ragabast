@@ -56,9 +56,23 @@ type ingestSuccessFallbackData struct {
 // documentsFallbackData is the data shape for GET /documents.
 // Title, Tags, Category, and ID are all user-controllable (parsed
 // from ingested frontmatter / H1 header).
+//
+// Pagination fields (Total, Limit, Offset, PrevOffset, NextOffset,
+// StartShowing, EndShowing) drive the Previous/Next links
+// rendered at the bottom of the page when the corpus exceeds
+// the page size. -1 sentinel on PrevOffset/NextOffset means
+// "no link" — the template suppresses the corresponding
+// button.
 type documentsFallbackData struct {
-	Title     string
-	Documents []documentsFallbackRow
+	Title        string
+	Documents    []documentsFallbackRow
+	Total        int
+	Limit        int
+	Offset       int
+	PrevOffset   int
+	NextOffset   int
+	StartShowing int
+	EndShowing   int
 }
 
 // documentsFallbackRow is one row of the documents table.
@@ -249,6 +263,19 @@ const documentsFallbackBody = `<!DOCTYPE html>
     </table>
     {{ else }}
     <p>No documents ingested yet.</p>
+    {{ end }}
+
+    {{ if .Total }}
+    <p class="has-text-grey mt-4">
+        Showing {{ .StartShowing }}–{{ .EndShowing }} of {{ .Total }}
+        (page size {{ .Limit }}).
+        {{ if gt .PrevOffset -1 }}
+        <a class="button is-small ml-2" href="/documents?limit={{ .Limit }}&offset={{ .PrevOffset }}">Previous</a>
+        {{ end }}
+        {{ if gt .NextOffset -1 }}
+        <a class="button is-small ml-2" href="/documents?limit={{ .Limit }}&offset={{ .NextOffset }}">Next</a>
+        {{ end }}
+    </p>
     {{ end }}
 </body>
 </html>`
