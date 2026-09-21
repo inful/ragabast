@@ -68,7 +68,7 @@ func TestIngestAsync_TooLargeRejected(t *testing.T) {
 	q2 := replaceQueueMaxBytes(t, q, 100)
 	defer q2.Stop()
 
-	_, err := q2.Submit(strings.Repeat("a", 200), "192.0.2.1:1234")
+	_, err := q2.Submit(strings.Repeat("a", 200), "192.0.2.1:1234", "test-req-id")
 	require.ErrorIs(t, err, jobs.ErrJobContentTooLarge,
 		"oversized document must be rejected by the queue")
 }

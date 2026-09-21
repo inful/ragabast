@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/ragabast/internal/reqid"
 	"github.com/ragabast/internal/web/jobs"
 )
 
@@ -70,7 +71,7 @@ func registerIngestJobsOperations(api huma.API, q *jobs.Queue) {
 		// Re-use the same per-document size check the sync
 		// path enforces; ErrJobContentTooLarge is mapped to
 		// 413 by the queue.
-		j, err := q.Submit(input.Body.Content, clientIPFromContext(ctx))
+		j, err := q.Submit(input.Body.Content, clientIPFromContext(ctx), requestIDFromContext(ctx))
 		if err != nil {
 			if errors.Is(err, jobs.ErrJobContentTooLarge) {
 				return nil, &huma.ErrorModel{
@@ -174,4 +175,14 @@ func registerIngestJobsDisabled(api huma.API) {
 // limitation, not a correctness bug.
 func clientIPFromContext(_ context.Context) string {
 	return "unknown"
+}
+
+// requestIDFromContext returns the correlation ID for the
+// current HTTP request (set by requestIDMiddleware) or ""
+// when the call is not from the HTTP chain (CLI, tests).
+// Used by the async-ingest endpoint to stamp Job.RequestID so
+// the worker audit trail can be correlated with the request
+// that submitted it. See issue #11.
+func requestIDFromContext(ctx context.Context) string {
+	return reqid.FromContext(ctx)
 }

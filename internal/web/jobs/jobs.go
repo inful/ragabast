@@ -77,6 +77,13 @@ type Job struct {
 	// content). Optional so older test fixtures that do not
 	// set it still load.
 	RemoteAddr string `json:"remote_addr,omitempty"`
+
+	// RequestID is the correlation ID from the originating
+	// HTTP request (issue #11). Empty when the job was
+	// submitted by a non-HTTP caller (CLI, tests). Optional
+	// in JSON so older fixtures without the field still
+	// decode.
+	RequestID string `json:"request_id,omitempty"`
 }
 
 // ErrJobNotFound is returned by Queue.Get when the requested
@@ -166,8 +173,14 @@ func (q *Queue) Workers() int { return q.workers }
 // Submit creates a pending job on disk and enqueues its ID for
 // a worker. Returns the assigned job ID.
 //
+// requestID is the correlation ID from the originating HTTP
+// request (or "" when the caller is not an HTTP handler). It is
+// persisted on the Job and emitted in every audit line so the
+// ingest-job trail can be correlated with the request that
+// submitted it. See issue #11.
+//
 // Concurrency: safe from many goroutines.
-func (q *Queue) Submit(content, remoteAddr string) (*Job, error) {
+func (q *Queue) Submit(content, remoteAddr, requestID string) (*Job, error) {
 	if q.maxBytes > 0 && len(content) > q.maxBytes {
 		return nil, ErrJobContentTooLarge
 	}
@@ -178,6 +191,7 @@ func (q *Queue) Submit(content, remoteAddr string) (*Job, error) {
 		Status:     StatusPending,
 		CreatedAt:  time.Now().UTC(),
 		RemoteAddr: remoteAddr,
+		RequestID:  requestID,
 	}
 
 	if err := q.write(j); err != nil {
@@ -471,7 +485,7 @@ func (q *Queue) processOne(id string, svc Service, audit AuditFunc) {
 	j.Status = StatusProcessing
 	j.StartedAt = &now
 	if audit != nil {
-		audit("jobs.started", "job_id", id, "remote_addr", j.RemoteAddr, "bytes", len(j.Content))
+		audit("jobs.started", append(jobAuditFields(j), "bytes", len(j.Content))...)
 	}
 	if werr := q.writeAtPath(j, q.processingPath(id)); werr != nil && audit != nil {
 		audit("jobs.mark_processing_error", "job_id", id, "error", werr.Error())
@@ -485,14 +499,14 @@ func (q *Queue) processOne(id string, svc Service, audit AuditFunc) {
 		j.Status = StatusFailed
 		j.Error = err.Error()
 		if audit != nil {
-			audit("jobs.failed", "job_id", id, "remote_addr", j.RemoteAddr, "error", err.Error())
+			audit("jobs.failed", append(jobAuditFields(j), "error", err.Error())...)
 		}
 	} else {
 		j.Status = StatusCompleted
 		j.DocumentID = docID
 		j.Chunks = chunks
 		if audit != nil {
-			audit("jobs.completed", "job_id", id, "remote_addr", j.RemoteAddr, "document_id", docID, "chunks", chunks)
+			audit("jobs.completed", append(jobAuditFields(j), "document_id", docID, "chunks", chunks)...)
 		}
 	}
 
@@ -510,6 +524,21 @@ func (q *Queue) processOne(id string, svc Service, audit AuditFunc) {
 // path returns the canonical .json path for a job ID.
 func (q *Queue) path(id string) string {
 	return filepath.Join(q.dir, id+".json")
+}
+
+// jobAuditFields returns the standard prefix of every per-job
+// audit line: job_id, remote_addr, and (when present) request_id.
+// Centralizing this keeps the three call sites in processOne
+// (started/failed/completed) consistent, and lets the request_id
+// key be omitted cleanly for non-HTTP callers — instead of
+// emitting "request_id=" with an empty value, the field is just
+// absent from the audit line.
+func jobAuditFields(j *Job) []any {
+	fields := []any{"job_id", j.ID, "remote_addr", j.RemoteAddr}
+	if j.RequestID != "" {
+		fields = append(fields, "request_id", j.RequestID)
+	}
+	return fields
 }
 
 // processingPath returns the .processing.json path used
