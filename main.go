@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/ragabast/cmd"
+	"github.com/ragabast/internal/logging"
 )
 
 // version is overridden at build time via:
@@ -17,6 +19,13 @@ import (
 var version = "dev"
 
 func main() {
+	// Initialize the process-wide structured logger before
+	// anything else logs. RAGABAST_LOG_FORMAT=json switches
+	// the output to JSON for log shippers; the default is
+	// slog.NewTextHandler, which is line-based key=value pairs
+	// that stay grep-friendly for operators.
+	logging.Init()
+
 	var cli cmd.CLI
 
 	ctx := kong.Parse(
@@ -35,6 +44,7 @@ func main() {
 
 	err := ctx.Run()
 	if err != nil {
+		slog.Error("command failed", "error", err)
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
