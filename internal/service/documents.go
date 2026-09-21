@@ -71,7 +71,14 @@ func (s *Service) GetDocument(ctx context.Context, documentID string) (*models.D
 
 // DeleteDocument removes a document from the system.
 func (s *Service) DeleteDocument(ctx context.Context, documentID string) error {
-	return s.vectorOps.DeleteDocument(ctx, documentID)
+	if err := s.vectorOps.DeleteDocument(ctx, documentID); err != nil {
+		return err
+	}
+	// Invalidate the query cache (issue #13): removing
+	// documents shifts result rankings. Conservative
+	// whole-cache clear — same policy as IngestDocument.
+	s.cache.Clear()
+	return nil
 }
 
 // GetChunk retrieves a specific chunk.
@@ -81,5 +88,10 @@ func (s *Service) GetChunk(ctx context.Context, chunkID string) (*models.Chunk, 
 
 // DeleteChunk removes a specific chunk.
 func (s *Service) DeleteChunk(ctx context.Context, chunkID string) error {
-	return s.vectorOps.DeleteChunk(ctx, chunkID)
+	if err := s.vectorOps.DeleteChunk(ctx, chunkID); err != nil {
+		return err
+	}
+	// Same invalidation policy as DeleteDocument.
+	s.cache.Clear()
+	return nil
 }

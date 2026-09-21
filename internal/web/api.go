@@ -22,6 +22,7 @@ type serviceAPI interface {
 	DeleteDocument(ctx context.Context, documentID string) error
 	SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error)
 	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
+	QueryCacheStats() service.QueryCacheStats
 	GetNormalizedTags(ctx context.Context) ([]string, error)
 	GetNormalizedCategories(ctx context.Context) ([]string, error)
 	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)

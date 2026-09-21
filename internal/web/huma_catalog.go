@@ -12,6 +12,21 @@ type healthResponseBody struct {
 	Status string `json:"status"`
 }
 
+// queryCacheHealthStatus surfaces the LRU query cache
+// counters (issue #13). Capacity=0 means the cache is
+// disabled — every query runs end-to-end. Operators
+// monitoring hit-rate should compute it from
+// `hits / lookups`; emitting both raw counters lets the
+// dashboard render the ratio without recomputing.
+type queryCacheHealthStatus struct {
+	Enabled  bool  `json:"enabled"`
+	Capacity int   `json:"capacity"`
+	Size     int   `json:"size"`
+	Hits     int64 `json:"hits"`
+	Misses   int64 `json:"misses"`
+	Lookups  int64 `json:"lookups"`
+}
+
 // healthFullResponseBody carries the response of /api/health/full.
 // ingest_queue is always present; when async ingest is disabled
 // (AsyncIngestQueueDir is empty), the ingest_queue.enabled flag
@@ -23,6 +38,7 @@ type healthFullResponseBody struct {
 	VectorDB    string                  `json:"vector_db"`
 	EmbedServer string                  `json:"embeddings_server"`
 	IngestQueue ingestQueueHealthStatus `json:"ingest_queue"`
+	QueryCache  queryCacheHealthStatus  `json:"query_cache"`
 }
 
 type ingestQueueHealthStatus struct {
@@ -57,6 +73,9 @@ func buildHealthFull(ctx context.Context, svc serviceAPI) (*healthFullResponseBo
 		VectorDB:    "ok",
 		EmbedServer: "ok",
 		IngestQueue: ingestQueueHealthStatus{Enabled: false},
+		// QueryCache is populated below. Default zero
+		// values match the "cache disabled" state.
+		QueryCache: queryCacheHealthStatus{},
 	}
 
 	// Basic checks first — these are the contract /api/health
@@ -94,6 +113,18 @@ func buildHealthFull(ctx context.Context, svc serviceAPI) (*healthFullResponseBo
 					"workers may be stuck",
 			)
 		}
+	}
+
+	// Query cache stats (issue #13). Capacity=0 disables
+	// the cache and the Enabled flag flips accordingly.
+	cs := svc.QueryCacheStats()
+	body.QueryCache = queryCacheHealthStatus{
+		Enabled:  cs.Capacity > 0,
+		Capacity: cs.Capacity,
+		Size:     cs.Size,
+		Hits:     cs.Hits,
+		Misses:   cs.Misses,
+		Lookups:  cs.Lookups,
 	}
 
 	return &body, nil
