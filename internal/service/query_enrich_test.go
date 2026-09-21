@@ -74,6 +74,7 @@ func TestService_QueryDebugWithOptions_EnrichesResultsWithDocbuilderURL(t *testi
 		cfg.Ollama.EffectiveEmbeddingAPIKey(),
 		cfg.Ollama.Timeout,
 		cfg.Ollama.EmbeddingDimensions,
+		cfg.Ollama.EmbeddingConcurrency,
 	)
 	vectorOps := vector.NewVectorOperations(db, embeddings)
 

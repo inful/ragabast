@@ -68,6 +68,7 @@ func NewService(cfg *config.Config) (*Service, error) {
 		cfg.Ollama.EffectiveEmbeddingAPIKey(),
 		cfg.Ollama.Timeout,
 		cfg.Ollama.EmbeddingDimensions,
+		cfg.Ollama.EmbeddingConcurrency,
 	)
 
 	vectorOps := vector.NewVectorOperations(db, embeddings)

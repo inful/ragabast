@@ -100,6 +100,15 @@ type OllamaConfig struct {
 	// (any positive integer). Leave at 0 to disable truncation.
 	EmbeddingDimensions int `env:"OLLAMA_EMBEDDING_DIMENSIONS" yaml:"embedding_dimensions"`
 
+	// EmbeddingConcurrency controls the parallel worker pool
+	// that GenerateChunkEmbeddings uses for the ingest path.
+	// When >1, chunks are split into min(concurrency, n) equal
+	// sub-batches and embedded concurrently — useful when the
+	// server supports parallel requests (Ollama's
+	// OLLAMA_NUM_PARALLEL, vLLM's --max-num-seqs). Default 4
+	// matches Ollama's default. Set to 1 to disable the pool.
+	EmbeddingConcurrency int `env:"OLLAMA_EMBEDDING_CONCURRENCY" yaml:"embedding_concurrency"`
+
 	// ChatBaseURL is the OpenAI-compatible chat completions server endpoint.
 	// Defaults to the same local Ollama instance (which exposes
 	// /v1/chat/completions from 0.5+), but can point at vLLM, llama.cpp
@@ -311,11 +320,12 @@ func DefaultConfig() *Config {
 
 	return &Config{
 		Ollama: OllamaConfig{
-			BaseURL:        "http://localhost:11434",
-			ChatBaseURL:    "http://localhost:11434",
-			ChatModel:      "gemma:2b",
-			EmbeddingModel: "nomic-embed-text:v1.5",
-			Timeout:        30 * time.Second,
+			BaseURL:              "http://localhost:11434",
+			ChatBaseURL:          "http://localhost:11434",
+			ChatModel:            "gemma:2b",
+			EmbeddingModel:       "nomic-embed-text:v1.5",
+			Timeout:              30 * time.Second,
+			EmbeddingConcurrency: 4,
 			// RAG-friendly defaults: low temperature + conservative sampling.
 			Temperature: &defaultTemp,
 			Options: map[string]any{
