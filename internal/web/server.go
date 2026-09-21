@@ -76,6 +76,13 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.RealIP)
+	// clientIPMiddleware runs immediately after chi's RealIP
+	// so r.RemoteAddr has already been rewritten from
+	// X-Forwarded-For / X-Real-IP headers. The middleware
+	// extracts the host portion and stores it on the
+	// request context; downstream callers (audit log,
+	// rate-limit) read it via ClientIPFromContext.
+	router.Use(clientIPMiddleware())
 	router.Use(maxBytesReaderMiddleware)
 	router.Use(middleware.Timeout(60 * time.Second))
 
