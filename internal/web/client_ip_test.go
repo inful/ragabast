@@ -92,9 +92,10 @@ func TestClientIPMiddleware_HandlesNoPort(t *testing.T) {
 
 // TestClientIPMiddleware_EmptyRemoteAddr documents that an
 // empty RemoteAddr (rare; only seen in some test fixtures)
-// is recorded as empty on the context. ClientIPFromContext
-// returns "unknown" in that case — the audit log fallback
-// for the truly-missing case.
+// collapses to the "unknown" fallback rather than producing
+// an empty audit field. FromContext translates a stored ""
+// into "unknown" — the caller-facing audit value is always
+// either a real IP or the literal "unknown".
 func TestClientIPMiddleware_EmptyRemoteAddr(t *testing.T) {
 	var ctxIP string
 	h := clientIPMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,8 +107,8 @@ func TestClientIPMiddleware_EmptyRemoteAddr(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 
-	assert.Empty(t, ctxIP,
-		"empty RemoteAddr is recorded as empty on the context")
+	assert.Equal(t, "unknown", ctxIP,
+		"empty RemoteAddr collapses to the unknown fallback")
 }
 
 // TestClientIPFromContext_UnknownWhenAbsent pins the no-

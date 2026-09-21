@@ -161,17 +161,11 @@ func registerIngestJobsDisabled(api huma.API) {
 	})
 }
 
-// clientIPFromContext extracts the client IP from the Huma
-// context if a chi request is attached; otherwise returns
-// "unknown". The async path uses this only for the audit
-// log — the actual rate-limit middleware sees the chi
-// request directly.
-//
-// We can't easily reach chi's request from the Huma
-// middleware interface, so this returns "unknown" until
-// upstream surfaces r.RemoteAddr. The audit line still has
-// the job_id and document_id; the missing IP is a known
-// limitation, not a correctness bug.
-func clientIPFromContext(_ context.Context) string {
-	return "unknown"
+// clientIPFromContext extracts the client IP from the
+// request context if a chi request passed through the
+// clientIPMiddleware; otherwise returns "unknown". The async
+// path uses this only for the audit log — the actual
+// rate-limit middleware sees the chi request directly.
+func clientIPFromContext(ctx context.Context) string {
+	return ClientIPFromContext(ctx)
 }
