@@ -1,11 +1,11 @@
 package web
 
 import (
-	"context"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/ragabast/internal/reqid"
 )
 
 // requestIDHeader is the HTTP header the middleware reads on
@@ -21,31 +21,12 @@ const requestIDHeader = "X-Request-ID"
 // megabytes of log output per request.
 const maxRequestIDLen = 128
 
-// requestIDContextKey is the typed key for storing the request
-// ID in context.Context. As an unexported struct type, it cannot
-// collide with any string-typed key an external caller might use,
-// so context.WithValue returns "" rather than a stale value when
-// the middleware did not run.
-type requestIDContextKey struct{}
-
-// RequestIDFromContext returns the request ID stored on ctx, or
-// the empty string when no middleware set one. Callers should
-// pass this value to log lines and async-job submissions so
-// downstream audit trails can be correlated with the originating
-// HTTP request. The empty-string fallback is intentional: CLI
-// commands and worker goroutines run outside the HTTP chain and
-// should see a defined zero value rather than panic.
-func RequestIDFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(requestIDContextKey{}).(string)
-	return v
-}
-
 // requestIDMiddleware returns a chi middleware that ensures
 // every request carries an X-Request-ID. Reads the header when
 // the client supplied a valid value; generates a new UUID
 // otherwise. Stores the resolved ID on the request context via
-// RequestIDFromContext and echoes it on the response so the
-// caller can see which ID the server assigned.
+// reqid.WithID and echoes it on the response so the caller can
+// see which ID the server assigned.
 //
 // Install this middleware at the top of the chi chain so every
 // subsequent handler — including auth failures and rate-limit
@@ -58,7 +39,7 @@ func requestIDMiddleware() func(http.Handler) http.Handler {
 				id = uuid.NewString()
 			}
 			w.Header().Set(requestIDHeader, id)
-			ctx := context.WithValue(r.Context(), requestIDContextKey{}, id)
+			ctx := reqid.WithID(r.Context(), id)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

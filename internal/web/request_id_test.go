@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ragabast/internal/reqid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ import (
 func TestRequestIDMiddleware_GeneratesUUIDWhenAbsent(t *testing.T) {
 	var ctxID string
 	h := requestIDMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctxID = RequestIDFromContext(r.Context())
+		ctxID = reqid.FromContext(r.Context())
 	}))
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
@@ -38,7 +39,7 @@ func TestRequestIDMiddleware_EchoesClientSuppliedID(t *testing.T) {
 	const supplied = "client-supplied-correlation-id-abc-123"
 
 	h := requestIDMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, supplied, RequestIDFromContext(r.Context()),
+		assert.Equal(t, supplied, reqid.FromContext(r.Context()),
 			"context value matches the echoed header")
 	}))
 
@@ -111,19 +112,13 @@ func TestRequestIDMiddleware_RejectsControlChars(t *testing.T) {
 // fabricated value. Useful for code paths that run both inside
 // and outside the HTTP server (CLI commands, async workers).
 func TestRequestIDFromContext_EmptyWhenAbsent(t *testing.T) {
-	assert.Empty(t, RequestIDFromContext(context.Background()))
-}
-
-// TestRequestIDFromContext_ReturnsSet pins the round-trip: a
-// value stored on the context is retrievable.
-func TestRequestIDFromContext_ReturnsSet(t *testing.T) {
-	ctx := context.WithValue(context.Background(), requestIDContextKey{}, "abc")
-	assert.Equal(t, "abc", RequestIDFromContext(ctx))
+	assert.Empty(t, reqid.FromContext(context.Background()))
 }
 
 // TestIsValidRequestID covers the validator's edge cases. The
-// rules are: non-empty, ≤ maxRequestIDLen chars, printable ASCII
-// only (no newlines, tabs, control chars, or non-ASCII runes).
+// rules are: non-empty after trim, ≤ maxRequestIDLen chars,
+// printable ASCII only (no newlines, tabs, control chars, or
+// non-ASCII runes).
 func TestIsValidRequestID(t *testing.T) {
 	long := strings.Repeat("a", 129)
 	cases := []struct {

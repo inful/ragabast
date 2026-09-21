@@ -7,6 +7,7 @@
 // value. Each layer:
 //   - writes the ID with WithID(ctx, id)
 //   - reads the ID with FromContext(ctx)
+//
 // and the underlying context.Context plumbing is identical.
 //
 // The key is an unexported struct type so it cannot collide with
