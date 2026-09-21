@@ -242,6 +242,227 @@ func (db *VectorDB) AddChunk(ctx context.Context, chunk *models.Chunk, embedding
 	return nil
 }
 
+// DocumentMetadataPatch captures which metadata fields
+// to update on a document's chunks. A nil field means
+// "don't touch"; an empty slice means "clear". Tags are
+// handled separately (merge vs replace) at the service
+// layer because the semantics are operation-specific.
+type DocumentMetadataPatch struct {
+	DocumentID string
+	Tags       []string // nil = no change; otherwise the post-merge value
+	Categories []string // nil = no change; non-nil = replace
+	URLs       []string // nil = no change; non-nil = replace
+	MergeTags  bool     // when Tags != nil: true = merge into existing, false = replace
+}
+
+// UpdateDocumentMetadata patches the chunk metadata
+// (tags, categories, urls) for every chunk belonging to
+// documentID. Tags merge/replace semantics are handled
+// here based on patch.MergeTags. Categories and URLs are
+// replaced wholesale when patch specifies them — they're
+// always an explicit operator declaration.
+//
+// The implementation walks GetChunksByDocument, mutates
+// each chunk's metadata, deletes the old chunks from
+// chromem-go, and re-adds them with the SAME chunk IDs
+// and embeddings + the new metadata. Embeddings are not
+// re-computed (metadata-only update). The chunk_id is
+// stable across the update.
+//
+// Returns models.ErrNotFound when no chunks match
+// documentID so callers can surface "no such document"
+// without inspecting an empty result. The caller does
+// the existence check; this method doesn't have a
+// separate "exists" call so we save a chunk scan.
+func (db *VectorDB) UpdateDocumentMetadata(ctx context.Context, patch DocumentMetadataPatch) error {
+	if patch.DocumentID == "" {
+		return fmt.Errorf("%w: empty document_id", models.ErrInvalidInput)
+	}
+
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	chunks, err := db.getChunksByDocumentLocked(ctx, patch.DocumentID)
+	if err != nil {
+		return fmt.Errorf("read chunks for update: %w", err)
+	}
+	if len(chunks) == 0 {
+		return models.ErrNotFound
+	}
+
+	// Re-derive each chunk's metadata with the patch
+	// applied. We don't store the original embeddings on
+	// the chunks themselves — they're in chromem-go's
+	// collection — so we need to fetch the embeddings
+	// back from chromem-go. Do this by re-walking the
+	// same query we used to get the chunks.
+	embeddings, err := db.embeddingsForChunksLocked(ctx, chunks)
+	if err != nil {
+		return fmt.Errorf("fetch embeddings for update: %w", err)
+	}
+
+	// Apply the patch to each chunk's metadata.
+	for _, chunk := range chunks {
+		applyMetadataPatch(chunk, patch)
+	}
+
+	// Delete the old chunks, then re-add with the SAME
+	// IDs + same embeddings + updated metadata. Re-adding
+	// with the same IDs overwrites chromem-go's view of
+	// those chunks; the embeddings are unchanged so the
+	// similarity scores stay identical.
+	if err := db.collection.Delete(ctx, nil, map[string]string{"document_id": patch.DocumentID}); err != nil {
+		return fmt.Errorf("delete old chunks: %w", err)
+	}
+
+	// Use the existing AddChunksBatch path so dimension
+	// checking + the same error wrapping apply.
+	if err := db.AddChunksBatch(ctx, chunks, embeddings); err != nil {
+		return fmt.Errorf("re-add with new metadata: %w", err)
+	}
+	return nil
+}
+
+// getChunksByDocumentLocked is the lock-free variant of
+// GetChunksByDocument — the caller must already hold
+// db.mu (write lock). UpdateDocumentMetadata uses it to
+// avoid re-locking between the read and the re-write.
+func (db *VectorDB) getChunksByDocumentLocked(ctx context.Context, documentID string) ([]*models.Chunk, error) {
+	count := db.collection.Count()
+	if count == 0 {
+		return []*models.Chunk{}, nil
+	}
+	dummyEmbedding := make([]float32, db.embeddingDimension)
+	options := chromem.QueryOptions{
+		QueryEmbedding: dummyEmbedding,
+		NResults:       min(count, 1000),
+		Where:          map[string]string{"document_id": documentID},
+	}
+	results, err := db.collection.QueryWithOptions(ctx, options)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get document chunks: %w", err)
+	}
+	chunks := make([]*models.Chunk, len(results))
+	for i, result := range results {
+		chunks[i] = chunkFromResult(result)
+	}
+	return chunks, nil
+}
+
+// embeddingsForChunksLocked runs the same query as
+// getChunksByDocumentLocked but only to extract the
+// embedding vector from each result. Used by
+// UpdateDocumentMetadata so the embeddings survive the
+// delete + re-add cycle.
+func (db *VectorDB) embeddingsForChunksLocked(ctx context.Context, chunks []*models.Chunk) ([][]float32, error) {
+	count := db.collection.Count()
+	if count == 0 {
+		return nil, nil
+	}
+	// Build a where filter that matches the chunks we
+	// care about — same shape as getChunksByDocumentLocked
+	// but parameterised so this can also work for bulk
+	// updates across many documents (future expansion).
+	dummyEmbedding := make([]float32, db.embeddingDimension)
+	options := chromem.QueryOptions{
+		QueryEmbedding: dummyEmbedding,
+		NResults:       min(count, 1000),
+		Where:          map[string]string{"document_id": chunks[0].DocumentID},
+	}
+	results, err := db.collection.QueryWithOptions(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	// Map by chunk ID so we don't rely on result order.
+	byID := make(map[string][]float32, len(results))
+	for _, r := range results {
+		id := r.Metadata["chunk_id"]
+		if id != "" {
+			byID[id] = r.Embedding
+		}
+	}
+	out := make([][]float32, len(chunks))
+	for i, chunk := range chunks {
+		emb, ok := byID[chunk.ID]
+		if !ok {
+			return nil, fmt.Errorf("chunk %s: embedding not found in collection", chunk.ID)
+		}
+		out[i] = emb
+	}
+	return out, nil
+}
+
+// applyMetadataPatch mutates chunk's metadata in-place
+// per the patch. Tags merge-or-replace based on
+// patch.MergeTags; categories and URLs always replace
+// wholesale. Empty-slice fields clear the corresponding
+// metadata; nil fields leave it untouched.
+//
+// (Helper, not exported — UpdateDocumentMetadata owns the
+// merge semantics; the vector layer just persists.)
+func applyMetadataPatch(chunk *models.Chunk, patch DocumentMetadataPatch) {
+	if patch.Tags != nil {
+		if patch.MergeTags {
+			chunk.DocumentTags = mergeUniqueStrings(chunk.DocumentTags, patch.Tags)
+		} else {
+			chunk.DocumentTags = copySlice(patch.Tags)
+		}
+	}
+	if patch.Categories != nil {
+		chunk.DocumentCategories = copySlice(patch.Categories)
+	}
+	if patch.URLs != nil {
+		chunk.DocumentURLs = copySlice(patch.URLs)
+	}
+}
+
+func mergeUniqueStrings(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, s := range a {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	for _, s := range b {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func copySlice(s []string) []string {
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
+}
+
+// chunkFromResult converts a chromem-go query result into a
+// models.Chunk using the metadata's stored chunk_id.
+// Exported by the existing chunk parsing logic above; we
+// just call into it from the locked variants.
+func chunkFromResult(result chromem.Result) *models.Chunk {
+	return &models.Chunk{
+		ID:                 result.Metadata["chunk_id"],
+		DocumentID:         result.Metadata["document_id"],
+		Content:            result.Content,
+		HeaderPath:         result.Metadata["header_path"],
+		Level:              0,
+		DocumentTitle:      result.Metadata["document_title"],
+		DocumentURLs:       splitMetadataList(result.Metadata["document_urls"]),
+		DocumentTags:       splitMetadataList(result.Metadata["document_tags"]),
+		DocumentCategories: splitMetadataList(result.Metadata["document_categories"]),
+		ParentID:           result.Metadata["parent_id"],
+		UID:                result.Metadata["uid"],
+		Fingerprint:        result.Metadata["fingerprint"],
+	}
+}
+
 // AddChunksBatch adds multiple chunks in a batch operation.
 func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, embeddings [][]float32) error {
 	if len(chunks) != len(embeddings) {

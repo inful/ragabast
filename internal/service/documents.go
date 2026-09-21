@@ -2,8 +2,11 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/vector"
 )
 
 // ListDocuments returns every ingested document. Kept as
@@ -94,4 +97,70 @@ func (s *Service) DeleteChunk(ctx context.Context, chunkID string) error {
 	// Same invalidation policy as DeleteDocument.
 	s.cache.Clear()
 	return nil
+}
+
+// BulkUpdateDocumentsResult is one element of the bulk
+// update response array. Status mirrors the per-item
+// result: "ok" for a successful update, "error" for a
+// failure (with a non-empty Error field).
+type BulkUpdateDocumentsResult struct {
+	DocumentID string `json:"document_id"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+}
+
+// BulkUpdateDocuments patches metadata (tags, categories,
+// URLs) on each document in patches. mode controls tag
+// semantics: "merge" (the default) keeps existing tags
+// and adds new ones, deduped; "replace" overwrites tags
+// wholesale. Categories and URLs always replace wholesale
+// when the patch sets them — they're explicit operator
+// declarations, so there's nothing to merge with.
+//
+// Per-document failures (missing doc, partial write
+// failure) are reported as per-item errors without
+// aborting the rest of the batch. The function returns
+// nil on any partial success; the caller inspects the
+// per-item results array.
+//
+// Returns ErrInvalidInput when patches is empty so
+// callers (CLI, huma) can surface 400 instead of doing
+// no work silently.
+func (s *Service) BulkUpdateDocuments(ctx context.Context, patches []vector.DocumentMetadataPatch, mode string) ([]BulkUpdateDocumentsResult, error) {
+	if len(patches) == 0 {
+		return nil, models.ErrInvalidInput
+	}
+	// Reject empty document_ids up-front rather than
+	// letting them fall through to "document not found".
+	// Without this, the test passes with status=ok and
+	// the fake happens to match the empty string against
+	// its own empty-doc entry — a real operator with no
+	// empty-doc entry would see a confusing "not found"
+	// instead of a clear "your patch is malformed".
+	for i, p := range patches {
+		if strings.TrimSpace(p.DocumentID) == "" {
+			return nil, fmt.Errorf("%w: patch[%d].document_id is empty", models.ErrInvalidInput, i)
+		}
+		p.DocumentID = strings.TrimSpace(p.DocumentID)
+	}
+	mergeTags := mode != "replace"
+
+	results := make([]BulkUpdateDocumentsResult, len(patches))
+	for i, patch := range patches {
+		patch.MergeTags = mergeTags
+		err := s.vectorOps.UpdateDocumentMetadata(ctx, patch)
+		results[i].DocumentID = patch.DocumentID
+		if err != nil {
+			results[i].Status = "error"
+			results[i].Error = err.Error()
+			continue
+		}
+		results[i].Status = "ok"
+	}
+	// Cache invalidation: bulk updates shift result
+	// rankings (tags/categories drive filters, URLs drive
+	// result surfaces). Drop everything — same policy as
+	// DeleteDocument.
+	s.cache.Clear()
+	return results, nil
 }

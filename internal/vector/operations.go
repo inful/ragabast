@@ -229,6 +229,17 @@ func (vo *VectorOperations) GetUniqueDocuments(ctx context.Context) ([]models.Do
 	return vo.db.GetUniqueDocuments(ctx)
 }
 
+// UpdateDocumentMetadata patches tags/categories/URLs on
+// every chunk belonging to patch.DocumentID. Tags merge
+// or replace based on patch.MergeTags; categories and
+// URLs always replace wholesale. Returns models.ErrNotFound
+// when no chunks match (operator got the document_id
+// wrong). Embeddings are not re-computed — this is a
+// metadata-only update.
+func (vo *VectorOperations) UpdateDocumentMetadata(ctx context.Context, patch DocumentMetadataPatch) error {
+	return vo.db.UpdateDocumentMetadata(ctx, patch)
+}
+
 // GetUniqueDocumentsPaged returns a page of unique
 // documents plus the total corpus size. limit=0 means
 // "no limit" (return everything). See VectorDB for the

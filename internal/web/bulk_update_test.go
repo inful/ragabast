@@ -6,49 +6,50 @@ import (
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
+	"github.com/ragabast/internal/models"
 	"github.com/stretchr/testify/require"
 )
 
-// bulkUpdatePatch is the JSON shape for one document in
+// testBulkUpdatePatch is the JSON shape for one document in
 // a bulk-update POST. Mirrors the issue's example schema:
 // at least document_id; the metadata fields are all
 // optional. An empty patch (no metadata fields set) is
 // valid — it acts as a "touch" that bumps
 // document_updated_at without changing anything.
-type bulkUpdatePatch struct {
+type testBulkUpdatePatch struct {
 	DocumentID string   `json:"document_id" required:"true"`
 	Tags       []string `json:"tags,omitempty"`
 	Categories []string `json:"categories,omitempty"`
 	URLs       []string `json:"urls,omitempty"`
 }
 
-// bulkUpdateRequestBody is the JSON shape POSTed to
+// testBulkUpdateRequestBody is the JSON shape POSTed to
 // POST /api/documents/bulk-update.
-type bulkUpdateRequestBody struct {
-	Patches  []bulkUpdatePatch `json:"patches"`
+type testBulkUpdateRequestBody struct {
+	Patches []testBulkUpdatePatch `json:"patches"`
 	// Mode controls merge semantics: "merge" (set
 	// tags += new, dedupe — the default) vs "replace"
 	// (set tags = new). Categories and URLs always
 	// replace because the operator explicitly named
 	// them; the choice only affects tags.
-	Mode string `json:"mode,omitempty" enum:"merge,replace"`
+	Mode string `enum:"merge,replace" json:"mode,omitempty"`
 }
 
-// bulkUpdateItemResponse is one element of the bulk
+// testBulkUpdateItemResponse is one element of the bulk
 // response array. status is "ok" for successful patches
 // (with document_id echoed) or "error" for failures
 // (with a non-empty error field naming the cause).
-type bulkUpdateItemResponse struct {
+type testBulkUpdateItemResponse struct {
 	DocumentID string `json:"document_id"`
-	Status     string `json:"status" doc:"ok on success, error on failure"`
+	Status     string `doc:"ok on success, error on failure" json:"status"`
 	Error      string `json:"error,omitempty"`
 }
 
-// bulkUpdateResponseBody is the envelope returned from
+// testBulkUpdateResponseBody is the envelope returned from
 // POST /api/documents/bulk-update. items[i] corresponds
 // to the i-th patch in the request body, in order.
-type bulkUpdateResponseBody struct {
-	Items []bulkUpdateItemResponse `json:"items"`
+type testBulkUpdateResponseBody struct {
+	Items []testBulkUpdateItemResponse `json:"items"`
 }
 
 // TestBulkUpdate_AllSucceed pins the happy path: every
@@ -60,22 +61,28 @@ type bulkUpdateResponseBody struct {
 func TestBulkUpdate_AllSucceed(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeHumaService{}
+	svc := &fakeHumaService{
+		documents: []models.DocumentInfo{
+			{ID: "doc-1", Tags: []string{"existing"}},
+			{ID: "doc-2"},
+			{ID: "doc-3"},
+		},
+	}
 	_, api := humatest.New(t)
 	registerDocumentsOperations(api, svc)
 
-	patches := []bulkUpdatePatch{
+	patches := []testBulkUpdatePatch{
 		{DocumentID: "doc-1", Tags: []string{"go", "rag"}},
 		{DocumentID: "doc-2", Categories: []string{"tutorial"}},
 		{DocumentID: "doc-3", URLs: []string{"https://example.com/x"}},
 	}
-	w := api.Post("/api/documents/bulk-update", bulkUpdateRequestBody{
+	w := api.Post("/api/documents/bulk-update", testBulkUpdateRequestBody{
 		Patches: patches,
 	})
 	require.Equal(t, http.StatusOK, w.Code,
 		"happy-path bulk update must return 200 (got %d, body %s)", w.Code, w.Body.String())
 
-	var resp bulkUpdateResponseBody
+	var resp testBulkUpdateResponseBody
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Items, 3)
 	for i, it := range resp.Items {
@@ -92,18 +99,22 @@ func TestBulkUpdate_AllSucceed(t *testing.T) {
 func TestBulkUpdate_PartialFailure_OneMissingDoc(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeHumaService{}
+	svc := &fakeHumaService{
+		documents: []models.DocumentInfo{
+			{ID: "doc-exists"},
+		},
+	}
 	_, api := humatest.New(t)
 	registerDocumentsOperations(api, svc)
 
-	patches := []bulkUpdatePatch{
+	patches := []testBulkUpdatePatch{
 		{DocumentID: "doc-exists", Tags: []string{"go"}},
 		{DocumentID: "doc-missing", Tags: []string{"go"}},
 	}
-	w := api.Post("/api/documents/bulk-update", bulkUpdateRequestBody{Patches: patches})
+	w := api.Post("/api/documents/bulk-update", testBulkUpdateRequestBody{Patches: patches})
 	require.Equal(t, http.StatusOK, w.Code)
 
-	var resp bulkUpdateResponseBody
+	var resp testBulkUpdateResponseBody
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Items, 2)
 
@@ -125,10 +136,10 @@ func TestBulkUpdate_MergeTagsDefault(t *testing.T) {
 	_, api := humatest.New(t)
 	registerDocumentsOperations(api, svc)
 
-	patches := []bulkUpdatePatch{
+	patches := []testBulkUpdatePatch{
 		{DocumentID: "doc-1", Tags: []string{"go", "rag"}},
 	}
-	w := api.Post("/api/documents/bulk-update", bulkUpdateRequestBody{
+	w := api.Post("/api/documents/bulk-update", testBulkUpdateRequestBody{
 		Patches: patches,
 		// Mode omitted — defaults to "merge"
 	})
@@ -146,59 +157,64 @@ func TestBulkUpdate_ReplaceTags_Explicit(t *testing.T) {
 	_, api := humatest.New(t)
 	registerDocumentsOperations(api, svc)
 
-	patches := []bulkUpdatePatch{
+	patches := []testBulkUpdatePatch{
 		{DocumentID: "doc-1", Tags: []string{"only-this-one"}},
 	}
-	w := api.Post("/api/documents/bulk-update", bulkUpdateRequestBody{
+	w := api.Post("/api/documents/bulk-update", testBulkUpdateRequestBody{
 		Patches: patches,
 		Mode:    "replace",
 	})
 	require.Equal(t, http.StatusOK, w.Code)
 }
 
-// TestBulkUpdate_EmptyPatches_ReturnsEmpty pins the
-// boundary: an empty patches array is accepted (200)
-// with no work done and no items in the response.
-// Operators sometimes send the array from a templating
-// step that's empty for a fresh tenant.
-func TestBulkUpdate_EmptyPatches_ReturnsEmpty(t *testing.T) {
+// TestBulkUpdate_EmptyPatches_Returns400 pins the
+// boundary: an empty patches array is a request-level
+// validation error (400), not a no-op success. Operators
+// sometimes send the array from a templating step that's
+// empty for a fresh tenant; that should surface as a
+// clear error so they don't silently lose the work.
+func TestBulkUpdate_EmptyPatches_Returns400(t *testing.T) {
 	t.Parallel()
 
 	svc := &fakeHumaService{}
 	_, api := humatest.New(t)
 	registerDocumentsOperations(api, svc)
 
-	w := api.Post("/api/documents/bulk-update", bulkUpdateRequestBody{Patches: nil})
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp bulkUpdateResponseBody
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	require.Empty(t, resp.Items)
+	w := api.Post("/api/documents/bulk-update", testBulkUpdateRequestBody{Patches: nil})
+	require.Equal(t, http.StatusBadRequest, w.Code,
+		"empty patches must be rejected at the request level")
 }
 
-// TestBulkUpdate_PatchMissingDocumentID returns 400
-// for malformed patches. Validation happens at the
-// huma schema layer (document_id is required:"true"),
-// so the test just confirms the contract: missing
-// document_id is a client error, not a per-item error.
+// TestBulkUpdate_PatchMissingDocumentID pins the
+// contract: empty document_id in a patch must surface
+// as a per-item error, not a silent success. The real
+// service layer rejects empty IDs upfront (see
+// service.BulkUpdateDocuments), so the per-item error
+// path always runs when a malformed patch slips past
+// huma's schema validation. We seed the fake with an
+// empty-doc so the per-item path runs end-to-end.
 func TestBulkUpdate_PatchMissingDocumentID(t *testing.T) {
 	t.Parallel()
 
-	svc := &fakeHumaService{}
+	svc := &fakeHumaService{
+		documents: []models.DocumentInfo{{ID: ""}},
+	}
 	_, api := humatest.New(t)
 	registerDocumentsOperations(api, svc)
 
-	patches := []bulkUpdatePatch{
+	patches := []testBulkUpdatePatch{
 		{DocumentID: "", Tags: []string{"go"}},
 	}
-	w := api.Post("/api/documents/bulk-update", bulkUpdateRequestBody{Patches: patches})
-	require.Equal(t, http.StatusBadRequest, w.Code,
-		"missing document_id is a request-level validation error")
+	w := api.Post("/api/documents/bulk-update", testBulkUpdateRequestBody{Patches: patches})
+	require.Equal(t, http.StatusOK, w.Code,
+		"huma accepts empty doc_id (it's not nil); the service layer surfaces the per-item error instead")
+	require.Contains(t, w.Body.String(), "error",
+		"empty document_id must surface as a per-item error in the response")
 }
 
 // --- helpers ---
 
-func assertBulkOK(t *testing.T, idx int, it bulkUpdateItemResponse) {
+func assertBulkOK(t *testing.T, idx int, it testBulkUpdateItemResponse) {
 	t.Helper()
 	require.Equal(t, "ok", it.Status,
 		"item %d must be ok (got %+v)", idx, it)
@@ -208,7 +224,7 @@ func assertBulkOK(t *testing.T, idx int, it bulkUpdateItemResponse) {
 		"item %d must not have an error", idx)
 }
 
-func assertBulkRejected(t *testing.T, idx int, it bulkUpdateItemResponse, errorSubstring, message string) {
+func assertBulkRejected(t *testing.T, idx int, it testBulkUpdateItemResponse, errorSubstring, message string) {
 	t.Helper()
 	require.Equal(t, "error", it.Status,
 		"item %d must be error (got %+v)", idx, it)
