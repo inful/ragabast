@@ -16,23 +16,30 @@ import (
 // Service orchestrates the RAG system operations. Its methods are
 // split across ingest.go (writes), query.go (LLM-backed reads),
 // documents.go (document and chunk CRUD), catalog.go (tags and
-// categories), and stats.go (health and counters); this file only
-// holds the type and its constructor so the wiring is visible at
-// a glance.
+// categories), chat_session.go (chat history), and stats.go
+// (health and counters); this file only holds the type and its
+// constructor so the wiring is visible at a glance.
 //
 // cache holds the bounded LRU query cache (issue #13). nil means
 // "cache disabled" — Search/HybridSearch run every time without
 // touching a cache. Clear() is invoked from the write paths
 // (IngestDocument, DeleteDocument, DeleteChunk) because any
 // state change could shift query result rankings.
+//
+// chatSessions holds the in-memory chat history store (issue
+// #22). Nil means "history disabled" — every /chat/message
+// request is one-shot, with no follow-up context threaded
+// into the LLM call. The chat handler still works without a
+// session store; it's just stateless.
 type Service struct {
-	config     *config.Config
-	parser     *parser.DocbuilderParser
-	chunker    *chunker.Chunker
-	vectorOps  *vector.VectorOperations
-	llmClient  llmChatClient
-	cache      *querycache.Cache[[]models.SearchResult]
-	embedModel string // captured at construction so the cache key stays stable
+	config       *config.Config
+	parser       *parser.DocbuilderParser
+	chunker      *chunker.Chunker
+	vectorOps    *vector.VectorOperations
+	llmClient    llmChatClient
+	cache        *querycache.Cache[[]models.SearchResult]
+	chatSessions *ChatSessionStore
+	embedModel   string // captured at construction so the cache key stays stable
 }
 
 // buildDocbuilderURL returns the synthetic permalink for a
@@ -119,12 +126,13 @@ func NewService(cfg *config.Config) (*Service, error) {
 	cacheTTL := cfg.Ragabast.QueryCacheTTL
 
 	return &Service{
-		config:     cfg,
-		parser:     docParser,
-		chunker:    docChunker,
-		vectorOps:  vectorOps,
-		llmClient:  newLLMChatClient(cfg),
-		cache:      querycache.New[[]models.SearchResult](cacheSize, cacheTTL),
-		embedModel: cfg.Ollama.EmbeddingModel,
+		config:       cfg,
+		parser:       docParser,
+		chunker:      docChunker,
+		vectorOps:    vectorOps,
+		llmClient:    newLLMChatClient(cfg),
+		cache:        querycache.New[[]models.SearchResult](cacheSize, cacheTTL),
+		chatSessions: NewChatSessionStore(ChatSessionStoreConfig{MaxTurns: cfg.Ragabast.ChatSessionMaxTurns}),
+		embedModel:   cfg.Ollama.EmbeddingModel,
 	}, nil
 }

@@ -92,6 +92,14 @@ type RagabastConfig struct {
 	// live until evicted by capacity). Format: a Go
 	// duration string (e.g. "5m", "1h").
 	QueryCacheTTL time.Duration `env:"RAGABAST_QUERY_CACHE_TTL" yaml:"query_cache_ttl,omitempty"`
+
+	// ChatSessionMaxTurns caps the number of user/
+	// assistant exchanges persisted per chat session
+	// (issue #22). Oldest turns are dropped FIFO when
+	// the session exceeds this — operators get enough
+	// context for follow-up questions without unbounded
+	// memory growth. Default 20 (≈40 messages).
+	ChatSessionMaxTurns int `env:"RAGABAST_CHAT_SESSION_MAX_TURNS" yaml:"chat_session_max_turns,omitempty"`
 }
 
 // OllamaConfig holds configuration for the embedding and chat-completions

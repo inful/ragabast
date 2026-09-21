@@ -3,9 +3,7 @@ package service
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/ragabast/internal/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -52,7 +50,7 @@ func TestChatSessionStore_AppendTrimsToMaxTurns(t *testing.T) {
 	t.Parallel()
 
 	store := NewChatSessionStore(ChatSessionConfig{MaxTurns: 3})
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		store.Append("s", []ChatMessage{
 			{Role: "user", Content: "q"},
 			{Role: "assistant", Content: "a"},
@@ -112,9 +110,9 @@ func TestChatSessionStore_ConcurrentSafe(t *testing.T) {
 
 	done := make(chan struct{})
 	const writers = 8
-	for i := 0; i < writers; i++ {
-		go func(id int) {
-			for j := 0; j < 50; j++ {
+	for range writers {
+		go func() {
+			for range 50 {
 				store.Append("shared", []ChatMessage{
 					{Role: "user", Content: "x"},
 					{Role: "assistant", Content: "y"},
@@ -122,9 +120,9 @@ func TestChatSessionStore_ConcurrentSafe(t *testing.T) {
 				_ = store.Get("shared")
 			}
 			done <- struct{}{}
-		}(i)
+		}()
 	}
-	for i := 0; i < writers; i++ {
+	for range writers {
 		<-done
 	}
 	// No race detector failure = success.
@@ -161,9 +159,9 @@ func TestService_ChatSession_AppendViaService(t *testing.T) {
 	t.Parallel()
 
 	svc := newServiceForChatTests(t)
-	err := svc.AppendChatTurn(context.Background(), "s", models.ChatMessage{Role: "user", Content: "hi"})
+	err := svc.AppendChatTurn(context.Background(), "s", ChatMessage{Role: "user", Content: "hi"})
 	require.NoError(t, err)
-	err = svc.AppendChatTurn(context.Background(), "s", models.ChatMessage{Role: "assistant", Content: "hello"})
+	err = svc.AppendChatTurn(context.Background(), "s", ChatMessage{Role: "assistant", Content: "hello"})
 	require.NoError(t, err)
 
 	hist := svc.ChatSessionHistory("s")
@@ -179,7 +177,7 @@ func TestService_ChatSession_ClearRemoves(t *testing.T) {
 	t.Parallel()
 
 	svc := newServiceForChatTests(t)
-	_ = svc.AppendChatTurn(context.Background(), "s", models.ChatMessage{Role: "user", Content: "hi"})
+	_ = svc.AppendChatTurn(context.Background(), "s", ChatMessage{Role: "user", Content: "hi"})
 	require.NotEmpty(t, svc.ChatSessionHistory("s"))
 
 	svc.ClearChatSession("s")
@@ -189,13 +187,9 @@ func TestService_ChatSession_ClearRemoves(t *testing.T) {
 // --- helpers ---
 
 // ChatSessionConfig is the constructor input for the
-// in-memory session store. Defined here (not in
-// production code) because tests only need the
-// construction shape; the production file owns the
-// canonical struct.
-//
-// We re-use the production type to keep the test and
-// production aligned.
+// in-memory session store. Re-exported from production
+// code so the test file stays decoupled from internal
+// struct layout.
 type ChatSessionConfig = ChatSessionStoreConfig
 
 func newServiceForChatTests(t *testing.T) *Service {
