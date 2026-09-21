@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ragabast/internal/reqid"
+
 	"github.com/ragabast/internal/models"
 )
 
@@ -69,14 +71,37 @@ type OpenAILLMClient struct {
 // "...[truncated]" marker so operators know it was cut.
 const chatDebugLogMaxBytes = 8 * 1024 // 8 KiB
 
-// writeChatDebugLog emits a single chat-debug line at the
-// standard logger, truncating the body if it exceeds the cap.
-// Pulled out so the call sites in client.do are uniform.
-func writeChatDebugLog(label, body string) {
+// chatDebugLine builds the formatted log line for a chat-debug
+// entry. Returns the form:
+//
+//	[chat-debug] <label>: <body>
+//
+// when no request ID is present, or:
+//
+//	[chat-debug] <label> request_id=<id>: <body>
+//
+// when one is on ctx. The request_id segment is omitted (rather
+// than emitted as "request_id=" with an empty value) so the
+// common case stays grep-friendly for operators that match on
+// `[chat-debug] <label>:`.
+//
+// Pulled out from writeChatDebugLog so the format can be tested
+// without redirecting the standard logger.
+func chatDebugLine(ctx context.Context, label, body string) string {
 	if len(body) > chatDebugLogMaxBytes {
 		body = body[:chatDebugLogMaxBytes] + "...[truncated]"
 	}
-	log.Printf("[chat-debug] %s: %s", label, body)
+	if reqID := reqid.FromContext(ctx); reqID != "" {
+		return fmt.Sprintf("[chat-debug] %s request_id=%s: %s", label, reqID, body)
+	}
+	return fmt.Sprintf("[chat-debug] %s: %s", label, body)
+}
+
+// writeChatDebugLog emits a single chat-debug line at the
+// standard logger, truncating the body if it exceeds the cap.
+// Pulled out so the call sites in client.do are uniform.
+func writeChatDebugLog(ctx context.Context, label, body string) {
+	log.Print(chatDebugLine(ctx, label, body))
 }
 
 // NewOpenAILLMClientWithOptions is the fully-configurable constructor.
@@ -209,7 +234,7 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 	// this to verify the prompt template actually reaches the
 	// model. Bearer token is never in this string.
 	if c.logChatRequests {
-		writeChatDebugLog("request", string(body))
+		writeChatDebugLog(ctx, "request", string(body))
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/chat/completions", bytes.NewBuffer(body))
@@ -239,7 +264,7 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 	// actually emitted (including the cases where ragabast's
 	// post-processors strip preamble).
 	if c.logChatRequests {
-		writeChatDebugLog("response", string(respBody))
+		writeChatDebugLog(ctx, "response", string(respBody))
 	}
 
 	if resp.StatusCode != http.StatusOK {
