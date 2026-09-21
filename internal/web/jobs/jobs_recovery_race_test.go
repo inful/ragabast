@@ -63,7 +63,7 @@ func testOneStartPlusSubmit(t *testing.T) int64 {
 	defer q.Stop()
 
 	const content = "race-test-content"
-	j, err := q.Submit(content, "192.0.2.1:1234")
+	j, err := q.Submit(content, "192.0.2.1:1234", "")
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
