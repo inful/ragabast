@@ -25,6 +25,9 @@ type serviceAPI interface {
 	SuggestFrontmatter(ctx context.Context, content string, existing map[string]any, allowedCategories []string, allowedTags []string) (service.FrontmatterSuggestion, error)
 	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
 	QueryCacheStats() service.QueryCacheStats
+	ChatSessionHistory(sessionID string) []service.ChatMessage
+	AppendChatTurn(ctx context.Context, sessionID string, exchange ...service.ChatMessage) error
+	ClearChatSession(sessionID string)
 	GetNormalizedTags(ctx context.Context) ([]string, error)
 	GetNormalizedCategories(ctx context.Context) ([]string, error)
 	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)

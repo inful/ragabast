@@ -250,6 +250,7 @@ func (s *Server) registerRoutes() {
 		http.Redirect(w, r, "/", http.StatusFound)
 	})
 	s.router.Post("/chat/message", s.handleChatMessage)
+	s.router.Post("/chat/clear", s.handleChatClear)
 	s.router.Get("/search", s.handleSearchPage)
 	s.router.Post("/search", s.handleSearchSubmit)
 	s.router.Get("/ingest", s.handleIngestPage)

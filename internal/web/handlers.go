@@ -273,10 +273,37 @@ func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
+	// Issue #22 — pin a session id across page reloads.
+	// First-time callers get a UUID via Set-Cookie; the
+	// form embeds the same id in a hidden field so the
+	// subsequent POST round-trips it back to the server.
+	sessionID, shouldSet := ensureChatSessionID(r)
+	if shouldSet {
+		setChatSessionCookie(w, sessionID)
+	}
 	s.renderTemplate(w, "chat.html", map[string]any{
 		"Title":     "RAGabast - Chat",
 		"CsrfToken": CsrfTokenFromContext(r.Context()),
+		"SessionID": sessionID,
 	})
+}
+
+// handleChatClear implements POST /chat/clear: drops
+// the session history AND the cookie so the next
+// /chat/message starts fresh. Used by the "private
+// mode" UI affordance.
+func (s *Server) handleChatClear(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+	sessionID := strings.TrimSpace(r.FormValue("session_id"))
+	s.service.ClearChatSession(sessionID)
+	clearChatSessionCookie(w)
+	// Redirect back to the chat page so the browser
+	// re-renders with a fresh session-id cookie set on
+	// the response.
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
@@ -291,10 +318,32 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, info, err := s.service.QueryDebugWithOptions(r.Context(), msg, chatTopK(r), service.LLMOptions{})
+	// Issue #22 — read prior context from the session
+	// store (empty for first-time callers). Threads the
+	// history into the LLM call so follow-up questions
+	// ("tell me more about that") carry the prior
+	// exchange. Operators with no session_id opt out of
+	// persistence via the empty-string no-op path.
+	sessionID := strings.TrimSpace(r.FormValue("session_id"))
+	history := s.service.ChatSessionHistory(sessionID)
+
+	answer, info, err := s.service.QueryDebugWithOptions(r.Context(), msg, chatTopK(r), service.LLMOptions{
+		History: history,
+	})
 	if err != nil {
 		internalError(w, r, "query", err)
 		return
+	}
+
+	// Record the new exchange (user + assistant) so the
+	// NEXT request in this session sees it. The empty
+	// sessionID no-op in AppendChatTurn keeps single-shot
+	// callers (no cookie, no form field) stateless.
+	if sessionID != "" {
+		_ = s.service.AppendChatTurn(r.Context(), sessionID,
+			service.ChatMessage{Role: "user", Content: msg},
+			service.ChatMessage{Role: "assistant", Content: answer},
+		)
 	}
 
 	var sources []models.SearchResult

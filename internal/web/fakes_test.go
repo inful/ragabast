@@ -35,6 +35,8 @@ type fakeHumaService struct {
 	debug             *service.QueryDebugInfo
 	queryErr          error
 	lastQueryOpts     service.LLMOptions
+	history           []service.ChatMessage // issue #22: canned prior history returned to the chat handler
+	appendedTurns     []appendedTurn        // issue #22: recorded exchanges the chat handler asked us to remember
 	frontmatterSug    service.FrontmatterSuggestion
 	frontmatterErr    error
 }
@@ -218,6 +220,20 @@ func (f *fakeHumaService) QueryDebugWithOptions(_ context.Context, _ string, _ i
 	return f.answer, f.debug, nil
 }
 
+func (f *fakeHumaService) ChatSessionHistory(string) []service.ChatMessage {
+	if f.history != nil {
+		return f.history
+	}
+	return []service.ChatMessage{}
+}
+
+func (f *fakeHumaService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {
+	f.appendedTurns = append(f.appendedTurns, appendedTurn{sessionID: sessionID, messages: exchange})
+	return nil
+}
+
+func (f *fakeHumaService) ClearChatSession(string) {}
+
 func (f *fakeHumaService) SuggestFrontmatter(_ context.Context, _ string, _ map[string]any, _ []string, _ []string) (service.FrontmatterSuggestion, error) {
 	if f.frontmatterErr != nil {
 		return service.FrontmatterSuggestion{}, f.frontmatterErr
@@ -282,6 +298,9 @@ type fakeService struct {
 	lastSearchMode    service.SearchMode
 	queryAnswer       string
 	queryDebug        *service.QueryDebugInfo
+	history           []service.ChatMessage
+	appendedTurns     []appendedTurn
+	clearedSessions   []string
 	queryErr          error
 	checkHealthOK     bool
 	ingestDocument    *models.Document
@@ -290,6 +309,16 @@ type fakeService struct {
 	categories        []string
 	documents         []models.DocumentInfo
 	listErr           error
+}
+
+// appendedTurn is the record the chat handler asks the
+// service to remember for the next request. Tests use the
+// slice to assert the right messages were threaded in
+// (and to verify the assistant's reply is included, not
+// just the user's question).
+type appendedTurn struct {
+	sessionID string
+	messages  []service.ChatMessage
 }
 
 func (f *fakeService) CheckHealth(context.Context) (bool, error) {
@@ -384,6 +413,22 @@ func (f *fakeService) QueryDebugWithOptions(_ context.Context, _ string, _ int, 
 		f.queryDebug = &service.QueryDebugInfo{Results: []models.SearchResult{}}
 	}
 	return f.queryAnswer, f.queryDebug, nil
+}
+
+func (f *fakeService) ChatSessionHistory(string) []service.ChatMessage {
+	if f.history != nil {
+		return f.history
+	}
+	return []service.ChatMessage{}
+}
+
+func (f *fakeService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {
+	f.appendedTurns = append(f.appendedTurns, appendedTurn{sessionID: sessionID, messages: exchange})
+	return nil
+}
+
+func (f *fakeService) ClearChatSession(sessionID string) {
+	f.clearedSessions = append(f.clearedSessions, sessionID)
 }
 
 func (f *fakeService) GetNormalizedTags(context.Context) ([]string, error) {
