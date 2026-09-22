@@ -36,6 +36,7 @@ type fakeHumaService struct {
 	queryErr          error
 	lastQueryOpts     service.LLMOptions
 	history           []service.ChatMessage // issue #22: canned prior history returned to the chat handler
+	transcriptByID    map[string]string     // issue #39: canned markdown transcript keyed by session_id
 	appendedTurns     []appendedTurn        // issue #22: recorded exchanges the chat handler asked us to remember
 	frontmatterSug    service.FrontmatterSuggestion
 	frontmatterErr    error
@@ -227,6 +228,13 @@ func (f *fakeHumaService) ChatSessionHistory(string) []service.ChatMessage {
 	return []service.ChatMessage{}
 }
 
+func (f *fakeHumaService) ExportChatTranscript(sessionID string) string {
+	if f.transcriptByID != nil {
+		return f.transcriptByID[sessionID]
+	}
+	return ""
+}
+
 func (f *fakeHumaService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {
 	f.appendedTurns = append(f.appendedTurns, appendedTurn{sessionID: sessionID, messages: exchange})
 	return nil
@@ -299,6 +307,7 @@ type fakeService struct {
 	queryAnswer       string
 	queryDebug        *service.QueryDebugInfo
 	history           []service.ChatMessage
+	transcriptByID    map[string]string // issue #39: per-session canned export
 	appendedTurns     []appendedTurn
 	clearedSessions   []string
 	queryErr          error
@@ -420,6 +429,13 @@ func (f *fakeService) ChatSessionHistory(string) []service.ChatMessage {
 		return f.history
 	}
 	return []service.ChatMessage{}
+}
+
+func (f *fakeService) ExportChatTranscript(sessionID string) string {
+	if f.transcriptByID != nil {
+		return f.transcriptByID[sessionID]
+	}
+	return ""
 }
 
 func (f *fakeService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {

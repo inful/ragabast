@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -177,4 +178,55 @@ func (s *Service) ClearChatSession(sessionID string) {
 		return
 	}
 	s.chatSessions.Clear(sessionID)
+}
+
+// ExportChatTranscript renders a session's history as a
+// markdown document. Returns "" for unknown / empty
+// sessions so the HTTP handler can decide between 404
+// and 200-with-empty-body. The shape is deliberately
+// simple — no source citations (we don't store them
+// yet), no timestamps per turn (would require expanding
+// ChatMessage). Just the conversation in chronological
+// order, which is the operator's actual use case:
+//
+//	go run . serve → chat → export → paste into a wiki
+//
+// Layout:
+//
+//	## User
+//
+//	What is ragabast?
+//
+//	## Assistant
+//
+//	A markdown chunker and RAG server.
+//
+// H2 (not H3) so the transcript is readable in any
+// markdown viewer; H1 is reserved for the document title
+// if the user pastes it into a wiki.
+func (s *Service) ExportChatTranscript(sessionID string) string {
+	if sessionID == "" || s.chatSessions == nil {
+		return ""
+	}
+	history := s.chatSessions.Get(sessionID)
+	if len(history) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, msg := range history {
+		// Title-case the role so `## User` / `## Assistant`
+		// are stable across readers (some viewers lowercase
+		// the heading on render, which would read as a typo).
+		heading := strings.ToUpper(msg.Role[:1]) + msg.Role[1:]
+		b.WriteString("## ")
+		b.WriteString(heading)
+		b.WriteString("\n\n")
+		b.WriteString(msg.Content)
+		// Trailing blank line — markdown requires two
+		// newlines to terminate a paragraph; one is a
+		// soft break that viewers may collapse.
+		b.WriteString("\n\n")
+	}
+	return b.String()
 }
