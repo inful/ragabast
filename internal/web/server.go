@@ -251,6 +251,7 @@ func (s *Server) registerRoutes() {
 	})
 	s.router.Post("/chat/message", s.handleChatMessage)
 	s.router.Post("/chat/clear", s.handleChatClear)
+	s.router.Get("/api/chat/export", s.handleChatExport)
 	s.router.Get("/search", s.handleSearchPage)
 	s.router.Post("/search", s.handleSearchSubmit)
 	s.router.Get("/ingest", s.handleIngestPage)

@@ -3,9 +3,11 @@ package web
 import (
 	"fmt"
 	"html/template"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
@@ -304,6 +306,44 @@ func (s *Server) handleChatClear(w http.ResponseWriter, r *http.Request) {
 	// re-renders with a fresh session-id cookie set on
 	// the response.
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleChatExport implements GET /api/chat/export
+// (issue #39): returns the chat session as a markdown
+// document for download. The session id is sourced from
+// the form/query string so a plain link in the chat UI
+// can trigger a download — no JavaScript required.
+//
+// 404 on empty/unknown session: an empty .md file would
+// be confusing to operators ("did I just download a
+// blank file?"). The link is only rendered when there
+// IS content, so 404 is the right signal.
+func (s *Server) handleChatExport(w http.ResponseWriter, r *http.Request) {
+	sessionID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	transcript := s.service.ExportChatTranscript(sessionID)
+	if transcript == "" {
+		http.Error(w, "No chat transcript for this session.", http.StatusNotFound)
+		return
+	}
+
+	// Filename: ragabast-chat-<session_short>-<unix>.md.
+	// Truncate the session id to 8 chars so the
+	// filename is sane in the operator's Downloads
+	// folder — full 32-char hex ids look like an
+	// accidental dump. The session id itself stays
+	// short enough that 8 chars is enough to correlate
+	// with the cookie.
+	short := sessionID
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	filename := "ragabast-chat-" + short + "-" +
+		strconv.FormatInt(time.Now().Unix(), 10) + ".md"
+
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition",
+		`attachment; filename="`+filename+`"`)
+	_, _ = io.WriteString(w, transcript)
 }
 
 func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {

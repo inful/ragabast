@@ -159,6 +159,10 @@ const chatFallbackBody = `<!DOCTYPE html>
 		</div>
 	</div>
 
+	<div class="box">
+		<a id="chat-export" class="button is-small is-light" href="/api/chat/export?session_id={{ .SessionID }}">Export transcript (.md)</a>
+	</div>
+
 	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input" hx-on::before-request="document.getElementById('chat-send')?.classList.add('is-loading')" hx-on::after-request="this.reset(); document.getElementById('chat-send')?.classList.remove('is-loading'); document.getElementById('chat-input')?.focus()" hx-on::response-error="document.getElementById('chat-send')?.classList.remove('is-loading')">
 		<input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
 		<input type="hidden" name="session_id" value="{{ .SessionID }}">
