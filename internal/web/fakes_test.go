@@ -221,6 +221,10 @@ func (f *fakeHumaService) QueryDebugWithOptions(_ context.Context, _ string, _ i
 	return f.answer, f.debug, nil
 }
 
+func (f *fakeHumaService) GetDocument(context.Context, string) (*models.Document, error) {
+	return nil, errFakeUnimplemented
+}
+
 func (f *fakeHumaService) ChatSessionHistory(string) []service.ChatMessage {
 	if f.history != nil {
 		return f.history
@@ -424,6 +428,10 @@ func (f *fakeService) QueryDebugWithOptions(_ context.Context, _ string, _ int, 
 	return f.queryAnswer, f.queryDebug, nil
 }
 
+func (f *fakeService) GetDocument(context.Context, string) (*models.Document, error) {
+	return nil, errFakeUnimplemented
+}
+
 func (f *fakeService) ChatSessionHistory(string) []service.ChatMessage {
 	if f.history != nil {
 		return f.history
@@ -483,7 +491,10 @@ func (f *fakeService) QueryCacheStats() service.QueryCacheStats {
 // errFakeUnhealthy is the sentinel returned by CheckHealth when
 // the test wants the unhealthy path. Kept private — tests set
 // checkHealthOK=false to trigger it.
-var errFakeUnhealthy = fakeError("service unhealthy")
+var (
+	errFakeUnhealthy     = fakeError("service unhealthy")
+	errFakeUnimplemented = fakeError("not implemented in fake")
+)
 
 type fakeError string
 

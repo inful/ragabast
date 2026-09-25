@@ -259,6 +259,18 @@ func (s *Server) registerRoutes() {
 	s.router.Get("/documents", s.handleDocumentsPage)
 
 	s.router.Get("/static/*", s.handleStatic)
+
+	// MCP HTTP transport — opt-in. When
+	// server.mcp_http_enabled is true, mount the streamable
+	// HTTP handler at /mcp on the same listen port. Auth
+	// is inherited from the global authMiddleware — the
+	// existing server.auth_tokens list applies. When auth
+	// is unconfigured, /mcp is open (matches the rest of
+	// the API surface). Opt-in by default so existing
+	// operators aren't surprised by a new endpoint.
+	if s.config.Server.MCPHTTPEnabled {
+		s.router.Handle("/mcp", mcpHTTPHandler(s.service))
+	}
 }
 
 // Start starts the web server.

@@ -29,6 +29,7 @@ type serviceAPI interface {
 	ExportChatTranscript(sessionID string) string
 	AppendChatTurn(ctx context.Context, sessionID string, exchange ...service.ChatMessage) error
 	ClearChatSession(sessionID string)
+	GetDocument(ctx context.Context, documentID string) (*models.Document, error)
 	GetNormalizedTags(ctx context.Context) ([]string, error)
 	GetNormalizedCategories(ctx context.Context) ([]string, error)
 	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)

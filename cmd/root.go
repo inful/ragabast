@@ -36,6 +36,7 @@ type CLI struct {
 	Status StatusCmd     `cmd:"" help:"Check system health and status"`
 	List   ListCmd       `cmd:"" help:"List ingested documents"`
 	Search SearchCmd     `cmd:"" help:"Semantic search across documents"`
+	MCP    MCPCmd        `cmd:"" help:"Run an MCP (Model Context Protocol) server"`
 }
 
 type ConfigOpts struct {

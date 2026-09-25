@@ -336,6 +336,14 @@ type ServerConfig struct {
 
 	// WriteTimeout for HTTP responses.
 	WriteTimeout time.Duration `env:"SERVER_WRITE_TIMEOUT" yaml:"write_timeout"`
+
+	// MCPHTTPEnabled mounts the Model Context Protocol
+	// streamable-HTTP server at /mcp on the same listen
+	// port. Bearer-token auth via the existing
+	// server.auth_tokens applies. Off by default — opt
+	// in by setting mcp_http_enabled: true or
+	// SERVER_MCP_HTTP_ENABLED=true.
+	MCPHTTPEnabled bool `env:"SERVER_MCP_HTTP_ENABLED" yaml:"mcp_http_enabled,omitempty"`
 }
 
 // ListenAddr returns an address suitable for net/http Server.Addr.
