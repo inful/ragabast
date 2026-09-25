@@ -65,6 +65,7 @@ YAML to find the knob they need.
 | `SERVER_MAX_INGEST_DOCUMENT_BYTES` | `max_ingest_document_bytes` | `1048576` (1 MiB) | Per-document size cap for both sync and async ingest paths. |
 | `SERVER_READ_TIMEOUT` | `read_timeout` | `15s` | `http.Server.ReadTimeout`. |
 | `SERVER_WRITE_TIMEOUT` | `write_timeout` | `15s` | `http.Server.WriteTimeout`. |
+| `SERVER_MCP_HTTP_ENABLED` | `mcp_http_enabled` | `false` | Mount the MCP streamable-HTTP server at `/mcp`. Off by default. |
 | `SERVER_ASYNC_INGEST_QUEUE_DIR` | `async_ingest_queue_dir` | `data/jobs` | On-disk async job queue. Empty disables async ingest (endpoints 503). |
 | `SERVER_ASYNC_INGEST_WORKERS` | `async_ingest_workers` | `5` | Worker pool concurrency. `0` falls back to `1`. |
 | `SERVER_ASYNC_INGEST_CLEANUP_INTERVAL` | `async_ingest_cleanup_interval` | `1h` | Background sweeper cadence for evicting finished jobs past TTL. |
@@ -597,13 +598,6 @@ the store and in the browser cookie.
 
 ## Embedding task prompts
 
-Some embedding models (notably Google's `embedding-gemma` and
-OpenAI's `text-embedding-3-*`) take a task-name prompt that biases
-the embedding toward the intended use. For ragabast's two distinct
-embed cases — document chunks vs. user queries — the prompts should
-differ: a "search_document" prompt for what's being indexed, a
-"search_query" prompt for what's being searched.
-
 ```yaml
 ollama:
   embedding_doc_prompt:    "search_document: "    # prepended to chunk text
@@ -620,3 +614,68 @@ makes queries and documents indistinguishable, which can degrade
 retrieval quality by 5-15% on asymmetric search tasks. The two
 fields are intentionally separate so operators can tune them
 independently.
+
+## MCP (Model Context Protocol)
+
+ragabast exposes its corpus as MCP tools so any compatible
+AI agent (Claude Code, Claude Desktop, opencode, ...) can
+register ragabast as a knowledge source. The HTTP transport
+mounts at `/mcp` on the same port `ragabast serve` listens
+on; bearer-token auth via the existing `server.auth_tokens`
+applies. Opt-in via `server.mcp_http_enabled: true` (or env
+`SERVER_MCP_HTTP_ENABLED=true`).
+
+When `mcp_http_enabled: true`:
+
+```
+# Claude Desktop config (claude_desktop_config.json)
+{
+  "mcpServers": {
+    "ragabast": {
+      "url": "https://ragabast.internal/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
+    }
+  }
+}
+```
+
+Tools exposed:
+
+| Tool | Purpose |
+|---|---|
+| `search` | Hybrid search with mode (hybrid/semantic/keyword) and filters (document_id, tag, category). Returns markdown-formatted results. |
+| `query` | Chat-mode RAG. Stateless — MCP clients manage conversation context themselves. Returns LLM answer + sources. |
+| `list_documents` | Paginated document list (limit/offset). |
+| `get_document` | Single-document fetch with chunk count, tags, categories, and URLs. |
+
+The HTTP transport is the primary integration point — central
+ragabast installs become reachable by remote MCP clients without
+additional deployment. `csrfMiddleware` already exempts
+requests with an `Authorization` header, so bearer-auth MCP
+clients skip CSRF (no browser session to protect).
+
+For local operator workflows, the binary also exposes a
+stdio transport:
+
+```
+$ ragabast mcp serve --stdio
+```
+
+No auth — the operator IS the client. Useful for piping
+through `opencode` or a local Claude Desktop instance that
+talks to a process instead of an HTTP endpoint.
+
+### What this PR doesn't include (follow-ups)
+
+- **Resources and prompts**: just tools for v1. Resources would
+  let agents list the corpus without a query — nice but a 4-tool
+  implementation is enough to demonstrate value.
+- **Streaming responses**: MCP supports them. ragabast's
+  responses are small (markdown), so streaming isn't critical.
+- **MCP at a separate port**: same-port mounting is simpler;
+  the auth boundary operators already have covers the threat
+  model. If you need network isolation, reverse-proxy /mcp
+  separately.
+- **WebSocket transport**: not part of the MCP spec.

@@ -175,6 +175,17 @@ server:
   async_ingest_failed_job_ttl: 720h
   read_timeout: 15s
   write_timeout: 15s
+  # Mount the Model Context Protocol (MCP) server at /mcp
+  # on the existing HTTP port. Bearer-token auth via the
+  # existing server.auth_tokens applies. Off by default
+  # so existing operators aren't surprised by a new
+  # endpoint. When enabled, any MCP-compatible agent
+  # (Claude Code, Claude Desktop, opencode, ...) can
+  # register ragabast as a knowledge source. The /mcp
+  # route serves the four tools listed in the README's
+  # MCP section.
+  # Env: SERVER_MCP_HTTP_ENABLED.
+  mcp_http_enabled: false
 
 processing:
   max_chunk_size: 2000

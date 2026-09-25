@@ -281,6 +281,7 @@ graph TB
   | GET | `/ingest` | upload form |
   | POST | `/ingest` | HTMX upload result |
   | GET | `/documents` | ingested-document list (paginated) |
+  | GET | `/mcp` | MCP streamable-HTTP transport (opt-in via `server.mcp_http_enabled`) |
   | GET | `/static/*` | CSS / assets |
 
 - Rendered with `html/template`; styling is Bulma. `renderChatMarkdownToSafeHTML`
@@ -370,7 +371,8 @@ graph TB
 | `internal/vector` | chromem-go wrapper, embedding client, LLM client, `SearchFilters`-aware `Where`, bleve-backed keyword index (`internal/vector/search_index.go`) |
 | `internal/service` | `Service` wiring + every business operation (ingest, search, query, frontmatter, links, catalog, stats, health, chat sessions, bulk update, date filters) |
 | `internal/service/querycache` | Bounded LRU cache for repeated search calls (#69). Subpackage to keep the eviction / TTL bookkeeping out of `service.go`. |
-| `internal/web` | chi router, HUMA API, HTMX pages, server lifecycle |
+| `internal/mcp` | MCP tool surface (`search`, `query`, `list_documents`, `get_document`). Transport-agnostic; wired to stdio via `cmd/mcp.go` and to streamable-HTTP via `internal/web/mcp.go`. |
+| `internal/web` | chi router, HUMA API, HTMX pages, server lifecycle, MCP HTTP mount |
 | `internal/web/jobs` | Persistent async ingest queue (JSON files + bounded worker pool + restart recovery) |
 
 ## When you change X, expect Y to notice
