@@ -15,6 +15,87 @@ Precedence:
 
 See [config.example.yml](config.example.yml) for a starting point.
 
+### Environment variable reference
+
+Every env var ragabast recognises, with its YAML key (where
+applicable), built-in default, and a one-line description. Useful
+for operators scripting a deploy who don't want to read the full
+YAML to find the knob they need.
+
+#### `ollama` — LLM provider
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `OLLAMA_BASE_URL` | `base_url` | `http://localhost:11434` | Embeddings server URL. Strip trailing `/v1` if present. |
+| `OLLAMA_CHAT_BASE_URL` | `chat_base_url` | `http://localhost:11434` | Chat completions server URL. Same provider family as embeddings, often the same host. |
+| `OLLAMA_CHAT_MODEL` | `chat_model` | `gemma:2b` | Model name to send in `/v1/chat/completions` requests. |
+| `OLLAMA_EMBEDDING_MODEL` | `embedding_model` | `nomic-embed-text:v1.5` | Model name to send in `/v1/embeddings` requests. |
+| `OLLAMA_EMBEDDING_DIMENSIONS` | `embedding_dimensions` | `0` (off) | Matryoshka truncation request — `jina v5`, OpenAI `text-embedding-3-*`. 0 disables. Must match `vectordb.embedding_dimension`. |
+| `OLLAMA_EMBEDDING_CONCURRENCY` | `embedding_concurrency` | `4` | Concurrent `/v1/embeddings` requests in flight. |
+| `OLLAMA_EMBEDDING_DOC_PROMPT` | `embedding_doc_prompt` | `""` | Task-name prefix for chunks being indexed. Leave empty for models without task input. |
+| `OLLAMA_EMBEDDING_QUERY_PROMPT` | `embedding_query_prompt` | `""` | Task-name prefix for user queries. Must differ from `_DOC_PROMPT` for asymmetric retrieval. |
+| `OLLAMA_API_KEY` | `api_key` | `""` | Bearer token for both servers. Empty for unauthenticated local. |
+| `OLLAMA_CHAT_API_KEY` | `chat_api_key` | `""` | Chat-specific bearer token. Wins over `api_key` for chat only. |
+| `OLLAMA_EMBEDDING_API_KEY` | `embedding_api_key` | `""` | Embeddings-specific bearer token. Wins over `api_key` for embeddings only. |
+| `OLLAMA_TEMPERATURE` | `temperature` | `0.1` | LLM sampling temperature. Pointer field — unset in env keeps the YAML default. |
+| `OLLAMA_OPTIONS_JSON` | `options` | `{top_k:20, top_p:0.8, min_p:0.05, num_predict:512}` | Pass-through OpenAI-compat sampling options. JSON-encoded in env. |
+| `OLLAMA_TIMEOUT` | `timeout` | `30s` | Per-request timeout for both embeddings and chat. |
+
+#### `vectordb` — vector store
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `VECTOR_DB_DIR` | `persistence_dir` | `<cwd>/data/vectors` | On-disk chromem-go directory. Changing requires re-ingest. |
+| `VECTOR_DB_KEYWORD_INDEX_DIR` | `keyword_index_dir` | `""` (→ `<persistence_dir>/search`) | bleve keyword index path. Override when persistence is on NFS. |
+| `VECTOR_DB_COLLECTION` | `collection_name` | `ragabast` | chromem-go collection name. |
+| `VECTOR_DB_DIMENSION` | `embedding_dimension` | `768` | Embedding vector size. Must match the truncated dimension if `OLLAMA_EMBEDDING_DIMENSIONS > 0`. |
+
+#### `server` — HTTP layer
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `SERVER_ADDRESS` | `address` | `0.0.0.0` | Bind address. Use `127.0.0.1` for local-only. |
+| `SERVER_PORT` | `port` | `8080` | Listen port. |
+| `SERVER_ENABLE_CORS` | `enable_cors` | `true` | Master switch for CORS processing. |
+| `SERVER_CORS_ORIGINS` | `cors_origins` | `[]` | Allowed origins (comma-separated). `*` for trusted local-only. |
+| `SERVER_AUTH_TOKEN` | `auth_token` | `""` | Single bearer token. Empty = open access (local-dev default). |
+| `SERVER_AUTH_TOKENS` | `auth_tokens` | `[]` | Array of `{label, value}` bearer tokens. Mix with `SERVER_AUTH_TOKEN` is undefined. |
+| `SERVER_RATE_LIMIT_PER_MINUTE` | `rate_limit_per_minute` | `0` (off) | Sustained per-IP rate. `0` disables the limiter. |
+| `SERVER_RATE_LIMIT_BURST` | `rate_limit_burst` | `5` | Immediate requests allowed before the per-minute rate kicks in. |
+| `SERVER_MAX_INGEST_DOCUMENT_BYTES` | `max_ingest_document_bytes` | `1048576` (1 MiB) | Per-document size cap for both sync and async ingest paths. |
+| `SERVER_READ_TIMEOUT` | `read_timeout` | `15s` | `http.Server.ReadTimeout`. |
+| `SERVER_WRITE_TIMEOUT` | `write_timeout` | `15s` | `http.Server.WriteTimeout`. |
+| `SERVER_ASYNC_INGEST_QUEUE_DIR` | `async_ingest_queue_dir` | `data/jobs` | On-disk async job queue. Empty disables async ingest (endpoints 503). |
+| `SERVER_ASYNC_INGEST_WORKERS` | `async_ingest_workers` | `5` | Worker pool concurrency. `0` falls back to `1`. |
+| `SERVER_ASYNC_INGEST_CLEANUP_INTERVAL` | `async_ingest_cleanup_interval` | `1h` | Background sweeper cadence for evicting finished jobs past TTL. |
+| `SERVER_ASYNC_INGEST_COMPLETED_JOB_TTL` | `async_ingest_completed_job_ttl` | `168h` (7 days) | How long completed jobs are retained for `/api/ingest/jobs/{id}` history. |
+| `SERVER_ASYNC_INGEST_FAILED_JOB_TTL` | `async_ingest_failed_job_ttl` | `720h` (30 days) | How long failed jobs are retained. |
+
+#### `processing` — chunking
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `PROCESSING_MAX_CHUNK_SIZE` | `max_chunk_size` | `2000` | Maximum characters per chunk. |
+| `PROCESSING_MIN_CHUNK_SIZE` | `min_chunk_size` | `300` | Minimum characters per chunk. |
+| `PROCESSING_CHUNK_OVERLAP` | `chunk_overlap` | `150` | Character overlap between consecutive chunks. |
+
+#### `paths` — filesystem layout
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `DATA_DIR` | `data_dir` | `<cwd>/data` | Root for all on-disk data. |
+| `TEMPLATES_DIR` | `templates_dir` | `""` (→ embedded templates) | Override the HTML template set without rebuilding. |
+
+#### `ragabast` — presentation / linking / caching
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `RAGABAST_DOCBUILDER_BASE_URL` | `docbuilder_base_url` | `""` | docbuilder root — every search result gets a synthetic `<base>/_uid/<uid>/` permalink. |
+| `RAGABAST_LOG_CHAT_REQUESTS` | `log_chat_requests` | `false` | Log every chat-completions request/response under `[chat-debug]` on stderr. |
+| `RAGABAST_QUERY_CACHE_SIZE` | `query_cache_size` | `512` | LRU cap for the search cache. `0` disables. |
+| `RAGABAST_QUERY_CACHE_TTL` | `query_cache_ttl` | `5m` | Per-entry TTL. |
+| `RAGABAST_CHAT_SESSION_MAX_TURNS` | `chat_session_max_turns` | `20` | FIFO-trimmed cap on the in-memory chat session store. Each turn is user + assistant. |
+
 Notes:
 - Set `ollama.temperature` in YAML (or `OLLAMA_TEMPERATURE`) to control sampling.
 - `ragabast query --temperature ...` overrides config/env for that invocation.
@@ -403,10 +484,10 @@ without parsing JSON.
 Link: <.../api/documents?limit=25&offset=25>; rel="next", <.../api/documents?limit=25&offset=0>; rel="prev"
 ```
 
-| Field | Default | Effect |
-|---|---|---|
-| `server.documents_page_size` | `25` | Default `limit` for both the API and the UI. Env: `SERVER_DOCUMENTS_PAGE_SIZE`. |
-| `server.documents_max_page_size` | `1000` | Maximum `limit` accepted by the API. Requests above this are clamped. Env: `SERVER_DOCUMENTS_MAX_PAGE_SIZE`. |
+The default page size (25) and the upper clamp (1000) are
+hard-coded in the handler — they're not currently config knobs.
+Requests for `limit=0` get the default; requests for `limit > 1000`
+are silently clamped to 1000 (the spec was "clamp, don't reject").
 
 ### Bulk metadata updates
 

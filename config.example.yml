@@ -50,7 +50,26 @@ ollama:
   chat_api_key: ""
   embedding_api_key: ""
 
+  # Concurrent /v1/embeddings requests in flight at once. Matches the
+  # embeddings server's request parallelism — set to match the upstream
+  # batch size for best throughput. Default 4. Env: OLLAMA_EMBEDDING_CONCURRENCY.
+  embedding_concurrency: 4
+
+  # Optional task-name prompts prepended to the text before embedding.
+  # Useful for embedding models that take a task input — Google's
+  # `embedding-gemma`, OpenAI `text-embedding-3-*`, jina v5, etc.
+  # Set `embedding_doc_prompt` for chunks being indexed, `embedding_query_prompt`
+  # for user queries. Leaving both empty sends no prefix, which is right
+  # for `nomic-embed-text`, `mxbai-embed-large`, and most models that
+  # don't take a task input. Setting both to the SAME value degrades
+  # asymmetric retrieval quality by 5-15%.
+  # Env: OLLAMA_EMBEDDING_DOC_PROMPT, OLLAMA_EMBEDDING_QUERY_PROMPT.
+  embedding_doc_prompt: ""
+  embedding_query_prompt: ""
+
   # RAG-friendly defaults (lower randomness tends to stick to retrieved context).
+  # Pointer so OLLAMA_TEMPERATURE can be unset in the env without losing
+  # the YAML default (zero-value is a valid temperature, not "absent").
   temperature: 0.2
   options:
     top_k: 40
@@ -58,7 +77,6 @@ ollama:
     min_p: 0.05
     num_predict: 512
   timeout: 30s
-  keep_alive: true
 
 vectordb:
   persistence_dir: data/vectors
@@ -100,6 +118,21 @@ server:
   # means anyone who can reach the listener can ingest, query,
   # and delete documents. Env: SERVER_AUTH_TOKEN.
   auth_token: ""
+
+  # Multiple bearer tokens with optional labels (one per line).
+  # Use this when several operators or services share one
+  # ragabast instance and you want audit logs to distinguish
+  # them. The `value` field carries the token; `label` is
+  # optional and surfaces in the access log. Mixing the
+  # singular `auth_token` and the plural `auth_tokens` is
+  # undefined — pick one. Env: SERVER_AUTH_TOKENS
+  # (comma-separated list of `label:value` pairs, or just
+  # values when labels are unwanted).
+  auth_tokens: []
+  #  - label: alice
+  #    value: TOKEN_FOR_ALICE
+  #  - label: docbuilder
+  #    value: TOKEN_FOR_DOCBUILDER
   # Per-client-IP token-bucket rate applied to the LLM-backed
   # and ingest endpoints. 0 disables the limiter (the
   # local-dev default).
@@ -130,19 +163,26 @@ server:
   # embeddings server's request parallelism.
   # Env: SERVER_ASYNC_INGEST_WORKERS.
   async_ingest_workers: 5
+  # How often the background sweeper evicts finished jobs past
+  # their TTL. Default 1h. Env: SERVER_ASYNC_INGEST_CLEANUP_INTERVAL.
+  async_ingest_cleanup_interval: 1h
+  # How long completed jobs are retained for /api/ingest/jobs/{id}
+  # history. Default 168h (7 days). Env: SERVER_ASYNC_INGEST_COMPLETED_JOB_TTL.
+  async_ingest_completed_job_ttl: 168h
+  # How long failed jobs are retained — typically longer than
+  # completed ones because operators want to see what went wrong.
+  # Default 720h (30 days). Env: SERVER_ASYNC_INGEST_FAILED_JOB_TTL.
+  async_ingest_failed_job_ttl: 720h
   read_timeout: 15s
   write_timeout: 15s
 
 processing:
-  max_chunk_size: 1000
-  min_chunk_size: 100
-  chunk_overlap: 100
-  max_concurrent_processing: 5
+  max_chunk_size: 2000
+  min_chunk_size: 300
+  chunk_overlap: 150
 
 paths:
   data_dir: data
-  documents_dir: data/documents
-  temp_dir: data/temp
   # Empty uses the templates embedded into the binary
   # (see internal/web/templates.go). Set to a directory of
   # *.html files to ship a custom template set without
@@ -175,3 +215,27 @@ ragabast:
   # marker so the log stays scannable. The bearer token is
   # never logged.
   log_chat_requests: false
+
+  # Bounded LRU cache for repeated searches. Every /api/search
+  # and /api/hybrid call hits the cache; the cache key includes
+  # the query text, limit, filters (date-range, tag, category,
+  # document_id), and the embedding model. Ingest and delete
+  # automatically evict entries whose filter could match the
+  # affected document.
+  #
+  # `query_cache_size` caps the entry count (LRU eviction once
+  # full). `query_cache_ttl` is the per-entry time-to-live so
+  # model-output drift can't keep stale results alive forever.
+  # Hit rate is visible in /api/health/full.
+  # Set `query_cache_size: 0` to disable the cache entirely.
+  # Env: RAGABAST_QUERY_CACHE_SIZE, RAGABAST_QUERY_CACHE_TTL.
+  query_cache_size: 512
+  query_cache_ttl: 5m
+
+  # Maximum number of turns kept in the in-memory chat session
+  # store. Each turn is one user message + one assistant reply
+  # (so the default of 20 keeps ≈40 messages). FIFO-trimmed:
+  # older turns are dropped when the cap is reached. Sessions
+  # are in-memory only — restart drops them. Env:
+  # RAGABAST_CHAT_SESSION_MAX_TURNS.
+  chat_session_max_turns: 20
