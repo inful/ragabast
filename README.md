@@ -90,13 +90,17 @@ Rank Fusion (RRF, k=60).
 ```
 POST /api/search
 {
-  "query":       "kubernetes ingress tls",
-  "limit":       5,                       // default 5
-  "min_score":   0,                       // optional, default 0 (no floor)
-  "mode":        "hybrid",                // hybrid | semantic | keyword
-  "document_id": "",                      // optional filter
-  "tag":         "security",              // optional filter
-  "category":    "tutorial"               // optional filter
+  "query":          "kubernetes ingress tls",
+  "limit":          5,                       // default 5
+  "min_score":      0,                       // optional, default 0 (no floor)
+  "mode":           "hybrid",                // hybrid | semantic | keyword
+  "document_id":    "",                      // optional filter
+  "tag":            "security",              // optional filter
+  "category":       "tutorial",              // optional filter
+  "created_after":  "2026-01-01T00:00:00Z", // optional, RFC3339
+  "created_before": "2026-12-31T23:59:59Z", // optional, RFC3339
+  "updated_after":  "",                      // optional, RFC3339
+  "updated_before": ""                       // optional, RFC3339
 }
 ```
 
@@ -106,7 +110,11 @@ pass `semantic` for pure embedding similarity (the v0.3.0 behaviour) or
 
 Filters are applied to BOTH rankings before fusion; a chunk that fails
 the `document_id` / `tag` / `category` filter never appears in the
-result, even if it ranks at the top of both lists.
+result, even if it ranks at the top of both lists. Date filters
+(`created_after` / `created_before` / `updated_after` / `updated_before`)
+constrain by the parent document's frontmatter `created` /
+`updated` timestamps, and combine with AND semantics — the document
+must fall in every specified range.
 
 CLI equivalent:
 
@@ -146,14 +154,32 @@ sensible value and is documented in [config.example.yml](config.example.yml).
 ### Authentication (C-1, H-3)
 
 The web server's API and form-mounted endpoints require a bearer token when
-`server.auth_token` is non-empty. Clients send `Authorization: Bearer <token>`;
-the token is compared in constant time (`crypto/subtle.ConstantTimeCompare`)
-so the endpoint cannot be used as a timing oracle.
+`server.auth_token` (or `server.auth_tokens`) is non-empty. Clients send
+`Authorization: Bearer <token>`; the token is compared in constant time
+(`crypto/subtle.ConstantTimeCompare`) so the endpoint cannot be used as a
+timing oracle.
 
 Wire format:
 ```bash
 curl -H 'Authorization: Bearer YOUR_TOKEN' http://localhost:8080/api/health
 ```
+
+Multiple tokens with optional labels — use this when several operators
+or services share one ragabast instance and you want audit logs to
+distinguish them:
+
+```yaml
+server:
+  auth_tokens:
+    - label: alice        # optional, surfaces in access logs
+      value: TOKEN_FOR_ALICE
+    - label: docbuilder   # optional
+      value: TOKEN_FOR_DOCBUILDER
+```
+
+Env: `SERVER_AUTH_TOKEN` (singular), `SERVER_AUTH_TOKENS` (comma-separated
+list, no labels). Mixing the singular and plural env vars is undefined;
+pick one.
 
 Public routes (always open, even when auth is configured) — these are the
 GET pages that load the HTML chrome in the operator's browser, plus static
@@ -165,13 +191,11 @@ assets and CORS preflight:
 | GET | `/static/*` |
 | OPTIONS | `*` |
 
-Default behaviour when `auth_token` is empty: open access. This keeps the
-local single-user install working without configuration. Operators exposing
-ragabast on a non-loopback interface **must** set this — leaving it empty
-means anyone who can reach the listener can ingest, query, and delete
-documents.
-
-Env: `SERVER_AUTH_TOKEN`.
+Default behaviour when no auth token is configured: open access. This
+keeps the local single-user install working without configuration.
+Operators exposing ragabast on a non-loopback interface **must** set
+this — leaving it empty means anyone who can reach the listener can
+ingest, query, and delete documents.
 
 ### CORS (C-2)
 
@@ -219,16 +243,26 @@ import finishes. The async path lets docbuilder fire-and-forget.
 | Method | Path | Purpose |
 |---|---|---|
 | `POST` | `/api/ingest/async` | Submit a document for async ingest. Returns `202 Accepted` with a `job_id`. The job is persisted to disk; a bounded worker pool processes it in the background. |
+| `GET` | `/api/ingest/jobs` | List jobs with optional `status`, `limit`, and `offset` query params. Returns the jobs array plus a `total` count for pagination. |
 | `GET` | `/api/ingest/jobs/{job_id}` | Poll job status. Returns `pending`, `processing`, `completed`, or `failed` plus `document_id`, `chunks`, and timing fields. |
 
 The synchronous `POST /api/ingest` path remains available for
 interactive use — both endpoints share the same auth, rate limit, and
 per-document size cap.
 
+For very-large batch imports (`POST /api/ingest/batch`), see the
+[Batch ingest](#batch-ingest) section — it accepts up to N
+documents in a single request (or NDJSON stream) and reports
+per-item results without failing the whole call on one bad
+document.
+
 | Field | Default | Effect |
 |---|---|---|
 | `server.async_ingest_queue_dir` | `data/jobs` | On-disk directory for persisted jobs. Empty disables async ingest (endpoints return 503). Directory is `0700`; each job file is `0600`. Env: `SERVER_ASYNC_INGEST_QUEUE_DIR`. |
 | `server.async_ingest_workers` | `5` | Worker-pool concurrency. `0` falls back to `1`. Env: `SERVER_ASYNC_INGEST_WORKERS`. |
+| `server.async_ingest_cleanup_interval` | `5m` | How often the background sweeper runs to evict finished jobs past their TTL. Env: `SERVER_ASYNC_INGEST_CLEANUP_INTERVAL`. |
+| `server.async_ingest_completed_job_ttl` | `24h` | How long a completed job's metadata file is kept on disk for `/api/ingest/jobs/{id}` history. Env: `SERVER_ASYNC_INGEST_COMPLETED_JOB_TTL`. |
+| `server.async_ingest_failed_job_ttl` | `168h` | How long a failed job's metadata file is kept — typically longer than completed because operators want to see what went wrong. Env: `SERVER_ASYNC_INGEST_FAILED_JOB_TTL`. |
 
 **Restart safety.** Every state transition is persisted to
 `<queue_dir>/<job_id>.json` (or `<job_id>.processing.json` while a
@@ -248,7 +282,66 @@ ingest job event=ingest.job.failed job_id=... error=...
 ```
 
 Tail the operator log to monitor the queue without needing a separate
-audit pipeline.### HTTP hardening (H-1, H-2, M-4)
+audit pipeline.
+
+### Batch ingest
+
+For docbuilder imports that aren't quite at the queueing scale
+(thousands of jobs) but still represent dozens to hundreds of
+documents at once, `POST /api/ingest/batch` accepts an array of
+documents in a single request and returns per-item results. One
+oversized document doesn't fail the whole batch — that document
+reports as a per-item error and the rest are processed normally.
+
+```
+POST /api/ingest/batch
+[
+  {"content": "---\nfingerprint: ...\nuid: doc-1\n---\nbody..."},
+  {"content": "---\nfingerprint: ...\nuid: doc-2\n---\nbody..."}
+]
+```
+
+NDJSON stream variant — `Content-Type: application/x-ndjson`, one
+JSON document per line. Useful for very large batches that don't fit
+in memory as a single JSON array.
+
+Response shape:
+
+```json
+{
+  "results": [
+    {"document_id": "doc-1", "chunks": 12, "ok": true},
+    {"ok": false, "error": "document too large (12 MiB > 10 MiB cap)", "index": 1}
+  ],
+  "summary": {"total": 2, "succeeded": 1, "failed": 1}
+}
+```
+
+A 200 response means the request was processed; check `results[*].ok`
+for per-item outcomes. The HTTP request counts as ONE call against
+the rate limiter, regardless of how many documents were inside.
+
+### CSRF protection (H-5)
+
+Form-mounted POSTs (`/chat/message`, `/chat/clear`, `/search`,
+`/ingest`) require a CSRF token issued as a `ragabast_csrf`
+double-submit cookie. The form embeds the token in a hidden
+`csrf_token` field, and the server compares the cookie and the form
+field in constant time before the handler runs. A missing or
+mismatched pair is `403 Forbidden`.
+
+The `/api/*` JSON endpoints don't enforce CSRF — they require a
+bearer token instead, and JSON POSTs are not auto-submitted by
+browsers. The CSRF middleware only guards the form POSTs that a
+browser can trigger without explicit JS.
+
+Tokens are per-session, 32 random bytes hex-encoded, and rotated on
+every `GET /` page load. There is no on-disk persistence — a fresh
+page load gets a fresh token. This is intentionally simple: the
+attacker model is a third-party page that tries to auto-submit a
+form to ragabast, not a long-running session hijack.
+
+### HTTP hardening (H-1, H-2, M-4)
 
 Every response carries the defense headers below:
 
@@ -290,3 +383,159 @@ through unchanged.
 The bearer token is **never** logged, even when `ragabast.log_chat_requests`
 is true. Only the chat request/response bodies are written under the
 `[chat-debug]` prefix.
+
+## Documents
+
+`/api/documents` and the `/documents` page both paginate. Defaults
+keep the page-load bounded for the 10k-corpus case (where the old
+unpaginated endpoint timed out):
+
+```
+GET /api/documents?limit=25&offset=0
+```
+
+Response shape includes the items, the total count, and a `Link`
+header with `rel="next"` / `rel="prev"` URLs when applicable — same
+shape GitHub's REST API uses, so curl pipelines can follow pages
+without parsing JSON.
+
+```
+Link: <.../api/documents?limit=25&offset=25>; rel="next", <.../api/documents?limit=25&offset=0>; rel="prev"
+```
+
+| Field | Default | Effect |
+|---|---|---|
+| `server.documents_page_size` | `25` | Default `limit` for both the API and the UI. Env: `SERVER_DOCUMENTS_PAGE_SIZE`. |
+| `server.documents_max_page_size` | `1000` | Maximum `limit` accepted by the API. Requests above this are clamped. Env: `SERVER_DOCUMENTS_MAX_PAGE_SIZE`. |
+
+### Bulk metadata updates
+
+For corpus-wide metadata edits (e.g. applying a new tag to 200
+documents at once), `POST /api/documents/bulk-update` accepts an
+array of `{document_id, patch}` pairs and returns per-item
+results. A single bad patch doesn't fail the whole call — that
+document reports an error and the rest proceed normally.
+
+```
+POST /api/documents/bulk-update
+{
+  "patches": [
+    {"document_id": "doc-1", "patch": {"tags": ["security", "tls"]}},
+    {"document_id": "doc-2", "patch": {"category": "Reference"}}
+  ]
+}
+```
+
+Response shape:
+
+```json
+{
+  "results": [
+    {"document_id": "doc-1", "ok": true, "applied_tags": ["security", "tls"]},
+    {"document_id": "doc-2", "ok": true, "applied_category": "Reference"}
+  ],
+  "summary": {"total": 2, "succeeded": 2, "failed": 0}
+}
+```
+
+The HTTP request counts as ONE call against the rate limiter,
+regardless of how many patches are inside.
+
+## Health
+
+Two endpoints, both unauthenticated:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/health` | Liveness — `200 OK` with `{"status": "ok"}` if the process is running. No dependencies checked. |
+| `GET` | `/api/health/full` | Readiness — returns `200` with per-subsystem status, or `503` if anything critical is degraded. Includes the async-ingest queue depth, the query cache hit-rate, the chromem-go vector store health, and any background sweeper state. |
+
+`/api/health/full` is meant for k8s readiness probes and
+load-balancer health checks. The simple `/api/health` is the
+process-alive signal — use that for liveness probes that should
+NOT pull a node out of rotation just because chromem-go is briefly
+rebuilding its index.
+
+## Performance
+
+### Query cache (H-7)
+
+Repeated identical searches hit an in-memory LRU cache instead of
+re-running the embedding + BM25 + RRF pipeline. The cache key is
+`(query, limit, filters, model)` — change any of these and you
+miss. Cache invalidation is automatic: ingest and delete evict
+every entry whose filter could match the affected document.
+
+| Field | Default | Effect |
+|---|---|---|
+| `ragabast.query_cache_size` | `512` | Maximum number of cached search responses. LRU eviction once full. Env: `RAGABAST_QUERY_CACHE_SIZE`. |
+| `ragabast.query_cache_ttl` | `5m` | Time-to-live per cache entry. Even on a quiet cache, every entry expires after this duration so model-output drift can't keep stale results alive forever. Env: `RAGABAST_QUERY_CACHE_TTL`. |
+
+Hit rate is visible in `/api/health/full` — useful when tuning the
+TTL and size knobs for your traffic shape. Set `query_cache_size: 0`
+to disable the cache entirely (every search re-runs the full
+pipeline).
+
+## Chat history persistence
+
+Follow-up questions in the chat UI used to be one-shot — the LLM
+had no memory of the prior exchange, so "tell me more about that"
+always returned a generic answer. The chat session store fixes
+this: every conversation is keyed by a server-generated UUID held
+in a `ragabast_chat_session` cookie, and prior turns are threaded
+into subsequent LLM calls.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/chat/export?session_id=<id>` | Stream the chat transcript as a markdown download (`text/markdown`, `Content-Disposition: attachment; filename="ragabast-chat-<id8>-<unix>.md"`). 404 when the session has no messages. |
+| `POST` | `/chat/clear` | Drop the server-side history AND the browser cookie so the next chat starts fresh. The "private mode" toggle. |
+
+The transcript format:
+
+```markdown
+## User
+
+What is ragabast?
+
+## Assistant
+
+A markdown chunker and RAG server.
+```
+
+Sessions are in-memory only by default — restart drops them. The
+chat session store does not persist to disk; see issue #77
+(tracked) for the sqlite-backed follow-up.
+
+| Field | Default | Effect |
+|---|---|---|
+| `ragabast.chat_session_max_turns` | `20` | FIFO-trimmed cap. Each turn is user + assistant (≈40 messages). Env: `RAGABAST_CHAT_SESSION_MAX_TURNS`. |
+
+`/chat/clear` is the privacy affordance — operators who want a clean
+slate tap it and the prior context is gone immediately, both in
+the store and in the browser cookie.
+
+## Embedding task prompts
+
+Some embedding models (notably Google's `embedding-gemma` and
+OpenAI's `text-embedding-3-*`) take a task-name prompt that biases
+the embedding toward the intended use. For ragabast's two distinct
+embed cases — document chunks vs. user queries — the prompts should
+differ: a "search_document" prompt for what's being indexed, a
+"search_query" prompt for what's being searched.
+
+```yaml
+ollama:
+  embedding_doc_prompt:    "search_document: "    # prepended to chunk text
+  embedding_query_prompt:  "search_query: "       # prepended to user query
+```
+
+Env: `OLLAMA_EMBEDDING_DOC_PROMPT`, `OLLAMA_EMBEDDING_QUERY_PROMPT`.
+Empty (the default) sends no prompt prefix — appropriate for
+`nomic-embed-text`, `mxbai-embed-large`, and most other models
+that don't take a task input.
+
+Setting both prompts to the SAME value (or leaving both empty)
+makes queries and documents indistinguishable, which can degrade
+retrieval quality by 5-15% on asymmetric search tasks. The two
+fields are intentionally separate so operators can tune them
+independently.
