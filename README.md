@@ -615,6 +615,49 @@ retrieval quality by 5-15% on asymmetric search tasks. The two
 fields are intentionally separate so operators can tune them
 independently.
 
+### Models that take a task input
+
+The canonical case is Google's **embedding-gemma** — open-weights,
+designed to run locally via Ollama / vLLM / llama.cpp / LM Studio.
+It's trained to expect a task prefix in the input text; without
+one, retrieval quality drops measurably. The canonical prefixes:
+
+| Model | `embedding_doc_prompt` | `embedding_query_prompt` |
+|---|---|---|
+| `embeddinggemma` / `embedding-gemma` | `search_document: ` | `search_query: ` |
+| OpenAI `text-embedding-3-*` | ` ` *(space)* | ` ` *(space)* |
+| jina v5 | `task=retrieval.passage: ` | `task=retrieval.query: ` |
+
+OpenAI's `text-embedding-3-*` family accepts a "task" via prompt
+prefix too, but it's rarely useful in practice — set both prompts
+to a single space if you want to keep the prefix-prepend on (for
+model symmetry) without biasing the embedding.
+
+The OpenAI-compat server receives the prefixed text in the standard
+`/v1/embeddings` request — there's no separate `task` field on the
+wire. The prefix-prepend happens at the application layer, before
+the HTTP POST.
+
+### Models that DO NOT take a task input
+
+`nomic-embed-text`, `mxbai-embed-large`, `bge-*`, `e5-*`, and most
+older embedding models expect raw text. Leave both prompts empty
+(the default). Setting a prefix on a model that doesn't expect
+one can degrade quality.
+
+### Google's native Gemini API
+
+`embedding-gemma` is also available via Google's native Gemini
+endpoint, but that API is **not** OpenAI-compat. ragabast does
+not speak the native Gemini embedding protocol — operators
+wanting hosted embedding-gemma would need a proxy that exposes
+`/v1/embeddings`. The same caveat applies to Google's other
+embedding models (`gemini-embedding-001`, `gemini-embedding-2`),
+which work today only because Google's OpenAI-compat shim
+translates the wire format; the `dimensions` field is silently
+ignored by that shim, so Matryoshka truncation has no effect
+against Google-hosted embeddings.
+
 ## MCP (Model Context Protocol)
 
 ragabast exposes its corpus as MCP tools so any compatible
