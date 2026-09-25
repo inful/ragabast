@@ -18,15 +18,16 @@ graph TB
     end
 
     subgraph "Service layer (internal/service)"
-        service[Service struct<br/>config + parser + chunker<br/>+ vectorOps + llmClient]
-        searchFilters[SearchFilters<br/>DocumentID, Tag, Category]
+        service[Service struct<br/>config + parser + chunker<br/>+ vectorOps + llmClient<br/>+ queryCache + chatSessions]
+        searchFilters[SearchFilters<br/>DocumentID, Tag, Category,<br/>CreatedAfter/Before,<br/>UpdatedAfter/Before]
         ingestFn[IngestFile / IngestDirectory]
         searchFn[Search — semantic-only (v0.3.0)]
-        hybridFn[HybridSearch — semantic + keyword RRF (v0.4.0+)]
-        queryFn[Query / QueryDebug — soft-deprecated]
+        hybridFn[HybridSearch — keyword / semantic / hybrid RRF (v0.4.0+)]
+        queryFn[Query / QueryDebugWithOptions<br/>+ History threading]
         frontmatterFn[SuggestFrontmatter]
-        linksFn[SuggestLinks]
-        statsFn[GetStats / CheckHealth]
+        linksFn[HUMA /api/link-suggestions<br/>direct Search wrapper]
+        statsFn[GetStats / CheckHealth / ValidateConnection]
+        chatFn[AppendChatTurn / ChatSessionHistory /<br/>ClearChatSession / ExportChatTranscript]
     end
 
     subgraph "Parser + Chunker"
@@ -111,10 +112,17 @@ graph TB
   type and constructor live in `service.go`; ingest in `ingest.go`;
   search/query in `query.go`; LLM helpers in `llm.go`; prompt assembly
   in `prompt.go`; frontmatter suggestion in `frontmatter.go` +
-  `frontmatter_parse.go`; link extraction/policy in `links_extract.go`
-  + `links_policy.go`; catalog stats in `catalog.go` + `stats.go`;
-  query context building in `query_context.go`; document listing in
-  `documents.go`.
+  `frontmatter_parse.go` + `frontmatter_prompt.go`; link
+  extraction/policy in `links_extract.go` + `links_policy.go` +
+  `links_section.go` (the trailing-Links stripper); catalog stats in
+  `catalog.go` + `stats.go` + `cache_stats.go`; query context
+  building in `query_context.go`; document listing in `documents.go`;
+  chat session persistence in `chat_session.go`; date-range filter
+  parsing in `date_filter.go`; chat-reply post-processing in
+  `pipeline.go` + `scratchpad.go` + `think_tags.go` + `thinking.go`;
+  corruption detection in `corruption.go`; inline source-link
+  rendering in `inline_links.go`. The bounded LRU query cache is its
+  own subpackage: `internal/service/querycache/`.
 - Public surface (consumed by `internal/web` through the `serviceAPI`
   interface in `huma_helpers.go`):
 
@@ -123,18 +131,28 @@ graph TB
   | `IngestFile(ctx, filePath) error` | One file off disk. |
   | `IngestDirectory(ctx, dirPath) (IngestResult, error)` | Walks a directory and ingests every `.md`; returns aggregate counts. |
   | `IngestDocument(ctx, content) (*models.Document, error)` | Raw markdown string. |
+  | `BulkUpdateDocuments(ctx, patches, requester)` | Apply metadata patches (tags/categories) to many documents in one call (#72). Per-item errors don't fail the batch. |
+  | `DeleteDocument(ctx, documentID)` | Drop every chunk for a document. |
+  | `DeleteChunk(ctx, chunkID)` | Drop one chunk. |
   | `Search(ctx, query, limit, filters)` | **Find-docs entry point (v0.3.0).** Pure semantic ranking via the embedding store. Kept for callers that depend on v0.3.0 semantics; new callers should use `HybridSearch`. |
+  | `SearchByDocument(ctx, query, documentID, limit)` | Scope a search to one document; used by the per-doc UI affordances. |
   | `HybridSearch(ctx, query, limit, filters, mode)` | **Find-docs entry point (v0.4.0+).** Runs keyword, semantic, or hybrid (RRF) per the `mode` parameter. Filters apply to BOTH rankings before fusion. The HTTP API defaults to `hybrid`. |
-  | `Query`, `QueryDebugWithOptions` | Chat-mode RAG. Soft-deprecated: prefer `Search` for retrieval-only callers. A one-shot warning is logged per process to nudge migrations. |
+  | `Query(ctx, query, limit)` / `QueryDebugWithOptions(ctx, query, limit, opts)` | Chat-mode RAG. `QueryDebugWithOptions` accepts `History []ChatMessage` so the LLM sees the prior exchange. Both are still live — no soft-deprecation banner. |
   | `SuggestFrontmatter(ctx, doc)` | LLM-assisted `description`/`categories`/`tags`/`custom_tags` suggestion; parser tolerates unstructured LLM output via `constructJSONFromText`. |
-  | `SuggestLinks(ctx, query)` | Returns link URLs extracted from the top retrieved chunks. |
+  | `AppendChatTurn(ctx, sessionID, exchange...)` / `ChatSessionHistory(sessionID)` / `ClearChatSession(sessionID)` / `ExportChatTranscript(sessionID)` | In-memory chat session store (v0.7.0 #22). Cookie-keyed, FIFO-trimmed to `ChatSessionMaxTurns`. |
+  | `ListDocuments(ctx)` / `ListDocumentsPaged(ctx, limit, offset)` | Catalog listing. Paged variant backs `/api/documents` and `/documents` UI; default 25, capped at 1000. |
+  | `GetDocument(ctx, documentID)` | Single-document fetch with chunk metadata. |
+  | `GetChunk(ctx, chunkID)` | Single-chunk fetch. |
   | `GetNormalizedTags`, `GetNormalizedCategories`, `GetTagsAndCategories` | Catalog lookups over the vector store metadata. |
-  | `GetUniqueDocuments` | List ingested documents for `/documents`. |
   | `GetStats` | Doc count, model keys, etc. Used by `status`. |
-  | `CheckHealth` | Round-trip ping for `/api/health`. |
+  | `CheckHealth` / `ValidateConnection` | Round-trip ping for `/api/health` and `/api/health/full`. |
+  | `QueryCacheStats` | LRU cache hit-rate counters surfaced by `/api/health/full` (#69). |
 
-- The `SearchFilters` struct (`DocumentID`, `Tag`, `Category`) is the
-  modern way to scope a search; it converts to a `chromem-go` `Where`
+- The `SearchFilters` struct (`DocumentID`, `Tag`, `Category`,
+  `CreatedAfter`, `CreatedBefore`, `UpdatedAfter`, `UpdatedBefore`) is
+  the modern way to scope a search; date fields filter on the parent
+  document's frontmatter `created` / `updated` timestamps and combine
+  with AND semantics. Filters convert to a `chromem-go` `Where`
   filter via `toWhere`.
 
 ### Parser + Chunker
@@ -227,35 +245,42 @@ graph TB
 
   | Method | Path | Operation |
   |---|---|---|
-  | GET | `/api/health` | health |
+  | GET | `/api/health` | liveness — `200 OK` if the process is running |
+  | GET | `/api/health/full` | readiness — per-subsystem status + queue depth + cache hit rate; `503` if anything critical is degraded |
   | GET | `/api/tags` | normalized tags |
   | GET | `/api/categories` | normalized categories |
   | GET | `/api/tags-categories` | both |
-| POST | `/api/ingest` | ingest one Markdown document (sync) |
-| POST | `/api/ingest/raw` | ingest raw Markdown body (sync) |
-| POST | `/api/ingest/file` | ingest multipart upload (sync) |
-| POST | `/api/ingest/async` | submit ingest job; returns 202 + job_id |
-| GET | `/api/ingest/jobs/{id}` | poll async ingest job status |
-| GET | `/api/documents` | list ingested documents |
+  | POST | `/api/ingest` | ingest one Markdown document (sync) |
+  | POST | `/api/ingest/raw` | ingest raw Markdown body (sync) |
+  | POST | `/api/ingest/file` | ingest multipart upload (sync) |
+  | POST | `/api/ingest/batch` | ingest an array or NDJSON stream of documents; per-item errors don't fail the batch (#71) |
+  | POST | `/api/ingest/async` | submit ingest job; returns 202 + job_id |
+  | GET | `/api/ingest/jobs` | list jobs with optional `status` / `limit` / `offset` filters |
+  | GET | `/api/ingest/jobs/{id}` | poll async ingest job status |
+  | GET | `/api/documents` | list ingested documents (paginated) |
   | GET | `/api/documents/{document_id}` | get one |
+  | POST | `/api/documents/bulk-update` | apply metadata patches to many documents (#72) |
   | POST | `/api/documents/prune` | delete chunks not present on disk |
-  | POST | `/api/query` | chat-mode (soft-deprecated) |
+  | POST | `/api/query` | chat-mode RAG |
   | POST | `/api/search` | find-docs (recommended) |
   | POST | `/api/frontmatter/suggest` | LLM-assisted frontmatter |
-  | POST | `/api/link-suggestions` | link extraction |
+  | POST | `/api/link-suggestions` | link extraction (direct Search wrapper, no service-side SuggestLinks method) |
+  | GET | `/api/chat/export` | stream the chat session as markdown (v0.7.0 #39) |
 
 - Web UI pages (chi):
 
   | Method | Path | Handler |
   |---|---|---|
-  | GET | `/` | chat page |
+  | GET | `/` | chat page (sets session cookie + CSRF) |
   | GET | `/chat` | redirect → `/` |
-  | POST | `/chat/message` | HTMX chat reply |
+  | POST | `/chat/message` | HTMX chat reply (threads History from session store) |
+  | POST | `/chat/clear` | drop session history + cookie (private-mode toggle) |
+  | GET | `/api/chat/export` | chat transcript download (anchored from the chat page) |
   | GET | `/search` | find-docs search form |
   | POST | `/search` | HTMX search results |
   | GET | `/ingest` | upload form |
   | POST | `/ingest` | HTMX upload result |
-  | GET | `/documents` | ingested-document list |
+  | GET | `/documents` | ingested-document list (paginated) |
   | GET | `/static/*` | CSS / assets |
 
 - Rendered with `html/template`; styling is Bulma. `renderChatMarkdownToSafeHTML`
@@ -285,11 +310,24 @@ graph TB
    - `mode=semantic` skips the keyword side entirely (v0.3.0 behaviour);
      `mode=keyword` skips the embedding side.
 
-3. **Chat-mode query (soft-deprecated)**
-   - User message + chat history → `Service.Query` → embed →
-     top-K retrieve → assemble context (parent sections, tags, categories,
-     URLs) → `OpenAILLMClient.Chat` (chat-completions with system prompt) →
-     answer streamed/returned to caller.
+3. **Chat-mode query**
+   - User message + session-scoped history → `Service.QueryDebugWithOptions`
+     with `LLMOptions{History: prior}` (loaded from the in-memory
+     chat session store keyed by the `ragabast_chat_session`
+     cookie; empty session_id opts out) → embed → top-K retrieve
+     → assemble context (parent sections, tags, categories, URLs) →
+     `OpenAILLMClient.Chat` (chat-completions with system prompt) →
+     reply post-processing (strip `<scratchpad>`, strip native
+     `<think>` tokens, strip leading-thinking heuristic backstop,
+     strip trailing "Links:" section, inline `[src:N]` → markdown
+     links, render to HTML via `goldmark` + `sanitizeForChatHTML`)
+     → HTML returned to the HTMX fragment target.
+   - After a successful reply, the handler records the exchange via
+     `Service.AppendChatTurn`. The store trims FIFO at
+     `ChatSessionMaxTurns` (default 20). Session id is server-minted
+     in a `HttpOnly + SameSite=Lax` cookie on first visit; reloads
+     preserve it. `/chat/clear` and `/api/chat/export` are the
+     privacy and portability affordances.
 
 4. **Frontmatter suggestion**
    - User pastes raw Markdown body → `Service.SuggestFrontmatter` →
@@ -330,7 +368,8 @@ graph TB
 | `internal/parser` | docbuilder Markdown → `*Document` (frontmatter + body + fingerprint) |
 | `internal/chunker` | H1/H2 split, stable chunk IDs, size validation |
 | `internal/vector` | chromem-go wrapper, embedding client, LLM client, `SearchFilters`-aware `Where`, bleve-backed keyword index (`internal/vector/search_index.go`) |
-| `internal/service` | `Service` wiring + every business operation (ingest, search, query, frontmatter, links, catalog, stats, health) |
+| `internal/service` | `Service` wiring + every business operation (ingest, search, query, frontmatter, links, catalog, stats, health, chat sessions, bulk update, date filters) |
+| `internal/service/querycache` | Bounded LRU cache for repeated search calls (#69). Subpackage to keep the eviction / TTL bookkeeping out of `service.go`. |
 | `internal/web` | chi router, HUMA API, HTMX pages, server lifecycle |
 | `internal/web/jobs` | Persistent async ingest queue (JSON files + bounded worker pool + restart recovery) |
 
