@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -55,7 +56,8 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 
 		doc, err := svc.IngestDocument(ctx, content)
 		if err != nil {
-			return nil, huma.Error400BadRequest("failed to ingest")
+			return nil, huma.Error400BadRequest(
+				fmt.Sprintf("failed to ingest: %s", err.Error()))
 		}
 
 		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{
@@ -90,7 +92,8 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 
 		doc, err := svc.IngestDocument(ctx, string(input.RawBody))
 		if err != nil {
-			return nil, huma.Error400BadRequest("failed to ingest")
+			return nil, huma.Error400BadRequest(
+				fmt.Sprintf("failed to ingest: %s", err.Error()))
 		}
 
 		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{
@@ -133,7 +136,8 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 
 		doc, err := svc.IngestDocument(ctx, string(b))
 		if err != nil {
-			return nil, huma.Error400BadRequest("failed to ingest")
+			return nil, huma.Error400BadRequest(
+				fmt.Sprintf("failed to ingest: %s", err.Error()))
 		}
 
 		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{
