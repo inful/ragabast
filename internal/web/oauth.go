@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,12 @@ import (
 
 	"github.com/ragabast/internal/config"
 )
+
+// loginTpl is the chooser page template, parsed from the
+// embedded templatesFS at package init so the per-request
+// handler can render it without paying template.Parse
+// cost on every GET /auth/login.
+var loginTpl = template.Must(template.ParseFS(templatesFS, "templates/login.html"))
 
 // oauthStateCookieName is the short-lived cookie that
 // carries the OAuth state token across the redirect. It is
@@ -309,6 +316,17 @@ func buildProviderEntry(ctx context.Context, p config.OAuthProvider, serverBase 
 	}
 }
 
+// loginPageProvider is one row in the chooser template.
+// DisplayName is the human-friendly label the UI shows;
+// Name is the URL slug the link points at. Next is the
+// redirect-after-login target (when the operator chose
+// one before being sent to /auth/login).
+type loginPageProvider struct {
+	Name        string
+	DisplayName string
+	Next        string
+}
+
 // handleLogin renders the login page. With zero providers
 // configured it returns 503 (auth disabled). With one
 // provider it redirects straight to /auth/<name>/login so
@@ -321,26 +339,90 @@ func (h *oauthHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(h.providers) == 1 {
-		// Pick the only configured provider.
+		// Pick the only configured provider. Iterating
+		// over a map gives non-deterministic order, but
+		// there's only one entry so it doesn't matter.
 		for name := range h.providers {
 			http.Redirect(w, r, "/auth/"+name+"/login", http.StatusFound)
 
 			return
 		}
 	}
-	// Multi-provider: the rendered template lists each
-	// provider as a button. Fall-through to the template
-	// rendering path.
+	// Multi-provider: render the chooser template. The
+	// template lives at templates/login.html (embedded
+	// into the binary) and lists every configured
+	// provider as a link to /auth/<name>/login.
+	next := r.URL.Query().Get("next")
+	if !isSafeRedirect(next) {
+		next = ""
+	}
+	providers := make([]loginPageProvider, 0, len(h.providers))
+	for name, entry := range h.providers {
+		providers = append(providers, loginPageProvider{
+			Name:        name,
+			DisplayName: providerDisplayName(entry.cfg),
+			Next:        next,
+		})
+	}
+	// Sort for stable ordering across restarts.
+	sortLoginProviders(providers)
+
+	data := map[string]any{
+		"Providers":  providers,
+		"SessionTTL": formatSessionTTL(h.cfg.SessionTTL),
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	// Minimal HTML fallback for now — the template layer
-	// replaces this once renderTemplate gains a LoginPage
-	// hook.
-	_, _ = w.Write([]byte("<!doctype html><title>Sign in</title><ul>"))
-	for name := range h.providers {
-		_, _ = fmt.Fprintf(w, `<li><a href="/auth/%s/login">Sign in with %s</a></li>`, name, name)
+	if err := loginTpl.Execute(w, data); err != nil {
+		// Best-effort: the headers are already on the
+		// wire, so we can't change the status code.
+		// Log so operators see the failure.
+		_, _ = fmt.Fprintf(w, "template error: %v", err)
 	}
-	_, _ = w.Write([]byte("</ul>"))
+}
+
+// providerDisplayName is the user-facing label for a
+// provider. Type=oidc uses the configured Name (the URL
+// slug) because there's no canonical "human" name; the
+// static presets get their well-known display names so the
+// UI reads "Sign in with GitHub" rather than "Sign in with
+// github.com".
+func providerDisplayName(p config.OAuthProvider) string {
+	switch p.Type {
+	case "github":
+		return "GitHub"
+	case "gitlab":
+		return "GitLab"
+	case "forgejo":
+		return "Forgejo"
+	default:
+		return p.Name
+	}
+}
+
+// formatSessionTTL renders the configured TTL in a
+// human-readable form for the chooser page footer. Zero
+// (no expiry) renders as "until restart" so the operator
+// understands the trade-off.
+func formatSessionTTL(d time.Duration) string {
+	if d == 0 {
+		return "until restart"
+	}
+
+	return d.String()
+}
+
+// sortLoginProviders orders providers by DisplayName so
+// the chooser page is stable across server restarts.
+func sortLoginProviders(ps []loginPageProvider) {
+	// Insertion sort — the slice is small (typically 1-3
+	// entries) so the overhead of sort.Interface is not
+	// worth it.
+	for i := 1; i < len(ps); i++ {
+		for j := i; j > 0 && ps[j-1].DisplayName > ps[j].DisplayName; j-- {
+			ps[j-1], ps[j] = ps[j], ps[j-1]
+		}
+	}
 }
 
 // handleProviderLogin starts the OAuth flow for the named

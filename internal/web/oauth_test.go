@@ -584,6 +584,38 @@ func TestLoginPage_SingleProviderRedirects(t *testing.T) {
 	assert.Equal(t, "/auth/gh/login", loc.String())
 }
 
+func TestLoginPage_MultipleProvidersRendersChooser(t *testing.T) {
+	user := fakeUser{}
+	srv := fakeGitHubServer(t, "https://app.example.com/auth/gh/callback", user)
+	defer srv.Close()
+	cfg := &config.Config{Auth: config.AuthConfig{
+		SessionTTL: time.Hour,
+		CookieName: "ragabast_session",
+		Providers: []config.OAuthProvider{
+			{Name: "gh", Type: "github", ClientID: "id", ClientSecret: "sec"},
+			{Name: "gl", Type: "gitlab", ClientID: "id", ClientSecret: "sec"},
+		},
+	}}
+	h, err := newOAuthHandlers(cfg, "https://app.example.com", newSessionStore(time.Hour))
+	require.NoError(t, err)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/login?next=/chat", nil)
+	w := httptest.NewRecorder()
+	h.handleLogin(w, req)
+	res := w.Result()
+	defer func() { _ = res.Body.Close() }()
+
+	require.Equal(t, http.StatusOK, res.StatusCode)
+	assert.Contains(t, res.Header.Get("Content-Type"), "text/html")
+	body, _ := io.ReadAll(res.Body)
+	html := string(body)
+	assert.Contains(t, html, "Sign in with GitHub")
+	assert.Contains(t, html, "Sign in with GitLab")
+	assert.Contains(t, html, "/auth/gh/login")
+	assert.Contains(t, html, "/auth/gl/login")
+	assert.Contains(t, html, "next=%2fchat", "next query parameter must be threaded into the chooser links")
+}
+
 func TestLoginPage_NoProvidersReturns503(t *testing.T) {
 	cfg := &config.Config{Auth: config.AuthConfig{CookieName: "ragabast_session", SessionTTL: time.Hour}}
 	h, err := newOAuthHandlers(cfg, "https://app.example.com", newSessionStore(time.Hour))
