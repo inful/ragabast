@@ -159,18 +159,32 @@ func withOptionalSession(r *http.Request, sessions *sessionStore, cookieName str
 //   - GET /, GET /chat, GET /search, GET /ingest, GET /documents
 //     (form pages — browsers do not send Authorization on GETs)
 //   - GET /static/* (CSS/JS/images)
+//   - GET /auth/login, /auth/<provider>/login,
+//     /auth/<provider>/callback — the OAuth flow itself
+//     must be reachable without a credential; the IdP
+//     redirect that lands on /auth/<provider>/callback
+//     carries no session yet
 //   - OPTIONS * (CORS preflight)
 //
-// Everything else requires the bearer token when
-// server.auth_token is configured.
+// Everything else requires the bearer token or a session
+// cookie when auth is configured.
 func isPublicRoute(method, path string) bool {
 	switch method {
 	case http.MethodGet:
 		switch path {
 		case "/", "/chat", "/search", "/ingest", "/documents":
 			return true
+		case "/auth/login", "/auth/me":
+			return true
 		}
 		if strings.HasPrefix(path, "/static/") || path == "/static" {
+			return true
+		}
+		if strings.HasPrefix(path, "/auth/") {
+			// /auth/<provider>/login and
+			// /auth/<provider>/callback — the entire
+			// /auth/ tree is open for GET so the
+			// OAuth handshake can complete.
 			return true
 		}
 	case http.MethodOptions:

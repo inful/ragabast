@@ -2,13 +2,16 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +41,14 @@ type Server struct {
 	// out of async ingest). The HTTP layer returns 503 from
 	// /api/ingest/async when this is nil.
 	ingestQueue *jobs.Queue
+	// oauthHandlers is the OAuth / OIDC login machinery.
+	// nil when server.auth.providers is empty (the
+	// historical single-user / bearer-token install). The
+	// session store, when oauthHandlers is non-nil, holds
+	// authenticated browser sessions keyed by the
+	// session-cookie value.
+	oauthHandlers *oauthHandlers
+	sessions      *sessionStore
 }
 
 // internalError logs the underlying error and returns a generic 500 to the
@@ -94,6 +105,33 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 		router.Use(corsMiddleware(cfg.Server.CORSOrigins))
 	}
 
+	// OAuth / session-cookie auth. The session store
+	// and oauthHandlers are constructed only when at
+	// least one provider is configured; both are nil in
+	// the historical single-user / bearer-token install
+	// so the existing auth path keeps working.
+	var (
+		sessions      *sessionStore
+		oauthHandlers *oauthHandlers
+	)
+	if len(cfg.Auth.Providers) > 0 {
+		// sessionTTL zero → sessions live forever
+		// (in-memory, until restart). Default to 12h
+		// when the operator hasn't set one.
+		ttl := cfg.Auth.SessionTTL
+		if ttl == 0 {
+			ttl = 12 * time.Hour
+		}
+		sessions = newSessionStore(ttl)
+		serverBase := deriveServerBase(cfg)
+		oh, err := newOAuthHandlers(cfg, serverBase, sessions)
+		if err != nil {
+			log.Printf("web: failed to initialize OAuth providers: %v; starting without session auth", err)
+		} else {
+			oauthHandlers = oh
+		}
+	}
+
 	// Auth runs last so the body-size limit, security
 	// headers, CORS preflight, and request logging all apply
 	// to auth-failed requests too. With auth_token empty
@@ -104,13 +142,7 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// AuthTokens list, deduping by Value. NewServer is the
 	// only call site for authMiddleware — keep it that way
 	// so the security boundary is easy to audit.
-	//
-	// The session store and cookie name are passed when
-	// OAuth providers are configured; both are nil/empty
-	// in the historical single-user local install so the
-	// middleware stays a pure bearer-token check (or a
-	// no-op when no bearer token is set either).
-	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens(), nil, ""))
+	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens(), sessions, cfg.Auth.CookieName))
 
 	// csrfMiddleware runs after auth so a Bearer-auth POST
 	// (which cannot be made cross-origin by a browser) skips
@@ -224,17 +256,149 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	}
 
 	s := &Server{
-		config:      cfg,
-		service:     svc,
-		router:      router,
-		templates:   templates,
-		fallback:    newFallbackTemplates(),
-		ingestQueue: ingestQueue,
+		config:        cfg,
+		service:       svc,
+		router:        router,
+		templates:     templates,
+		fallback:      newFallbackTemplates(),
+		ingestQueue:   ingestQueue,
+		oauthHandlers: oauthHandlers,
+		sessions:      sessions,
 	}
 
 	s.registerRoutes()
 
 	return s
+}
+
+// registerAuthRoutes wires the OAuth handlers into the
+// chi router. The routes are always registered so
+// /auth/login and /auth/me return predictable responses
+// whether OAuth is configured or not. The per-provider
+// handlers short-circuit to a 503 when oauthHandlers is
+// nil (the historical single-user / bearer-token
+// install) so an operator hitting the path sees the
+// missing-config signal in the log.
+func (s *Server) registerAuthRoutes() {
+	s.router.Get("/auth/login", s.handleAuthLogin)
+	s.router.Get("/auth/{provider}/login", s.handleAuthProviderLogin)
+	s.router.Get("/auth/{provider}/callback", s.handleAuthProviderCallback)
+	s.router.Post("/auth/logout", s.handleAuthLogout)
+	s.router.Get("/auth/me", s.handleMe)
+}
+
+// handleAuthLogin dispatches to the OAuth handler when
+// configured, 503 otherwise.
+func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if s.oauthHandlers == nil {
+		http.Error(w, "OAuth providers are not configured", http.StatusServiceUnavailable)
+
+		return
+	}
+	s.oauthHandlers.handleLogin(w, r)
+}
+
+// handleAuthProviderLogin dispatches to the per-provider
+// handler when configured.
+func (s *Server) handleAuthProviderLogin(w http.ResponseWriter, r *http.Request) {
+	if s.oauthHandlers == nil {
+		http.Error(w, "OAuth providers are not configured", http.StatusServiceUnavailable)
+
+		return
+	}
+	s.oauthHandlers.handleProviderLogin(w, r, chi.URLParam(r, "provider"))
+}
+
+// handleAuthProviderCallback dispatches to the
+// per-provider handler when configured.
+func (s *Server) handleAuthProviderCallback(w http.ResponseWriter, r *http.Request) {
+	if s.oauthHandlers == nil {
+		http.Error(w, "OAuth providers are not configured", http.StatusServiceUnavailable)
+
+		return
+	}
+	s.oauthHandlers.handleProviderCallback(w, r, chi.URLParam(r, "provider"))
+}
+
+// handleAuthLogout dispatches to the OAuth handler when
+// configured. When auth is unconfigured, respond 204 so
+// the UI's "Sign out" button is a safe no-op rather than
+// an error.
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	if s.oauthHandlers == nil {
+		w.WriteHeader(http.StatusNoContent)
+
+		return
+	}
+	s.oauthHandlers.handleLogout(w, r)
+}
+
+// handleMe returns the current session's user identity as
+// JSON for the UI's "signed in as" widget. 200 with
+// anonymous=true when no session is present (so the UI can
+// show "Sign in" without branching on status codes); 401
+// when auth is configured and no session resolves — keeps
+// the response consistent with the rest of the API.
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if s.oauthHandlers == nil || s.sessions == nil {
+		_, _ = w.Write([]byte(`{"authenticated":false}`))
+
+		return
+	}
+
+	sess, ok := s.sessions.Get(readSessionCookie(r, s.config.Auth.CookieName))
+	if !ok {
+		_, _ = w.Write([]byte(`{"authenticated":false}`))
+
+		return
+	}
+
+	u := userFromSession(sess)
+	role := u.Role
+	if role == "" {
+		role = "user"
+	}
+	body := map[string]any{
+		"authenticated": true,
+		"subject":       u.Subject,
+		"username":      u.Username,
+		"email":         u.Email,
+		"name":          u.Name,
+		"provider":      u.ProviderName,
+		"role":          role,
+	}
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(body)
+}
+
+// deriveServerBase is the externally-reachable origin
+// (scheme + host + port) the IdP redirects back to.
+// Falls back to http://<address>:<port> when neither TLS
+// nor X-Forwarded-Proto is in play. Operators behind a
+// reverse proxy should set the public-facing URL via a
+// follow-up config knob (the auth flow depends on it
+// matching what the IdP is configured with).
+func deriveServerBase(cfg *config.Config) string {
+	scheme := "http"
+	addr := cfg.Server.Address
+	port := cfg.Server.Port
+	if port == 0 {
+		port = 8080
+	}
+	if addr == "" {
+		addr = "localhost"
+	}
+
+	// Strip a port from Address if it already carries
+	// one; we'll re-append the configured Port.
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		addr = host
+	}
+
+	return scheme + "://" + net.JoinHostPort(addr, strconv.Itoa(port))
 }
 
 // registerRoutes registers all API routes and web handlers.
@@ -265,6 +429,14 @@ func (s *Server) registerRoutes() {
 	s.router.Get("/documents", s.handleDocumentsPage)
 
 	s.router.Get("/static/*", s.handleStatic)
+
+	// OAuth login / callback / logout / me. Registered
+	// here rather than via Huma because they don't speak
+	// OpenAPI; they're browser-flow endpoints. /auth/* is
+	// also added to isPublicRoute so a logged-out browser
+	// can hit /auth/login without being redirected to
+	// itself.
+	s.registerAuthRoutes()
 
 	// MCP HTTP transport — opt-in. When
 	// server.mcp_http_enabled is true, mount the streamable
