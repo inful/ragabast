@@ -27,62 +27,51 @@ func AuthLabelFromContext(ctx context.Context) string {
 	return v
 }
 
-// authMiddleware enforces a shared-secret bearer token on the
-// API and form-mounted endpoints.
+// authMiddleware enforces authentication on the API and
+// form-mounted endpoints. It accepts one or both of:
 //
-// When server.auth_token is empty (the default), the middleware
-// is a no-op — every request passes through. This keeps the
-// single-user local install working without configuration and
-// matches the historical "no auth" behavior.
+//   - A shared-secret bearer token (server.auth_token /
+//     server.auth_tokens). Compared constant-time against
+//     the Authorization header.
+//   - A session cookie (server.auth.cookie_name) issued by
+//     the OAuth callback handler. Resolved against the
+//     sessionStore.
 //
-// When server.auth_token is set, every request to a
-// protected route MUST carry an `Authorization: Bearer <token>`
-// header whose token matches the configured value via a
-// constant-time comparison. Requests that fail are rejected
-// with 401 + WWW-Authenticate: Bearer so curl/clients can
-// retry correctly.
+// tokens is the merged list of effective bearer tokens
+// (see ServerConfig.EffectiveAuthTokens). sessions, when
+// non-nil, is the in-memory session store the callback
+// handler writes to. cookieName is the session-cookie name
+// (only consulted when sessions != nil).
 //
-// Public routes (always open, even when auth is configured):
-//   - GET /                — chat landing page
-//   - GET /chat, /search, /ingest, /documents — page chrome
-//     forms submit to these paths' POST siblings; the GET is
-//     public so the browser can render the form
-//   - GET /static/* — CSS/JS/images; browsers do not send
-//     Authorization on these requests
-//   - OPTIONS * — CORS preflight; the CORS middleware below
-//     answers 204 before auth would fire
+// Decision order per request:
 //
-// Trust model: the bearer token is the ONLY credential. There
-// is no session, no refresh, no user identity beyond "the
-// bearer knows the token". This matches ragabast's
-// single-tenant posture; multi-user auth is out of scope.
+//  1. Public GET/OPTIONS routes bypass entirely. If a
+//     session cookie is present on a public route, the
+//     session is still attached to the context so the
+//     handler can render the "signed in as" line.
+//  2. Bearer token matches → allow, stash the token label.
+//  3. Session cookie resolves to a live (non-expired)
+//     session → allow, stash the session, slide the
+//     expiry forward.
+//  4. Otherwise → 401 with WWW-Authenticate.
 //
-// Constant-time comparison: subtle.ConstantTimeCompare runs in
-// time independent of which byte differs. A naive `==` would
-// leak the first-differing-byte position through response
-// latency and let an attacker recover the token byte-by-byte.
-// authMiddleware enforces a bearer-token check on the API
-// and form-mounted endpoints. tokens is the merged list of
-// effective tokens (see ServerConfig.EffectiveAuthTokens):
-// the singular AuthToken plus the AuthTokens list, deduped.
+// When both tokens and sessions are nil/empty the
+// middleware is a no-op — every request passes through.
+// This keeps the single-user local install working
+// without configuration and matches the historical
+// "no auth" behavior.
 //
-// When tokens is empty (the default), the middleware is a
-// no-op — every request passes through. This keeps the
-// single-user local install working without configuration
-// and matches the historical "no auth" behavior.
-//
-// When tokens is non-empty, every request to a protected
-// route MUST carry `Authorization: Bearer <token>` matching
-// one of the configured values via constant-time comparison.
-// Requests that fail are rejected with 401 + WWW-Authenticate:
-// Bearer so curl/clients can retry correctly.
-//
-// If the matched token has a label configured, the label is
-// stashed on the request context (AuthLabelFromContext) so
-// the access log can attribute traffic to a specific
-// consumer. Labels are operational attribution only — they
-// do not grant any privilege.
-func authMiddleware(tokens []config.AuthToken) func(http.Handler) http.Handler {
+// Constant-time comparison: subtle.ConstantTimeCompare runs
+// in time independent of which byte differs. A naive `==`
+// would leak the first-differing-byte position through
+// response latency and let an attacker recover the token
+// byte-by-byte.
+func authMiddleware(tokens []config.AuthToken, sessions *sessionStore, cookieName string) func(http.Handler) http.Handler {
+	// Pre-compute the "any auth at all" boolean so the
+	// hot path doesn't have to recheck on every request.
+	hasTokens := len(tokens) > 0
+	hasSessions := sessions != nil
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Public routes are always open. Listing them
@@ -93,24 +82,72 @@ func authMiddleware(tokens []config.AuthToken) func(http.Handler) http.Handler {
 			// realize they need to decide whether to add it
 			// here.
 			if isPublicRoute(r.Method, r.URL.Path) {
+				r = withOptionalSession(r, sessions, cookieName)
 				next.ServeHTTP(w, r)
+
 				return
 			}
 
-			label, ok := matchBearer(r.Header.Get("Authorization"), tokens)
-			if !ok {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="ragabast"`)
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			// No auth configured → no-op pass-through.
+			if !hasTokens && !hasSessions {
+				next.ServeHTTP(w, r)
+
 				return
 			}
-			if label != "" {
-				ctx := context.WithValue(r.Context(), authLabelKey{}, label)
-				r = r.WithContext(ctx)
+
+			// Bearer token check first (programs).
+			if hasTokens {
+				if label, ok := matchBearer(r.Header.Get("Authorization"), tokens); ok {
+					if label != "" {
+						ctx := context.WithValue(r.Context(), authLabelKey{}, label)
+						r = r.WithContext(ctx)
+					}
+					next.ServeHTTP(w, r)
+
+					return
+				}
 			}
 
-			next.ServeHTTP(w, r)
+			// Session cookie check next (browsers).
+			if hasSessions {
+				updated := withOptionalSession(r, sessions, cookieName)
+				//nolint:contextcheck // updated carries the session-stamped context; SessionFromContext must read from updated, not r
+				if SessionFromContext(updated.Context()) != nil {
+					next.ServeHTTP(w, updated)
+
+					return
+				}
+			}
+
+			w.Header().Set("WWW-Authenticate", `Bearer realm="ragabast"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		})
 	}
+}
+
+// withOptionalSession returns r with a session attached to
+// its context if (a) sessions is non-nil and (b) the
+// request's cookie resolves to a live (non-expired)
+// session record. The Touch (sliding renewal) is a no-op
+// when the store's defaultTTL is zero (no expiry).
+//
+// Exists as a helper so the public-route and protected-
+// route branches of authMiddleware share one session-
+// resolution path — divergence there is a classic source
+// of "the login page works but the API doesn't" bugs.
+func withOptionalSession(r *http.Request, sessions *sessionStore, cookieName string) *http.Request {
+	if sessions == nil {
+		return r
+	}
+	sess, ok := sessions.Get(readSessionCookie(r, cookieName))
+	if !ok {
+		return r
+	}
+	if sessions.defaultTTL > 0 {
+		sessions.Touch(sess.ID)
+	}
+
+	return r.WithContext(WithSession(r.Context(), sess))
 }
 
 // isPublicRoute returns true for routes that must remain

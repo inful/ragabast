@@ -104,7 +104,13 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// AuthTokens list, deduping by Value. NewServer is the
 	// only call site for authMiddleware — keep it that way
 	// so the security boundary is easy to audit.
-	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens()))
+	//
+	// The session store and cookie name are passed when
+	// OAuth providers are configured; both are nil/empty
+	// in the historical single-user local install so the
+	// middleware stays a pure bearer-token check (or a
+	// no-op when no bearer token is set either).
+	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens(), nil, ""))
 
 	// csrfMiddleware runs after auth so a Bearer-auth POST
 	// (which cannot be made cross-origin by a browser) skips
