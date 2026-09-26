@@ -14,6 +14,7 @@ require (
 	github.com/philippgille/chromem-go v0.7.0
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.17
+	golang.org/x/oauth2 v0.37.0
 	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
 )
