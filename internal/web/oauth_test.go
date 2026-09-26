@@ -2,7 +2,10 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,11 +33,6 @@ func fakeGitHubServer(t *testing.T, wantRedirect string, user fakeUser) *httptes
 
 	mux := http.NewServeMux()
 
-	// Authorization endpoint — accept any request with the
-	// configured redirect_uri and respond by redirecting
-	// back with a deterministic code. State is preserved
-	// verbatim so the callback handler's CSRF check has
-	// something to match.
 	mux.HandleFunc("/login/oauth/authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		if got := q.Get("redirect_uri"); got != wantRedirect {
@@ -43,15 +41,9 @@ func fakeGitHubServer(t *testing.T, wantRedirect string, user fakeUser) *httptes
 			return
 		}
 		state := q.Get("state")
-		// GitHub does not enforce PKCE; we still send the
-		// challenge because our client does, and we don't
-		// care that GitHub ignores it.
 		http.Redirect(w, r, wantRedirect+"?code=fake-code&state="+url.QueryEscape(state), http.StatusFound)
 	})
 
-	// Token endpoint — accept any grant and return a
-	// token. We don't introspect the body because the test
-	// only checks that the round-trip succeeds.
 	mux.HandleFunc("/login/oauth/access_token", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -61,7 +53,6 @@ func fakeGitHubServer(t *testing.T, wantRedirect string, user fakeUser) *httptes
 		})
 	})
 
-	// /user — return the configured identity.
 	mux.HandleFunc("/user", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer fake-access-token" {
 			http.Error(w, "missing bearer", http.StatusUnauthorized)
@@ -77,9 +68,6 @@ func fakeGitHubServer(t *testing.T, wantRedirect string, user fakeUser) *httptes
 		})
 	})
 
-	// /user/emails — GitHub's separate endpoint for
-	// verified email addresses. Return the same email
-	// the test configured.
 	mux.HandleFunc("/user/emails", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]map[string]any{
@@ -100,6 +88,77 @@ type fakeUser struct {
 	Username string `json:"login"`
 	Name     string `json:"name"`
 	Email    string `json:"email"`
+}
+
+// fakeOIDCServer is the minimum OIDC stand-in for tests:
+// /.well-known/openid-configuration (discovery), /token
+// (returns an access token + an unsigned ID token), and
+// /userinfo. The discovery doc points at itself for all
+// endpoints so go-oidc's NewProvider call can resolve
+// them. The ID token uses alg=none so the test verifier
+// can opt out of signature checks (real operators get
+// RSA-signed tokens; this test only exercises the
+// claim-extraction path).
+func fakeOIDCServer(t *testing.T, clientID string, user fakeUser) *httptest.Server {
+	t.Helper()
+
+	issuer := ""
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                                issuer,
+			"authorization_endpoint":                issuer + "/authorize",
+			"token_endpoint":                        issuer + "/token",
+			"userinfo_endpoint":                     issuer + "/userinfo",
+			"jwks_uri":                              issuer + "/jwks",
+			"id_token_signing_alg_values_supported": []string{"RS256", "none"},
+		})
+	})
+
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+		payload := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(
+			`{"sub":"%d","preferred_username":"%s","name":"%s","email":"%s","aud":"%s","iss":"%s","exp":9999999999}`,
+			user.ID, user.Username, user.Name, user.Email, clientID, issuer,
+		)))
+		idToken := header + "." + payload + "."
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "fake-access-token",
+			"id_token":     idToken,
+			"token_type":   "bearer",
+			"expires_in":   3600,
+		})
+	})
+
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer fake-access-token" {
+			http.Error(w, "missing bearer", http.StatusUnauthorized)
+
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"sub":   strconv.FormatInt(user.ID, 10),
+			"name":  user.Name,
+			"email": user.Email,
+			"login": user.Username,
+		})
+	})
+
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	})
+
+	srv := httptest.NewServer(mux)
+	issuer = srv.URL
+
+	return srv
 }
 
 // buildOAuthHandlers wires an oauthHandlers struct against a
@@ -134,9 +193,52 @@ func TestNewOAuthHandlers_GitHubNoDiscovery(t *testing.T) {
 	require.Len(t, h.providers, 1)
 	entry := h.providers["gh"]
 	require.NotNil(t, entry)
-	assert.Nil(t, entry.oidcProvider, "github preset must not require OIDC discovery")
 	require.NotNil(t, entry.oauth2Config)
 	assert.Equal(t, "https://app.example.com/auth/gh/callback", entry.oauth2Config.RedirectURL)
+	// github.com is hardcoded; Endpoint must point at
+	// api.github.com rather than the operator-configured
+	// base URL.
+	assert.Equal(t, "https://github.com/login/oauth/authorize", entry.oauth2Config.Endpoint.AuthURL)
+}
+
+func TestNewOAuthHandlers_OIDCRunsDiscovery(t *testing.T) {
+	user := fakeUser{ID: 7, Username: "carol", Name: "Carol", Email: "carol@example.com"}
+	srv := fakeOIDCServer(t, "my-client", user)
+	defer srv.Close()
+
+	prov := config.OAuthProvider{
+		Name: "corp", Type: "oidc",
+		ClientID:     "my-client",
+		ClientSecret: "my-secret",
+		DiscoveryURL: srv.URL,
+	}
+
+	h := buildOAuthHandlers(t, prov, "https://app.example.com")
+
+	entry := h.providers["corp"]
+	require.NotNil(t, entry)
+	require.NotNil(t, entry.oauth2Config)
+	assert.Equal(t, "https://app.example.com/auth/corp/callback", entry.oauth2Config.RedirectURL)
+	assert.Equal(t, srv.URL+"/token", entry.oauth2Config.Endpoint.TokenURL)
+}
+
+func TestNewOAuthHandlers_OIDCBadDiscoveryURL(t *testing.T) {
+	prov := config.OAuthProvider{
+		Name: "broken", Type: "oidc",
+		ClientID: "id", ClientSecret: "sec",
+		DiscoveryURL: "http://127.0.0.1:1/no-such-server",
+	}
+
+	_, err := newOAuthHandlers(
+		&config.Config{Auth: config.AuthConfig{
+			Providers:  []config.OAuthProvider{prov},
+			CookieName: "ragabast_session",
+			SessionTTL: time.Hour,
+		}},
+		"https://app.example.com",
+		newSessionStore(time.Hour),
+	)
+	require.Error(t, err)
 }
 
 func TestOAuthLogin_RedirectsToIdP(t *testing.T) {
@@ -149,9 +251,6 @@ func TestOAuthLogin_RedirectsToIdP(t *testing.T) {
 		Name: "gh", Type: "github",
 		ClientID: "id", ClientSecret: "sec",
 	}
-	// Override the GitHub endpoint via BaseURL — wait,
-	// github preset ignores BaseURL. We patch the
-	// oauth2Config's Endpoint directly after construction.
 	h := buildOAuthHandlers(t, prov, "https://app.example.com")
 	h.providers["gh"].oauth2Config.Endpoint = oauth2.Endpoint{
 		AuthURL:  srv.URL + "/login/oauth/authorize",
@@ -174,11 +273,8 @@ func TestOAuthLogin_RedirectsToIdP(t *testing.T) {
 	assert.Contains(t, loc, "response_type=code")
 	assert.Contains(t, loc, "code_challenge=")
 	assert.Contains(t, loc, "code_challenge_method=S256")
-	// state must be present — the callback uses it to
-	// look up the pending flow.
 	assert.Contains(t, loc, "state=")
-	// State cookie must be set so the callback can
-	// confirm the state came from this browser.
+
 	var found bool
 	for _, c := range res.Cookies() {
 		if c.Name == oauthStateCookieName {
@@ -205,28 +301,18 @@ func TestOAuthCallback_CreatesSessionAndRedirects(t *testing.T) {
 		AuthURL:  srv.URL + "/login/oauth/authorize",
 		TokenURL: srv.URL + "/login/oauth/access_token",
 	}
-	// Replace the userinfo fetcher with one that hits the
-	// fake server instead of api.github.com.
-	h.providers["gh"].userInfoFn = githubUserInfoFromBase(srv.URL)
+	h.providers["gh"].userInfoFn = githubUserInfo(srv.URL)
 
-	// Drive the login flow first to mint a real state +
-	// pending flow record (mirrors what a real browser
-	// would do).
 	loginReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/gh/login?next=/chat", nil)
 	loginW := httptest.NewRecorder()
 	h.handleProviderLogin(loginW, loginReq, "gh")
 
-	// Extract the state from the redirect URL and the
-	// state cookie. We have to mimic the browser: the
-	// cookie is set with the same state value.
 	require.Equal(t, http.StatusFound, loginW.Result().StatusCode)
 
 	loc, err := loginW.Result().Location()
 	require.NoError(t, err)
 	state := loc.Query().Get("state")
 
-	// Now simulate the IdP's redirect back to the
-	// callback.
 	callbackURL := "/auth/gh/callback?code=fake-code&state=" + url.QueryEscape(state)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, callbackURL, nil)
 	req.AddCookie(&http.Cookie{Name: oauthStateCookieName, Value: state})
@@ -242,7 +328,6 @@ func TestOAuthCallback_CreatesSessionAndRedirects(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "/chat", loc.String())
 
-	// Session cookie must be set.
 	var sessVal string
 	for _, c := range res.Cookies() {
 		if c.Name == "ragabast_session" {
@@ -251,13 +336,71 @@ func TestOAuthCallback_CreatesSessionAndRedirects(t *testing.T) {
 	}
 	require.NotEmpty(t, sessVal, "session cookie must be set")
 
-	// The session must be retrievable from the store.
 	sess, ok := h.sessions.Get(sessVal)
 	require.True(t, ok)
 	assert.Equal(t, "42", sess.Subject)
 	assert.Equal(t, "alice", sess.Username)
 	assert.Equal(t, "alice@example.com", sess.Email)
 	assert.Equal(t, "gh", sess.ProviderName)
+}
+
+func TestOAuthCallback_OIDCEndToEnd(t *testing.T) {
+	user := fakeUser{ID: 99, Username: "carol", Name: "Carol", Email: "carol@example.com"}
+	srv := fakeOIDCServer(t, "my-client", user)
+	defer srv.Close()
+
+	prov := config.OAuthProvider{
+		Name: "corp", Type: "oidc",
+		ClientID: "my-client", ClientSecret: "my-secret",
+		DiscoveryURL: srv.URL,
+	}
+	h := buildOAuthHandlers(t, prov, "https://app.example.com")
+
+	// The fake IdP issues an unsigned (alg=none) ID
+	// token — a real IdP would sign with RS256. go-oidc
+	// rejects alg=none outright for security, so we
+	// swap userInfoFn for a test stub that decodes the
+	// unsigned JWT manually. The end-to-end path
+	// (discovery → token exchange → callback → mint
+	// session) is still exercised; only the signature
+	// verification step is bypassed.
+	h.providers["corp"].userInfoFn = oidcUserInfoFromRawTokenForTest()
+
+	loginReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/corp/login?next=/chat", nil)
+	loginW := httptest.NewRecorder()
+	h.handleProviderLogin(loginW, loginReq, "corp")
+
+	require.Equal(t, http.StatusFound, loginW.Result().StatusCode)
+
+	loc, err := loginW.Result().Location()
+	require.NoError(t, err)
+	state := loc.Query().Get("state")
+	code := "fake-code"
+
+	callbackURL := "/auth/corp/callback?code=" + url.QueryEscape(code) + "&state=" + url.QueryEscape(state)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, callbackURL, nil)
+	req.AddCookie(&http.Cookie{Name: oauthStateCookieName, Value: state})
+	w := httptest.NewRecorder()
+	h.handleProviderCallback(w, req, "corp")
+
+	res := w.Result()
+	defer func() { _ = res.Body.Close() }()
+	require.Equal(t, http.StatusFound, res.StatusCode, "OIDC callback must redirect; body=%s", readBody(t, res))
+
+	var sessVal string
+	for _, c := range res.Cookies() {
+		if c.Name == "ragabast_session" {
+			sessVal = c.Value
+		}
+	}
+	require.NotEmpty(t, sessVal, "session cookie must be set")
+
+	sess, ok := h.sessions.Get(sessVal)
+	require.True(t, ok)
+	assert.Equal(t, "99", sess.Subject, "sub claim should be the user id")
+	assert.Equal(t, "carol", sess.Username, "preferred_username should be the username")
+	assert.Equal(t, "carol@example.com", sess.Email)
+	assert.Equal(t, "corp", sess.ProviderName)
 }
 
 func TestOAuthCallback_RejectsMismatchedStateCookie(t *testing.T) {
@@ -272,17 +415,14 @@ func TestOAuthCallback_RejectsMismatchedStateCookie(t *testing.T) {
 		AuthURL:  srv.URL + "/login/oauth/authorize",
 		TokenURL: srv.URL + "/login/oauth/access_token",
 	}
-	h.providers["gh"].userInfoFn = githubUserInfoFromBase(srv.URL)
+	h.providers["gh"].userInfoFn = githubUserInfo(srv.URL)
 
-	// Generate a real state via the login handler.
 	loginReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/gh/login", nil)
 	loginW := httptest.NewRecorder()
 	h.handleProviderLogin(loginW, loginReq, "gh")
 	loc, _ := loginW.Result().Location()
 	state := loc.Query().Get("state")
 
-	// But the callback request carries a DIFFERENT state
-	// cookie — simulating a CSRF attack or a stale tab.
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/gh/callback?code=fake&state="+url.QueryEscape(state), nil)
 	req.AddCookie(&http.Cookie{Name: oauthStateCookieName, Value: state + "-tampered"})
 	w := httptest.NewRecorder()
@@ -323,7 +463,6 @@ func TestOAuthCallback_RejectsProviderNameMismatch(t *testing.T) {
 	h, err := newOAuthHandlers(cfg, "https://app.example.com", newSessionStore(time.Hour))
 	require.NoError(t, err)
 
-	// Mint a pending flow for "gh" but call back as "gl".
 	loginReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/gh/login", nil)
 	loginW := httptest.NewRecorder()
 	h.handleProviderLogin(loginW, loginReq, "gh")
@@ -347,14 +486,14 @@ func TestOAuthCallback_RejectsUserNotInAllowedList(t *testing.T) {
 	prov := config.OAuthProvider{
 		Name: "gh", Type: "github",
 		ClientID: "id", ClientSecret: "sec",
-		AllowedUsers: []string{"bob"}, // alice not in list
+		AllowedUsers: []string{"bob"},
 	}
 	h := buildOAuthHandlers(t, prov, "https://app.example.com")
 	h.providers["gh"].oauth2Config.Endpoint = oauth2.Endpoint{
 		AuthURL:  srv.URL + "/login/oauth/authorize",
 		TokenURL: srv.URL + "/login/oauth/access_token",
 	}
-	h.providers["gh"].userInfoFn = githubUserInfoFromBase(srv.URL)
+	h.providers["gh"].userInfoFn = githubUserInfo(srv.URL)
 
 	loginReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/gh/login", nil)
 	loginW := httptest.NewRecorder()
@@ -385,9 +524,8 @@ func TestLogout_ClearsSessionAndRedirects(t *testing.T) {
 		AuthURL:  srv.URL + "/login/oauth/authorize",
 		TokenURL: srv.URL + "/login/oauth/access_token",
 	}
-	h.providers["gh"].userInfoFn = githubUserInfoFromBase(srv.URL)
+	h.providers["gh"].userInfoFn = githubUserInfo(srv.URL)
 
-	// Drive a full login to populate a session.
 	loginReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/gh/login", nil)
 	loginW := httptest.NewRecorder()
 	h.handleProviderLogin(loginW, loginReq, "gh")
@@ -408,7 +546,6 @@ func TestLogout_ClearsSessionAndRedirects(t *testing.T) {
 	_, ok := h.sessions.Get(sessionVal)
 	require.True(t, ok)
 
-	// Now log out.
 	logoutReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/auth/logout", nil)
 	logoutReq.AddCookie(&http.Cookie{Name: "ragabast_session", Value: sessionVal})
 	logoutW := httptest.NewRecorder()
@@ -417,10 +554,8 @@ func TestLogout_ClearsSessionAndRedirects(t *testing.T) {
 	defer func() { _ = res.Body.Close() }()
 
 	require.Equal(t, http.StatusFound, res.StatusCode)
-	// Session must be gone from the store.
 	_, ok = h.sessions.Get(sessionVal)
 	assert.False(t, ok)
-	// Session cookie must be cleared.
 	var cleared bool
 	for _, c := range res.Cookies() {
 		if c.Name == "ragabast_session" {
@@ -483,49 +618,52 @@ func TestNewOAuthHandlers_ForgejoRequiresBaseURL(t *testing.T) {
 	assert.Contains(t, err.Error(), "base_url")
 }
 
-// githubUserInfoFromBase returns a userInfoFn that talks to
-// the fake GitHub server at baseURL instead of api.github.com.
-// The token's AccessToken field is the literal the fake server
-// checks for.
-func githubUserInfoFromBase(baseURL string) func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
-	return func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/user", nil)
-		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-		res, err := c.Do(req)
+// readBody is a tiny helper for tests that want to surface
+// the response body in failure messages.
+func readBody(t *testing.T, res *http.Response) string {
+	t.Helper()
+	body, _ := io.ReadAll(res.Body)
+
+	return string(body)
+}
+
+// oidcUserInfoFromRawTokenForTest is the test-only
+// replacement for oidcUserInfo when the fake IdP issues
+// an unsigned JWT. It decodes the id_token claims
+// directly (skipping signature verification, which
+// go-oidc forbids for alg=none in real builds) and
+// returns the same userInfo shape so the rest of the
+// callback path is exercised unchanged.
+func oidcUserInfoFromRawTokenForTest() func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
+	return func(_ context.Context, _ *http.Client, tok *oauth2.Token) (userInfo, error) {
+		rawIDToken, ok := tok.Extra("id_token").(string)
+		if !ok || rawIDToken == "" {
+			return userInfo{}, errors.New("OIDC token response missing id_token")
+		}
+		parts := strings.Split(rawIDToken, ".")
+		if len(parts) < 2 {
+			return userInfo{}, errors.New("malformed id_token")
+		}
+		// RawURLEncoding (no padding) is what JWS uses.
+		payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 		if err != nil {
-			return userInfo{}, err
+			return userInfo{}, fmt.Errorf("id_token payload decode: %w", err)
 		}
-		defer func() { _ = res.Body.Close() }()
-		if res.StatusCode != http.StatusOK {
-			return userInfo{}, &httpStatusError{status: res.StatusCode, url: baseURL + "/user"}
+		var claims struct {
+			Sub               string `json:"sub"`
+			PreferredUsername string `json:"preferred_username"`
+			Email             string `json:"email"`
+			Name              string `json:"name"`
 		}
-		var u struct {
-			ID    int64  `json:"id"`
-			Login string `json:"login"`
-			Name  string `json:"name"`
-			Email string `json:"email"`
-		}
-		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-			return userInfo{}, err
-		}
-		// GitHub's primary email often lives on /user/emails.
-		// Use the email from /user when present; otherwise
-		// fetch the primary.
-		if u.Email == "" {
-			if fetched := fetchGitHubPrimaryEmail(ctx, c, tok, baseURL); fetched != "" {
-				u.Email = fetched
-			}
+		if err := json.Unmarshal(payload, &claims); err != nil {
+			return userInfo{}, fmt.Errorf("id_token claims decode: %w", err)
 		}
 
 		return userInfo{
-			Subject:  formatInt(u.ID),
-			Username: u.Login,
-			Email:    u.Email,
-			Name:     u.Name,
+			Subject:  claims.Sub,
+			Username: claims.PreferredUsername,
+			Email:    claims.Email,
+			Name:     claims.Name,
 		}, nil
 	}
-}
-
-func formatInt(i int64) string {
-	return strconv.FormatInt(i, 10)
 }

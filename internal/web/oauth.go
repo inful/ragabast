@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 
 	"github.com/ragabast/internal/config"
@@ -67,9 +68,9 @@ type userInfo struct {
 }
 
 // providerEntry is one built provider — the resolved
-// oauth2.Config, the optional OIDC verifier, and the
-// userInfoFn closure that fetches the authenticated user's
-// profile from the IdP's userinfo endpoint.
+// oauth2.Config and the userInfoFn closure that fetches
+// the authenticated user's profile from the IdP's
+// userinfo endpoint.
 //
 // Constructed once at startup by newOAuthHandlers and
 // read-only thereafter; tests that need to talk to a fake
@@ -82,21 +83,9 @@ type providerEntry struct {
 	// preset (github / gitlab / forgejo) or the runtime
 	// discovery result (oidc).
 	oauth2Config *oauth2.Config
-	// oidcProvider / oidcVerifier are non-nil only for
-	// type=oidc providers, where the discovery round-trip
-	// was needed to populate oauth2Config.Endpoint.
-	oidcProvider *oidcProviderEntry
 	// userInfoFn resolves the authenticated user's
 	// profile after a successful token exchange.
 	userInfoFn func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error)
-}
-
-// oidcProviderEntry wraps the bits a type=oidc provider
-// needs on top of the static oauth2.Config: the discovered
-// provider (used for UserInfo() and ID-token verification).
-type oidcProviderEntry struct {
-	// userInfoFn is set on the parent providerEntry but
-	// uses the OIDC UserInfo helper from go-oidc.
 }
 
 // flowState is a pending OAuth login — the (state, PKCE
@@ -200,11 +189,18 @@ func newOAuthHandlers(cfg *config.Config, serverBase string, sessions *sessionSt
 		flows:      newFlowStateStore(),
 	}
 
+	// Discovery uses a short context — operators
+	// configure a wrong DiscoveryURL once and the server
+	// fails to start; we don't want that request to hang
+	// forever. 10s is a comfortable margin.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
 	for _, p := range auth.Providers {
 		if err := p.Validate(); err != nil {
 			return nil, err
 		}
-		entry, err := buildProviderEntry(p, h.serverBase)
+		entry, err := buildProviderEntry(ctx, p, h.serverBase)
 		if err != nil {
 			return nil, fmt.Errorf("auth.providers[%q]: %w", p.Name, err)
 		}
@@ -217,12 +213,12 @@ func newOAuthHandlers(cfg *config.Config, serverBase string, sessions *sessionSt
 // buildProviderEntry resolves one OAuthProvider into a
 // providerEntry. The static presets (github / gitlab /
 // forgejo) get their endpoint from provider.Endpoint(); the
-// OIDC preset runs discovery.
+// OIDC preset runs discovery at startup.
 //
 // userInfoFn is wired here based on the provider's effective
 // base URL. For tests, callers can replace the entry's
 // userInfoFn after construction to point at a fake server.
-func buildProviderEntry(p config.OAuthProvider, serverBase string) (*providerEntry, error) {
+func buildProviderEntry(ctx context.Context, p config.OAuthProvider, serverBase string) (*providerEntry, error) {
 	redirect := p.RedirectURL(serverBase)
 
 	scopes := p.EffectiveScopes()
@@ -291,7 +287,23 @@ func buildProviderEntry(p config.OAuthProvider, serverBase string) (*providerEnt
 		// starting — which is the right behavior; silent
 		// fallback would mean login is broken with no
 		// signal in the logs.
-		return nil, errors.New("type=oidc provider requires go-oidc integration; not yet implemented in this build")
+		provider, err := oidc.NewProvider(ctx, p.DiscoveryURL)
+		if err != nil {
+			return nil, fmt.Errorf("OIDC discovery against %s failed: %w", p.DiscoveryURL, err)
+		}
+		verifier := provider.Verifier(&oidc.Config{ClientID: p.ClientID})
+
+		return &providerEntry{
+			cfg: p,
+			oauth2Config: &oauth2.Config{
+				ClientID:     p.ClientID,
+				ClientSecret: p.ClientSecret,
+				RedirectURL:  redirect,
+				Scopes:       scopes,
+				Endpoint:     provider.Endpoint(),
+			},
+			userInfoFn: oidcUserInfo(verifier),
+		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported type %q", p.Type)
 	}
@@ -334,8 +346,6 @@ func (h *oauthHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 // handleProviderLogin starts the OAuth flow for the named
 // provider: generate state + PKCE verifier, stash the
 // pending flow, redirect to the IdP.
-//
-//nolint:unparam // providerName will vary when multiple providers are wired up; current tests use a single provider
 func (h *oauthHandlers) handleProviderLogin(w http.ResponseWriter, r *http.Request, providerName string) {
 	entry, ok := h.providers[providerName]
 	if !ok {
@@ -696,4 +706,63 @@ type httpStatusError struct {
 
 func (e *httpStatusError) Error() string {
 	return fmt.Sprintf("userinfo fetch %s returned HTTP %d", e.url, e.status)
+}
+
+// oidcUserInfo returns a userInfoFn that resolves the
+// authenticated user's identity from the OIDC ID-token
+// claims. We prefer ID-token claims over the UserInfo
+// endpoint because:
+//
+//   - The ID token is signed by the IdP and validated by
+//     go-oidc's verifier (built from the discovery
+//     document's JWKS URI). UserInfo responses are also
+//     validated, but the ID token is the OIDC-spec
+//     primary source of identity.
+//   - The UserInfo endpoint may not be exposed by every
+//     IdP; the ID token always accompanies the token
+//     exchange when the openid scope is requested.
+//
+// Claims used (per OIDC Core 1.0):
+//   - sub                 — the stable per-user id
+//   - preferred_username  — the login handle (fallback:
+//     email local-part)
+//   - email               — the primary email
+//   - name                — the display name
+func oidcUserInfo(verifier *oidc.IDTokenVerifier) func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
+	return func(ctx context.Context, _ *http.Client, tok *oauth2.Token) (userInfo, error) {
+		rawIDToken, ok := tok.Extra("id_token").(string)
+		if !ok || rawIDToken == "" {
+			return userInfo{}, errors.New("OIDC token response missing id_token")
+		}
+		idTok, err := verifier.Verify(ctx, rawIDToken)
+		if err != nil {
+			return userInfo{}, fmt.Errorf("OIDC id_token verification failed: %w", err)
+		}
+		var claims struct {
+			Sub               string `json:"sub"`
+			PreferredUsername string `json:"preferred_username"`
+			Email             string `json:"email"`
+			Name              string `json:"name"`
+		}
+		if err := idTok.Claims(&claims); err != nil {
+			return userInfo{}, fmt.Errorf("OIDC id_token claims decode failed: %w", err)
+		}
+		username := claims.PreferredUsername
+		if username == "" && claims.Email != "" {
+			// Last-ditch fallback: derive a handle
+			// from the local part of the email.
+			if at := strings.IndexByte(claims.Email, '@'); at > 0 {
+				username = claims.Email[:at]
+			} else {
+				username = claims.Email
+			}
+		}
+
+		return userInfo{
+			Subject:  claims.Sub,
+			Username: username,
+			Email:    claims.Email,
+			Name:     claims.Name,
+		}, nil
+	}
 }
