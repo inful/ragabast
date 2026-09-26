@@ -270,6 +270,7 @@ assets and CORS preflight:
 | Method | Path |
 |---|---|
 | GET | `/`, `/chat`, `/search`, `/ingest`, `/documents` |
+| GET | `/auth/login`, `/auth/<provider>/login`, `/auth/<provider>/callback`, `/auth/me` |
 | GET | `/static/*` |
 | OPTIONS | `*` |
 
@@ -278,6 +279,69 @@ keeps the local single-user install working without configuration.
 Operators exposing ragabast on a non-loopback interface **must** set
 this — leaving it empty means anyone who can reach the listener can
 ingest, query, and delete documents.
+
+#### User login via OAuth / OIDC (web browser flow)
+
+Bearer tokens are API-friendly but awkward for humans — every browser
+user would have to copy a token into a header. Configure one or more
+identity providers under `auth.providers` so the web UI shows a "Sign in
+with …" chooser and the browser exchanges the IdP's code for a session
+cookie. The bearer token path keeps working in parallel, so existing
+API consumers don't need to change.
+
+Supported providers:
+
+| `type`    | Notes                                                                |
+|-----------|----------------------------------------------------------------------|
+| `github`  | github.com OAuth app.                                                |
+| `gitlab`  | gitlab.com by default; self-hosted when `base_url` is set.            |
+| `forgejo` | Any Forgejo/Gitea instance; `base_url` is required (e.g. codeberg.org). |
+| `oidc`    | Generic OpenID Connect via `discovery_url`. Covers Keycloak, Authentik, Authelia, Auth0, Forgejo (with OIDC enabled), and ADFS Server 2019+ (with the OIDC app template). |
+
+```yaml
+auth:
+  # Session cookie TTL (sliding renewal on every authenticated
+  # request). Default 12h. Set to 0 to disable expiry.
+  session_ttl: 12h
+  cookie_name: ragabast_session    # default
+  providers:
+    - name: company-gitlab
+      type: gitlab
+      client_id: ...
+      client_secret: ...
+      base_url: https://gitlab.example.com   # omit for gitlab.com
+      scopes: [openid, profile, email]
+      allowed_users:                          # optional whitelist
+        - alice@example.com
+        - bob@example.com
+```
+
+The IdP must be configured with the callback URL
+`https://<your-ragabast>/auth/<name>/callback` and the matching scopes.
+See [`plans/oauth.md`](plans/oauth.md) for per-provider setup recipes
+(client registration, scopes, callback URLs).
+
+Browser UX:
+
+- `GET /auth/login` — chooser page (auto-redirects to the single
+  provider when only one is configured).
+- `GET /auth/<provider>/login` — starts the Authorization Code + PKCE
+  flow; redirects to the IdP.
+- `GET /auth/<provider>/callback` — verifies the state cookie,
+  exchanges the code, mints a session cookie, redirects to `?next=`.
+- `POST /auth/logout` — destroys the session, clears the cookie,
+  redirects to `/auth/login`.
+- `GET /auth/me` — JSON user info for the UI's "signed in as" line.
+
+Browser protection: when OAuth is configured and a browser hits a
+protected route without a session, the middleware redirects to
+`/auth/login?next=<path>` instead of returning a raw 401. Programmatic
+clients (curl, scripts) still receive 401 + `WWW-Authenticate: Bearer`
+so they can retry correctly.
+
+Session storage is in-memory only by default — server restart logs
+everyone out. The store interface is small enough to swap for a
+DB-backed implementation later if operators ask for it.
 
 ### CORS (C-2)
 
