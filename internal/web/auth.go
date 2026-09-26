@@ -180,7 +180,8 @@ func withOptionalSession(r *http.Request, sessions *sessionStore, cookieName str
 	if sessions == nil {
 		return r
 	}
-	sess, ok := sessions.Get(readSessionCookie(r, cookieName))
+	cookieValue := readSessionCookie(r, cookieName)
+	sess, ok := sessions.Get(cookieValue)
 	if !ok {
 		return r
 	}

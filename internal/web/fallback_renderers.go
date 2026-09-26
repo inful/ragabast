@@ -30,17 +30,59 @@ type fallbackTemplates struct {
 	documents     *template.Template
 }
 
+// pageHeaderData is the per-page nav-bar data every fallback
+// template renders at the top of <body>.
+//
+// Fields:
+//
+//   - AuthEnabled is true when at least one OAuth provider is
+//     configured. When false, the header renders nothing —
+//     the historical single-user install has no login
+//     concept.
+//   - SignedIn is true when the request carries a valid
+//     session cookie. The header shows the user's display
+//     name and a sign-out form.
+//   - ShowSignIn is true when AuthEnabled is true and the
+//     user is not signed in. The header shows a "Sign in"
+//     link to /auth/login (with ?next=<current path> so the
+//     post-login redirect lands the user back where they
+//     came from).
+//   - DisplayName is the rendered "alice (github)" label
+//     when signed in. Empty when not signed in.
+//   - CsrfToken is the per-request CSRF token stamped on the
+//     context by the csrf middleware. Embedded in the
+//     sign-out form so the browser-echoed cookie matches
+//     the form value at submit time.
+//   - SignInURL is the href for the "Sign in" link —
+//     /auth/login?next=<current path>, percent-encoded.
+//
+// All three string fields (DisplayName, CsrfToken, SignInURL)
+// flow through html/template's {{ }} substitution which
+// auto-escapes HTML-significant characters; an attacker who
+// controls the URL or username can't break out of the
+// attribute context.
+type pageHeaderData struct {
+	AuthEnabled bool
+	SignedIn    bool
+	ShowSignIn  bool
+	DisplayName string
+	CsrfToken   string
+	SignInURL   string
+}
+
 // chatFallbackData is the data shape for the chat landing page.
 type chatFallbackData struct {
 	Title     string
 	CsrfToken string
 	SessionID string // issue #22: chat session id, embedded in the form so reloads preserve context
+	Header    pageHeaderData
 }
 
 // ingestFallbackData is the data shape for the GET /ingest page.
 type ingestFallbackData struct {
 	Title     string
 	CsrfToken string
+	Header    pageHeaderData
 }
 
 // ingestSuccessFallbackData is the data shape for POST /ingest's
@@ -52,6 +94,7 @@ type ingestSuccessFallbackData struct {
 	DocumentID string
 	Chunks     int
 	Tags       []string
+	Header     pageHeaderData
 }
 
 // documentsFallbackData is the data shape for GET /documents.
@@ -74,6 +117,7 @@ type documentsFallbackData struct {
 	NextOffset   int
 	StartShowing int
 	EndShowing   int
+	Header       pageHeaderData
 }
 
 // documentsFallbackRow is one row of the documents table.
@@ -92,14 +136,77 @@ type documentsFallbackRow struct {
 // Bodies are intentionally defined as raw strings so html/template
 // can apply context-aware escaping to every {{ }} expression; do
 // not refactor to fmt.Fprintf.
+//
+// The header partial is shared across all four pages so the
+// sign-in / sign-out UX stays consistent without duplicating
+// the navbar HTML four times. Each per-page template is
+// built by composing pageHeaderFallbackBody (the named block
+// "header") with the page-specific body string at parse time.
 func newFallbackTemplates() *fallbackTemplates {
 	return &fallbackTemplates{
-		chat:          template.Must(template.New("chat.html").Parse(chatFallbackBody)),
-		ingest:        template.Must(template.New("ingest.html").Parse(ingestFallbackBody)),
-		ingestSuccess: template.Must(template.New("ingest_success.html").Parse(ingestSuccessFallbackBody)),
-		documents:     template.Must(template.New("documents.html").Parse(documentsFallbackBody)),
+		chat:          mustParseWithHeader("chat.html", chatFallbackBody),
+		ingest:        mustParseWithHeader("ingest.html", ingestFallbackBody),
+		ingestSuccess: mustParseWithHeader("ingest_success.html", ingestSuccessFallbackBody),
+		documents:     mustParseWithHeader("documents.html", documentsFallbackBody),
 	}
 }
+
+// mustParseWithHeader builds one fallback template by combining
+// the shared header partial with the page-specific body. The
+// result is a single *template.Template that exposes the named
+// block "header" so per-page bodies can include it via
+// {{ template "header" .Header }}.
+func mustParseWithHeader(name, body string) *template.Template {
+	t := template.Must(template.New(name).Parse(pageHeaderFallbackBody))
+	return template.Must(t.Parse(body))
+}
+
+// pageHeaderFallbackBody defines the "header" block every page
+// includes at the top of <body>. The block renders nothing
+// when AuthEnabled is false (the historical single-user
+// install has no login concept); when true, it shows the
+// signed-in user + sign-out button, OR the "Sign in" link
+// when the visitor is unauthenticated.
+//
+// Bulma navbar markup keeps the visual language consistent
+// with the rest of the page chrome (chat-message, search,
+// search-results partials all use bulma classes too).
+//
+// CSRF: the sign-out form carries a csrf_token hidden field.
+// The csrf middleware sets the matching cookie on every
+// response; on submit, the middleware compares the form
+// value to the cookie and rejects mismatches with 403.
+// A signed-out browser can still submit the form (the
+// cookie is cleared), but the next render of any page
+// will be the public path and the cookie value won't
+// matter — the csrf middleware is a no-op for the
+// single-user open-access install (AuthEnabled=false).
+const pageHeaderFallbackBody = `
+{{ define "header" -}}
+{{- if .AuthEnabled -}}
+<nav class="navbar is-light" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <a class="navbar-item" href="/">ragabast</a>
+  </div>
+  <div class="navbar-menu is-active">
+    <div class="navbar-end">
+      {{- if .SignedIn }}
+      <span class="navbar-item has-text-grey">{{ .DisplayName }}</span>
+      <div class="navbar-item">
+        <form method="post" action="/auth/logout">
+          <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
+          <button class="button is-small is-light" type="submit">Sign out</button>
+        </form>
+      </div>
+      {{- else if .ShowSignIn }}
+      <a class="navbar-item" href="{{ .SignInURL }}">Sign in</a>
+      {{- end }}
+    </div>
+  </div>
+</nav>
+{{- end -}}
+{{- end -}}
+`
 
 // renderFallback executes the named fallback template with the
 // supplied data. Content-Type is set to text/html; charset=utf-8
@@ -150,6 +257,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 	</style>
 </head>
 <body class="container mt-4">
+	{{ template "header" .Header }}
 	<h1 class="title">Chat</h1>
 	<p class="subtitle">Ask questions against the ingested documents.</p>
 
@@ -192,6 +300,7 @@ const ingestFallbackBody = `<!DOCTYPE html>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
 </head>
 <body class="container mt-4">
+    {{ template "header" .Header }}
     <h1 class="title">Ingest Document</h1>
     <form method="post" action="/ingest">
         <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
@@ -224,6 +333,7 @@ const ingestSuccessFallbackBody = `<!DOCTYPE html>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
 </head>
 <body class="container mt-4">
+    {{ template "header" .Header }}
     <div class="notification is-success">
         <h1 class="title">Document Ingested Successfully!</h1>
         <p><strong>Document ID:</strong> {{ .DocumentID }}</p>
@@ -250,6 +360,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
 </head>
 <body class="container mt-4">
+    {{ template "header" .Header }}
     <h1 class="title">Ingested Documents</h1>
     <a href="/" class="button is-light mb-4">Back</a>
     {{ if .Documents }}

@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -112,16 +113,19 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 // attacker-controlled strings (doc.Title from the H1 header,
 // doc.Tags from YAML frontmatter) directly into the response.
 func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data any) {
+	header := headerFromMap(data)
 	switch templateName {
 	case "chat.html":
 		s.renderFallback(w, "chat.html", chatFallbackData{
 			Title:     titleFromMap(data, "RAGabast - Chat"),
 			CsrfToken: stringFromMap(data, "CsrfToken"),
+			Header:    header,
 		})
 	case "ingest.html":
 		s.renderFallback(w, "ingest.html", ingestFallbackData{
 			Title:     titleFromMap(data, "RAGabast - Ingest"),
 			CsrfToken: stringFromMap(data, "CsrfToken"),
+			Header:    header,
 		})
 	case "ingest_success.html":
 		s.renderFallback(w, "ingest_success.html", ingestSuccessFallbackData{
@@ -129,6 +133,7 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 			DocumentID: stringFromMap(data, "DocumentID"),
 			Chunks:     intFromMap(data, "Chunks"),
 			Tags:       tagsFromMap(data),
+			Header:     header,
 		})
 	case "documents.html":
 		s.renderFallback(w, "documents.html", documentsFallbackData{
@@ -141,16 +146,91 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 			NextOffset:   intFromMap(data, "NextOffset"),
 			StartShowing: intFromMap(data, "StartShowing"),
 			EndShowing:   intFromMap(data, "EndShowing"),
+			Header:       header,
 		})
 	default:
 		http.NotFound(w, nil)
 	}
 }
 
-// titleFromMap extracts a string "Title" field from the
-// map[string]any shape that renderTemplate passes through. Falls
-// back to the supplied default so a missing field does not
-// render as "<no value>".
+// headerFromMap extracts the optional pageHeaderData the
+// handler stashed under the "Header" key. Missing or
+// wrong-typed → empty struct (the template renders nothing
+// when AuthEnabled is false, which is the historical
+// single-user open-access behavior).
+func headerFromMap(data any) pageHeaderData {
+	m, ok := data.(map[string]any)
+	if !ok {
+		return pageHeaderData{}
+	}
+	h, _ := m["Header"].(pageHeaderData)
+
+	return h
+}
+
+// pageHeaderFromContext builds the per-request pageHeaderData
+// the navbar template consumes. Every page handler calls this
+// (typically via s.pageHeaderFromContext) so the header
+// stays consistent across chat / ingest / documents / etc.
+//
+// Decision matrix:
+//
+//	                                 AuthEnabled=true
+//	                            +-------------------+
+//	                            | SignedIn          |
+//	                            | true   | false     |
+//	+--------+-----------------+--------+----------+
+//	|        | SignedIn=true   | render |  —       |
+//	| Auth   |                 | header |          |
+//	| Ena... |                 | with   |          |
+//	| bled   |                 | user + |          |
+//	| =true  |                 | logout |          |
+//	|        +-----------------+--------+----------+
+//	|        | SignedIn=false  |  —     | "Sign    |
+//	|        |                 |        | in"     |
+//	|        |                 |        | link     |
+//	+--------+-----------------+--------+----------+
+//	| AuthEnabled=false            | render nothing |
+//	+-------------------------------+----------------+
+//
+// The "next=" parameter threads the current URL into the
+// Sign in link so the chooser page can redirect the user
+// back to where they were going after auth completes.
+func (s *Server) pageHeaderFromContext(r *http.Request) pageHeaderData {
+	authEnabled := s.oauthHandlers != nil && len(s.oauthHandlers.providers) > 0
+	if !authEnabled {
+		return pageHeaderData{}
+	}
+
+	h := pageHeaderData{
+		AuthEnabled: true,
+		CsrfToken:   CsrfTokenFromContext(r.Context()),
+	}
+
+	if u := UserFromContext(r.Context()); u.Subject != "" {
+		h.SignedIn = true
+		h.DisplayName = u.DisplayLabel()
+
+		return h
+	}
+
+	h.ShowSignIn = true
+	h.SignInURL = "/auth/login?next=" + url.QueryEscape(safeNextPath(r.URL.Path))
+
+	return h
+}
+
+// safeNextPath returns r.URL.Path with a leading slash; if
+// the URL has no path (rare but possible), it returns "/"
+// so the chooser's ?next= is never empty.
+func safeNextPath(p string) string {
+	if p == "" {
+		return "/"
+	}
+
+	return p
+}
+
 func titleFromMap(data any, fallback string) string {
 	m, ok := data.(map[string]any)
 	if !ok {
@@ -287,6 +367,7 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 		"Title":     "RAGabast - Chat",
 		"CsrfToken": CsrfTokenFromContext(r.Context()),
 		"SessionID": sessionID,
+		"Header":    s.pageHeaderFromContext(r),
 	})
 }
 
@@ -380,7 +461,8 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 	// sessionID no-op in AppendChatTurn keeps single-shot
 	// callers (no cookie, no form field) stateless.
 	if sessionID != "" {
-		_ = s.service.AppendChatTurn(r.Context(), sessionID,
+		_ = s.service.AppendChatTurn(
+			r.Context(), sessionID,
 			service.ChatMessage{Role: "user", Content: msg},
 			service.ChatMessage{Role: "assistant", Content: answer},
 		)
@@ -536,6 +618,7 @@ func (s *Server) handleIngestPage(w http.ResponseWriter, r *http.Request) {
 	s.renderTemplate(w, "ingest.html", map[string]any{
 		"Title":     "RAGabast - Ingest",
 		"CsrfToken": CsrfTokenFromContext(r.Context()),
+		"Header":    s.pageHeaderFromContext(r),
 	})
 }
 
@@ -573,6 +656,7 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 		"DocumentID": doc.ID,
 		"Chunks":     len(doc.Chunks),
 		"Tags":       doc.Tags,
+		"Header":     s.pageHeaderFromContext(r),
 	})
 }
 
@@ -629,6 +713,7 @@ func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {
 		"NextOffset":   nextOffset,
 		"StartShowing": startShowing,
 		"EndShowing":   endShowing,
+		"Header":       s.pageHeaderFromContext(r),
 	})
 }
 

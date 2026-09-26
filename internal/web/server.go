@@ -123,11 +123,28 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 			ttl = 12 * time.Hour
 		}
 		sessions = newSessionStore(ttl)
+
+		// Cookie name: the operator can override via
+		// cfg.Auth.CookieName (or AUTH_COOKIE_NAME env);
+		// empty means "use the default" so writer and
+		// reader stay in sync. Without this default,
+		// setSessionCookie would set the cookie as ""
+		// (which browsers reject silently) and
+		// readSessionCookie would never match.
+		cookieName := cfg.Auth.CookieName
+		if cookieName == "" {
+			cookieName = "ragabast_session"
+		}
+
 		serverBase := deriveServerBase(cfg)
 		oh, err := newOAuthHandlers(cfg, serverBase, sessions)
 		if err != nil {
 			log.Printf("web: failed to initialize OAuth providers: %v; starting without session auth", err)
 		} else {
+			// Override the cookie name on the oauthHandlers
+			// struct so callback handlers write the same
+			// cookie the middleware reads.
+			oh.cookieName = cookieName
 			oauthHandlers = oh
 		}
 	}
@@ -142,7 +159,11 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	// AuthTokens list, deduping by Value. NewServer is the
 	// only call site for authMiddleware — keep it that way
 	// so the security boundary is easy to audit.
-	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens(), sessions, cfg.Auth.CookieName))
+	cookieName := ""
+	if oauthHandlers != nil {
+		cookieName = oauthHandlers.cookieName
+	}
+	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens(), sessions, cookieName))
 
 	// csrfMiddleware runs after auth so a Bearer-auth POST
 	// (which cannot be made cross-origin by a browser) skips
@@ -349,7 +370,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, ok := s.sessions.Get(readSessionCookie(r, s.config.Auth.CookieName))
+	sess, ok := s.sessions.Get(readSessionCookie(r, s.resolveSessionCookieName()))
 	if !ok {
 		_, _ = w.Write([]byte(`{"authenticated":false}`))
 
@@ -399,6 +420,24 @@ func deriveServerBase(cfg *config.Config) string {
 	}
 
 	return scheme + "://" + net.JoinHostPort(addr, strconv.Itoa(port))
+}
+
+// resolveSessionCookieName returns the session-cookie name
+// the server actually uses, applying the default
+// ("ragabast_session") when the operator hasn't set one.
+// Centralizing the default keeps the cookie writer (in
+// the OAuth callback) and reader (authMiddleware,
+// handleMe) in sync — a mismatch would silently break
+// login with no signal in the logs.
+func (s *Server) resolveSessionCookieName() string {
+	if s.oauthHandlers != nil && s.oauthHandlers.cookieName != "" {
+		return s.oauthHandlers.cookieName
+	}
+	if s.config.Auth.CookieName != "" {
+		return s.config.Auth.CookieName
+	}
+
+	return "ragabast_session"
 }
 
 // registerRoutes registers all API routes and web handlers.
