@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ragabast/internal/config"
@@ -53,7 +54,13 @@ func AuthLabelFromContext(ctx context.Context) string {
 //  3. Session cookie resolves to a live (non-expired)
 //     session → allow, stash the session, slide the
 //     expiry forward.
-//  4. Otherwise → 401 with WWW-Authenticate.
+//  4. Browser request (Accept: text/html) without a
+//     valid credential AND sessions != nil → redirect
+//     to /auth/login?next=<path> so the operator lands
+//     on the chooser page rather than seeing a raw 401.
+//     Programmatic clients (curl, etc.) still get a 401
+//     with WWW-Authenticate so they can retry correctly.
+//  5. Otherwise → 401 with WWW-Authenticate.
 //
 // When both tokens and sessions are nil/empty the
 // middleware is a no-op — every request passes through.
@@ -119,10 +126,44 @@ func authMiddleware(tokens []config.AuthToken, sessions *sessionStore, cookieNam
 				}
 			}
 
+			// Unauthenticated request. Programmatic
+			// clients (curl, scripts) need a 401 with
+			// WWW-Authenticate so they can retry; browser
+			// clients (Accept: text/html) get a redirect
+			// to /auth/login so they land on the chooser
+			// page rather than seeing a raw "Unauthorized"
+			// body. The redirect is only emitted when at
+			// least one OAuth provider is configured —
+			// otherwise the 401 stays in place so an
+			// operator who forgot to set auth_token
+			// still sees a clear "this is broken" signal.
+			if hasSessions && wantsHTML(r) {
+				next := r.URL.Path
+				if r.URL.RawQuery != "" {
+					next += "?" + r.URL.RawQuery
+				}
+				http.Redirect(w, r, "/auth/login?next="+url.QueryEscape(next), http.StatusFound)
+
+				return
+			}
+
 			w.Header().Set("WWW-Authenticate", `Bearer realm="ragabast"`)
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		})
 	}
+}
+
+// wantsHTML reports whether the request looks like a
+// browser navigation. A non-browser client (curl, a Go
+// program, an HTMX fragment request) typically sends
+// Accept: application/json or no Accept header; a browser
+// always sends Accept: text/html as part of the
+// first/only item. We use this to decide between a
+// redirect (browser UX) and a 401 (programmatic UX).
+func wantsHTML(r *http.Request) bool {
+	accept := r.Header.Get("Accept")
+
+	return strings.Contains(accept, "text/html")
 }
 
 // withOptionalSession returns r with a session attached to
