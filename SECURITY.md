@@ -22,8 +22,11 @@ In scope:
 Out of scope:
 
 1. Kernel or container escape; sandbox escapes in the LLM provider.
-2. Multi-user authentication — there is exactly one credential, the
-   shared bearer token.
+2. Per-user authorization (RBAC, group-to-role mapping, per-user
+   audit attribution beyond what `/auth/me` and the access log's
+   `auth_label` already capture). The OAuth/OIDC login identifies
+   the user; every authenticated user currently has the same
+   privileges as the bearer-token holder.
 3. Tampering with the on-disk vector store by an attacker with write
    access to `data/vectors/` — `vector reset --force` is the
    recovery path; treat the persistence directory as a trusted
@@ -73,15 +76,39 @@ Out of scope:
 ### Public routes (always open)
 
 These remain reachable without `Authorization` so the operator's
-browser can render the form chrome and load static assets. State-changing
-endpoints (POST, DELETE) are NOT in this list — every one of them
-requires the bearer token.
+browser can render the form chrome, load static assets, and complete
+the OAuth handshake. State-changing endpoints (POST, PUT, PATCH,
+DELETE) are NOT in this list — every one of them requires either the
+bearer token or a valid session cookie (CSRF-protected).
 
 | Method | Path |
 |---|---|
 | GET | `/`, `/chat`, `/search`, `/ingest`, `/documents` |
+| GET | `/auth/login`, `/auth/<provider>/login`, `/auth/<provider>/callback`, `/auth/me` |
 | GET | `/static/*` |
 | OPTIONS | `*` (CORS preflight) |
+
+When OAuth is configured, the browser UX is:
+
+- `GET /auth/login` — chooser page (auto-redirects to the single
+  configured provider when only one exists).
+- `GET /auth/<provider>/login` — starts the OAuth 2.0 Authorization
+  Code + PKCE flow; redirects to the IdP.
+- `GET /auth/<provider>/callback` — verifies the state cookie,
+  exchanges the code, fetches the userinfo / ID-token claims, mints
+  the session cookie, redirects to `?next=<original URL>`.
+- `POST /auth/logout` — destroys the session, clears the cookie,
+  redirects to `/auth/login`.
+- `GET /auth/me` — JSON: `{authenticated: bool, subject, username,
+  email, name, provider, role}` for the UI's "signed in as" widget.
+
+Browser protection: when OAuth is configured and a browser hits a
+protected route without a session, the middleware redirects to
+`/auth/login?next=<path>` rather than returning a raw 401 — a 401
+would force the user to copy a URL into the address bar. Programmatic
+clients (curl, scripts) still receive 401 + `WWW-Authenticate:
+Bearer` so they can retry correctly; the redirect is gated on
+`Accept: text/html`.
 
 ### Protected routes
 
@@ -123,6 +150,40 @@ Jobs persist to `<async_ingest_queue_dir>/<job_id>.json` (mode
 `0700`); a restart during a long import resumes from where the
 process died. The in-memory channel is a transient cache; the
 on-disk file is the source of truth.
+
+### Session storage (OAuth login)
+
+When `auth.providers` is non-empty, the server mints an in-memory
+`Session` record after a successful OAuth callback. Sessions are
+keyed by the 64-char hex value of `auth.cookie_name` (default
+`ragabast_session`), stored in an HTTP-only, `SameSite=Lax`,
+Secure-when-TLS cookie.
+
+- **Storage**: in-memory only. Server restart logs everyone out.
+  The store interface is small enough to swap for a DB-backed
+  implementation later; until then, do not configure OAuth for a
+  multi-replica deployment without sticky sessions or shared
+  session storage.
+- **TTL**: `auth.session_ttl` (default 12h, env
+  `AUTH_SESSION_TTL`). Sliding renewal — every authenticated
+  request through the middleware extends the session's expiry
+  by the configured TTL.
+- **Expiry enforcement**: lazy on `Get` (evicts the expired entry
+  on read) plus a `Count()` accessor that operators can poll.
+  No background sweeper today; add one when traffic warrants.
+- **Cookie name**: `auth.cookie_name` (env `AUTH_COOKIE_NAME`).
+  Operators running multiple ragabast instances behind different
+  paths or ports should set distinct names so cookies don't
+  collide.
+- **CSRF on sign-out**: `POST /auth/logout` is a state-changing
+  request. The CSRF middleware requires the form's `csrf_token`
+  hidden field to match the `ragabast_csrf` cookie. A cross-origin
+  attacker cannot make the browser send the cookie on a POST, so
+  the sign-out flow is safe by the same mechanism as `/chat/message`.
+- **`AllowedUsers` allowlist**: when set on a provider, only the
+  listed usernames/emails can complete login. Empty = accept any
+  user the IdP authenticated. Match is exact-string equality (no
+  glob, no regex) so a typo means "nobody".
 
 ## HTTP hardening shipped by default
 

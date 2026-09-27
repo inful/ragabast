@@ -211,14 +211,17 @@ graph TB
   | Middleware | File | Purpose |
   |---|---|---|
   | `securityHeadersMiddleware` | `security_headers.go` | Adds CSP, X-Content-Type-Options, X-Frame-Options, Referrer-Policy, HSTS on every response. |
+  | `requestIDMiddleware` | `request_id.go` | Generates / propagates a per-request UUID so every log line and response header can be correlated. |
   | `redactAccessLogMiddleware` | `redact_log.go` | Rewrites `r.URL.RawQuery` to redact `query`, `message`, `text`, `content`, `document_id`, `docbuilder_base_url` values before chi's logger runs. |
   | `middleware.Logger` | chi | Access log (now reading the redacted URL). |
   | `middleware.Recoverer` | chi | Catches panics; returns 500. |
   | `middleware.RealIP` | chi | Populates `r.RemoteAddr` from `X-Forwarded-For` (chi v5.3.0+ validates trusted proxies; do not expose chi directly without a trusted proxy). |
+  | `clientIPMiddleware` | `client_ip.go` | Stores the trusted client IP on the request context for the rate-limiter and audit log. |
   | `maxBytesReaderMiddleware` | `max_bytes.go` | Wraps every request body with `http.MaxBytesReader` at 10 MiB. |
   | `middleware.Timeout(60s)` | chi | Cancels handler context after 60s. |
   | `corsMiddleware` | `cors.go` | Allow-list CORS (replaces the previous wildcard). `cors_origins` empty disables cross-origin browser requests. |
-  | `authMiddleware` | `auth.go` | Bearer-token auth via `Authorization: Bearer <token>`; constant-time compare. Skipped on public routes (HTML GETs, `/static/*`, OPTIONS). |
+  | `authMiddleware` | `auth.go` | Accepts `Authorization: Bearer <token>` (constant-time compare against `server.auth_tokens`) AND `auth.cookie_name` (resolved from the in-memory `sessionStore`); sliding-renews the session on every authenticated request. Skipped on public routes (HTML GETs, `/static/*`, OPTIONS, `/auth/*`). Browsers hitting a protected route without a session are redirected to `/auth/login?next=<path>`; programmatic clients get 401 + `WWW-Authenticate: Bearer`. |
+  | `csrfMiddleware` | `csrf.go` | Double-submit-cookie CSRF (HttpOnly + SameSite=Lax). Bypassed when the request carries an `Authorization` header (browsers can't send those cross-origin); bypassed entirely when no auth is configured. |
   | `llmRateLimiter.llmPathMiddleware` | `rate_limit.go` | Per-IP token-bucket on the LLM-backed paths only (`/api/query`, `/api/search`, `/api/link-suggestions`, `/api/frontmatter/suggest`, `/chat/message`, `/search`); `429` + `Retry-After` when the bucket is empty. |
 
 - The `http.Server` literal in `Start()` applies the configured
@@ -271,7 +274,7 @@ graph TB
 
   | Method | Path | Handler |
   |---|---|---|
-  | GET | `/` | chat page (sets session cookie + CSRF) |
+  | GET | `/` | chat page (sets session cookie + CSRF; renders the navbar with sign-in / sign-out when OAuth is configured) |
   | GET | `/chat` | redirect → `/` |
   | POST | `/chat/message` | HTMX chat reply (threads History from session store) |
   | POST | `/chat/clear` | drop session history + cookie (private-mode toggle) |
@@ -281,6 +284,11 @@ graph TB
   | GET | `/ingest` | upload form |
   | POST | `/ingest` | HTMX upload result |
   | GET | `/documents` | ingested-document list (paginated) |
+  | GET | `/auth/login` | chooser page (one provider → redirect; many → template) |
+  | GET | `/auth/<name>/login` | start OAuth 2.0 Authorization Code + PKCE flow for the named provider |
+  | GET | `/auth/<name>/callback` | verify state, exchange code, mint session, redirect to `?next=` |
+  | POST | `/auth/logout` | destroy session, clear cookie, redirect to `/auth/login` (always returns 204 when OAuth is not configured) |
+  | GET | `/auth/me` | JSON `{authenticated, subject, username, email, name, provider, role}` |
   | GET | `/mcp` | MCP streamable-HTTP transport (opt-in via `server.mcp_http_enabled`) |
   | GET | `/static/*` | CSS / assets |
 
@@ -372,7 +380,7 @@ graph TB
 | `internal/service` | `Service` wiring + every business operation (ingest, search, query, frontmatter, links, catalog, stats, health, chat sessions, bulk update, date filters) |
 | `internal/service/querycache` | Bounded LRU cache for repeated search calls (#69). Subpackage to keep the eviction / TTL bookkeeping out of `service.go`. |
 | `internal/mcp` | MCP tool surface (`search`, `query`, `list_documents`, `get_document`). Transport-agnostic; wired to stdio via `cmd/mcp.go` and to streamable-HTTP via `internal/web/mcp.go`. |
-| `internal/web` | chi router, HUMA API, HTMX pages, server lifecycle, MCP HTTP mount |
+| `internal/web` | chi router, HUMA API, HTMX pages, server lifecycle, MCP HTTP mount, OAuth/OIDC login flow, in-memory session store |
 | `internal/web/jobs` | Persistent async ingest queue (JSON files + bounded worker pool + restart recovery) |
 
 ## When you change X, expect Y to notice
