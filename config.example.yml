@@ -200,6 +200,77 @@ paths:
   # rebuilding. The Docker image does not need this set.
   templates_dir: ""
 
+# Web-layer user authentication via OAuth 2.0 / OIDC.
+# Leave `providers` empty for the historical single-user /
+# bearer-token install — operators who don't add this
+# block see no change in behavior. See plans/oauth.md for
+# per-provider setup recipes (GitHub, GitLab, Forgejo,
+# Keycloak, Authentik, Authelia, ADFS, ...).
+#
+# The bearer-token path (server.auth_token /
+# server.auth_tokens) keeps working in parallel — adding
+# OAuth here does NOT disable API-token auth. Programs and
+# humans can use whichever path they prefer.
+auth:
+  # Maximum age of a session cookie before the in-memory
+  # record is evicted. Sliding renewal: every authenticated
+  # request extends the session's expiry by this TTL.
+  # Default 12h. Set to 0 to disable expiry (sessions live
+  # until the server restarts — the in-memory store is
+  # wiped at restart regardless).
+  # Env: AUTH_SESSION_TTL.
+  session_ttl: 12h
+
+  # Session-cookie name. Default "ragabast_session". Set to
+  # something unique when running multiple ragabast
+  # instances behind the same host so cookies don't
+  # collide. Env: AUTH_COOKIE_NAME.
+  cookie_name: ragabast_session
+
+  # Identity providers. Each entry enables one sign-in
+  # button on /auth/login. Listed below is one example
+  # of each supported type — uncomment what you need.
+  # Env: AUTH_PROVIDERS_JSON (JSON array).
+  providers: []
+  # GitHub.com OAuth app (callback URL:
+  # https://<your-host>/auth/gh/callback):
+  # - name: gh
+  #   type: github
+  #   client_id: ...
+  #   client_secret: ...
+  #   allowed_users:        # optional whitelist
+  #     - alice
+  #     - bob@example.com
+
+  # GitLab.com or self-hosted (base_url defaults to
+  # gitlab.com; set for self-hosted):
+  # - name: gl
+  #   type: gitlab
+  #   client_id: ...
+  #   client_secret: ...
+  #   base_url: https://gitlab.example.com
+  #   scopes: [openid, profile, email]
+  #   default_role: user
+
+  # Forgejo / Gitea (base_url required, e.g. codeberg.org):
+  # - name: codeberg
+  #   type: forgejo
+  #   base_url: https://codeberg.org
+  #   client_id: ...
+  #   client_secret: ...
+
+  # Generic OpenID Connect (Keycloak, Authentik, Authelia,
+  # Auth0, ADFS Server 2019+, Forgejo-with-OIDC).
+  # discovery_url is the issuer; the handler fetches the
+  # well-known configuration at startup. A bad discovery_url
+  # (unreachable IdP, wrong path) prevents the server from
+  # starting — that's the right signal for a misconfig.
+  # - name: corp
+  #   type: oidc
+  #   discovery_url: https://keycloak.example.com/realms/main
+  #   client_id: ragabast
+  #   client_secret: ...
+
 # Ragabast-specific presentation / linking knobs.
 ragabast:
   # Base URL of the docbuilder instance that renders the

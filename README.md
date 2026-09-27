@@ -72,6 +72,14 @@ YAML to find the knob they need.
 | `SERVER_ASYNC_INGEST_COMPLETED_JOB_TTL` | `async_ingest_completed_job_ttl` | `168h` (7 days) | How long completed jobs are retained for `/api/ingest/jobs/{id}` history. |
 | `SERVER_ASYNC_INGEST_FAILED_JOB_TTL` | `async_ingest_failed_job_ttl` | `720h` (30 days) | How long failed jobs are retained. |
 
+#### `auth` — OAuth / OIDC login (browser users)
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `AUTH_SESSION_TTL` | `session_ttl` | `12h` | Max age of a session cookie. Sliding renewal on every authenticated request. `0` disables expiry (sessions live until restart). |
+| `AUTH_COOKIE_NAME` | `cookie_name` | `ragabast_session` | Session-cookie name. Set distinct names when running multiple ragabast instances behind the same host. |
+| `AUTH_PROVIDERS_JSON` | `providers` | `[]` | JSON array of OAuth providers. See `plans/oauth.md` for the schema. |
+
 #### `processing` — chunking
 
 | Env var | YAML key | Default | Description |
@@ -324,24 +332,51 @@ See [`plans/oauth.md`](plans/oauth.md) for per-provider setup recipes
 Browser UX:
 
 - `GET /auth/login` — chooser page (auto-redirects to the single
-  provider when only one is configured).
+  provider when only one is configured). All rendered pages
+  (`/`, `/ingest`, `/documents`, `/chat`) include a navbar at the
+  top: when OAuth is configured and the user is signed in, the
+  navbar shows `username (provider)` and a `Sign out` button; when
+  not signed in, a `Sign in` link to `/auth/login?next=<current URL>`
+  so the chooser can return the user to where they were going
+  after auth completes; when OAuth is not configured, the navbar
+  renders nothing (the historical single-user open-access mode).
 - `GET /auth/<provider>/login` — starts the Authorization Code + PKCE
   flow; redirects to the IdP.
 - `GET /auth/<provider>/callback` — verifies the state cookie,
-  exchanges the code, mints a session cookie, redirects to `?next=`.
+  exchanges the code, mints a session cookie, redirects to `?next=`
+  (or `/` when no `?next=` was set on the originating request).
 - `POST /auth/logout` — destroys the session, clears the cookie,
-  redirects to `/auth/login`.
-- `GET /auth/me` — JSON user info for the UI's "signed in as" line.
+  redirects to `/auth/login`. CSRF-protected (the form carries a
+  `csrf_token` hidden field that the csrf middleware checks
+  against the `ragabast_csrf` cookie).
+- `GET /auth/me` — JSON user info for the UI's "signed in as"
+  widget: `{"authenticated": true, "subject": "…", "username": "…",
+  "email": "…", "name": "…", "provider": "…", "role": "user"}` or
+  `{"authenticated": false}` when no session is present. Always
+  returns 200 — the UI uses `authenticated` to choose its state
+  without branching on status codes.
 
 Browser protection: when OAuth is configured and a browser hits a
 protected route without a session, the middleware redirects to
-`/auth/login?next=<path>` instead of returning a raw 401. Programmatic
-clients (curl, scripts) still receive 401 + `WWW-Authenticate: Bearer`
-so they can retry correctly.
+`/auth/login?next=<path>` instead of returning a raw 401. The
+`?next=` is the URL-encoded original path + query string (e.g.
+`?next=%2Fsearch%3Fq%3Dhello%2520world`); the chooser passes it
+through to the OAuth state so the user lands back where they
+started after auth. Programmatic clients (curl, scripts) still
+receive 401 + `WWW-Authenticate: Bearer` so they can retry
+correctly — the redirect is gated on `Accept: text/html` so an
+API consumer doesn't see a 302 when it expected a 401.
 
 Session storage is in-memory only by default — server restart logs
 everyone out. The store interface is small enough to swap for a
-DB-backed implementation later if operators ask for it.
+DB-backed implementation later if operators ask for it. Sliding
+renewal (every authenticated request extends the cookie's
+expiry by `auth.session_ttl`) keeps an active user signed in
+indefinitely; an idle user is logged out after one TTL.
+
+The session cookie name defaults to `ragabast_session`; override
+with `auth.cookie_name` (env `AUTH_COOKIE_NAME`) when running
+multiple ragabast instances behind the same host.
 
 ### CORS (C-2)
 

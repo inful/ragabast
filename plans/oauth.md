@@ -243,6 +243,60 @@ For working on ragabast itself, no OAuth config is needed — leave
 `auth.providers` empty and the server runs in the historical
 single-user / bearer-token mode. `/auth/login` returns 503 so an
 operator who accidentally enables it sees the missing-config signal.
+The navbar on every page also renders nothing in this mode — there
+is no sign-in / sign-out UX to show.
+
+## Session storage
+
+Sessions are **in-memory only**. A server restart (including a
+crash) wipes every live session — the next browser request after
+restart sees an unauthenticated navbar even if the cookie value is
+still in the browser's jar.
+
+- `auth.session_ttl` (env `AUTH_SESSION_TTL`) — max age of a session
+  cookie. Sliding renewal: every authenticated request through the
+  middleware extends the session's expiry by this TTL. An idle user
+  is logged out after one TTL; an active user stays signed in
+  indefinitely. Default 12h. Set to `0` to disable expiry (sessions
+  still vanish on restart, just not on idle).
+- `auth.cookie_name` (env `AUTH_COOKIE_NAME`) — session-cookie name.
+  Default `ragabast_session`. Override when running multiple
+  ragabast instances behind the same host (e.g. dev + staging on
+  different ports) so cookies don't collide.
+
+A persistent session store (Bolt, Badger, SQLite) is not currently
+implemented. The store interface in `internal/web/session.go` is
+small enough to swap when an operator asks for it; until then,
+single-replica deployments only. A load-balanced multi-replica
+deployment without sticky sessions will see users logged out on
+every request — the cookie value alone is not enough to identify
+the right replica's session store.
+
+## Browser UX (navbar)
+
+Every rendered page (`/`, `/ingest`, `/documents`, `/chat` and the
+ingest-success page) carries a navbar at the top, sourced from a
+shared `header` template so the look stays consistent:
+
+| State | Navbar shows |
+|---|---|
+| OAuth not configured | *(nothing — historical single-user behavior)* |
+| OAuth configured, not signed in | "Sign in" link → `/auth/login?next=<current URL>` |
+| OAuth configured, signed in | `username (provider)` + a real form-POST "Sign out" button |
+
+The "Sign in" link's `?next=` threads the current URL through the
+chooser page so the OAuth state callback can land the user back
+where they were going after auth completes. The link is built from
+the `Accept: text/html` signal so a browser sees it; a curl script
+that didn't send the header still gets 401 + `WWW-Authenticate:
+Bearer` so it can retry correctly.
+
+The "Sign out" button is a regular form that POSTs to
+`/auth/logout` with the CSRF token in a hidden field. The csrf
+middleware requires the form value to match the `ragabast_csrf`
+cookie; a cross-origin attacker cannot make the browser send the
+cookie on a POST, so the sign-out flow is safe by the same
+mechanism as every other state-changing endpoint.
 
 ## Debugging a broken flow
 
@@ -257,6 +311,31 @@ The most common failure modes:
   or didn't match the `state` query parameter. Usually a clock skew
   between ragabast and the IdP (the state TTL is 10 minutes), or the
   user took longer than 10 minutes to authorize.
+- **"login succeeds but every subsequent request bounces to the
+  sign-in page"** — the writer (OAuth callback) and reader
+  (authMiddleware) disagree on the cookie name. The cookie name
+  defaults to `ragabast_session`; if `auth.cookie_name` is set on
+  the server but the browser already has a stale cookie under the
+  default name, the middleware reads the default-named cookie
+  (empty) while the callback writes the configured name. Either
+  unset `AUTH_COOKIE_NAME` to use the default, or have users clear
+  cookies for the host before retrying. The first version of this
+  code shipped with this bug — the fix (in `NewServer`) applies
+  the default at startup so writer and reader can never disagree.
+- **"navbar shows 'Sign in' even when I just signed in"** — same
+  root cause as above; the auth middleware couldn't read the
+  cookie, so the session wasn't attached to the request context.
+  The navbar only shows "Sign out" when `UserFromContext` returns
+  a non-empty Subject, which only happens when the session
+  lookup succeeded. Fix the cookie-name mismatch and the navbar
+  updates on the next request.
+- **"server won't start with `type: oidc` provider"** — the OIDC
+  discovery round-trip at startup failed (bad `discovery_url`,
+  unreachable IdP, expired TLS cert). The startup log shows the
+  exact URL and the underlying error. Fix the URL or the network
+  path; the server refuses to start with a broken provider
+  because silent fallback would mean login is broken with no
+  signal in the logs.
 - **"token exchange failed: …"** — the IdP rejected the code.
   Usually a wrong client_secret, a revoked grant, or a code that's
   already been exchanged once.
