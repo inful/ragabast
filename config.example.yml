@@ -1,11 +1,10 @@
 # Copy this file to ./config.yml (config.yml is ignored by git) and tweak as needed.
 #
-# ragabast uses two OpenAI-compatible endpoints. You can point both at the
-# same server (omlx, vLLM, LM Studio, llama.cpp --server, OpenAI) or run
-# them separately. Embeddings and chat are independent of each other.
+# ragabast uses two endpoints. Embeddings and chat are independent of each other:
+# you can point embeddings at one server and chat at a different one.
 #
-# Servers that work out of the box (any OpenAI Chat Completions + Embeddings
-# server):
+# The default embeddings provider (empty / "openai") uses an
+# OpenAI-compatible /v1/embeddings server:
 #   - omlx              http://127.0.0.1:8000/v1
 #   - vLLM              http://host:8000/v1
 #   - LM Studio         http://localhost:1234/v1
@@ -14,8 +13,18 @@
 #   - OpenAI            https://api.openai.com/v1
 #   - Ollama (0.5+)     http://localhost:11434/v1
 #
-# Trailing /v1 in the URL is optional; the client strips it before
-# appending /v1/chat/completions and /v1/embeddings.
+# Set embedding_provider: "embedding_gemma" to use the EmbeddingGemma
+# /v2/embed wire shape instead. See the "embedding_gemma:" block below
+# and the README "Embedding provider" section for details.
+#
+# Trailing /v1 in the URL is optional; the OpenAI-compat client strips it
+# before appending /v1/chat/completions and /v1/embeddings.
+
+# Selects the embeddings client. Empty / "openai" — OpenAI-compat
+# /v1/embeddings (the default; see ollama: below).
+# "embedding_gemma" — EmbeddingGemma /v2/embed (see embedding_gemma:).
+# Env: EMBEDDING_PROVIDER.
+embedding_provider: ""
 
 ollama:
   # Embeddings server (OpenAI /v1/embeddings)
@@ -78,6 +87,41 @@ ollama:
     num_predict: 512
   timeout: 30s
 
+# EmbeddingGemma /v2/embed provider. Only consulted when
+# embedding_provider above is set to "embedding_gemma". The
+# /v2/embed wire shape is non-standard — the body is
+# {"texts": [...]} with no `model` or `dimensions` field, and
+# the endpoint is unauthenticated by convention. The server
+# picks the model itself; configure vectordb.embedding_dimension
+# to match what the server returns.
+#
+# Set embedding_provider: "embedding_gemma" above and uncomment
+# the block below to point ragabast at an EmbeddingGemma server.
+# Env: EMBEDDING_GEMMA_BASE_URL, EMBEDDING_GEMMA_TIMEOUT,
+#      EMBEDDING_GEMMA_DIMENSIONS, EMBEDDING_GEMMA_CONCURRENCY,
+#      EMBEDDING_GEMMA_DOC_PROMPT, EMBEDDING_GEMMA_QUERY_PROMPT.
+# embedding_gemma:
+#   base_url: https://embedder.local.net
+#   # EmbeddingDocPrompt and EmbeddingQueryPrompt are the
+#   # task-name prefixes embedding-gemma expects. The
+#   # recommended values below mirror Google's docs; leave
+#   # both empty for non-prompted models.
+#   embedding_doc_prompt: "title: none | text: "
+#   embedding_query_prompt: "task: search result | query: "
+#   # Expected response dimension. 0 disables the mismatch
+#   # check. /v2/embed does NOT accept a `dimensions` request
+#   # field — this is purely a check against what the server
+#   # returns, used to log a one-shot DIMENSION MISMATCH
+#   # warning if it differs.
+#   embedding_dimensions: 768
+#   # Parallel worker pool for the ingest path. Same semantics
+#   # as ollama.embedding_concurrency — chunks are split into
+#   # min(concurrency, n) equal sub-batches and embedded
+#   # concurrently. Default 1 (sequential). Raise it to match
+#   # the upstream server's request parallelism.
+#   embedding_concurrency: 1
+#   timeout: 30s
+
 vectordb:
   persistence_dir: data/vectors
   # Optional: override the bleve keyword index path. Leave empty
@@ -99,6 +143,7 @@ vectordb:
   #   - text-embedding-3-large (full)    3072
   #   - jina v5 at dimensions=256         256
   #   - bge-large-en-v1.5           1024
+  #   - embedding-gemma (full)       768
   # Changing this requires deleting data/vectors/ and re-ingesting.
   embedding_dimension: 768
 

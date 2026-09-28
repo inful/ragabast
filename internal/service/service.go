@@ -80,16 +80,28 @@ func NewService(cfg *config.Config) (*Service, error) {
 		return nil, fmt.Errorf("failed to initialize vector DB: %w", err)
 	}
 
-	embeddings := vector.NewOpenAIEmbeddingClientWithOptions(
-		cfg.Ollama.BaseURL,
-		cfg.Ollama.EmbeddingModel,
-		cfg.Ollama.EffectiveEmbeddingAPIKey(),
-		cfg.Ollama.Timeout,
-		cfg.Ollama.EmbeddingDimensions,
-		cfg.Ollama.EmbeddingConcurrency,
-		cfg.Ollama.EmbeddingDocPrompt,
-		cfg.Ollama.EmbeddingQueryPrompt,
-	)
+	embeddings, err := vector.NewEmbeddingClientFromOptions(vector.EmbeddingClientOptions{
+		Provider: vector.EmbeddingProvider(cfg.EmbeddingProvider),
+
+		OpenAIBaseURL:     cfg.Ollama.BaseURL,
+		OpenAIModel:       cfg.Ollama.EmbeddingModel,
+		OpenAIAPIKey:      cfg.Ollama.EffectiveEmbeddingAPIKey(),
+		OpenAITimeout:     cfg.Ollama.Timeout,
+		OpenAIDimensions:  cfg.Ollama.EmbeddingDimensions,
+		OpenAIConcurrency: cfg.Ollama.EmbeddingConcurrency,
+		OpenAIDocPrompt:   cfg.Ollama.EmbeddingDocPrompt,
+		OpenAIQueryPrompt: cfg.Ollama.EmbeddingQueryPrompt,
+
+		EmbeddingGemmaBaseURL:     cfg.EmbeddingGemma.BaseURL,
+		EmbeddingGemmaTimeout:     cfg.EmbeddingGemma.Timeout,
+		EmbeddingGemmaDimensions:  cfg.EmbeddingGemma.EmbeddingDimensions,
+		EmbeddingGemmaConcurrency: cfg.EmbeddingGemma.EmbeddingConcurrency,
+		EmbeddingGemmaDocPrompt:   cfg.EmbeddingGemma.EmbeddingDocPrompt,
+		EmbeddingGemmaQueryPrompt: cfg.EmbeddingGemma.EmbeddingQueryPrompt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize embeddings client: %w", err)
+	}
 
 	vectorOps := vector.NewVectorOperations(db, embeddings)
 

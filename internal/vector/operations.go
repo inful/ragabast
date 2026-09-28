@@ -13,16 +13,22 @@ import (
 // ingest, delete, and clear operation. When searchIndex is nil
 // (the historical default), the keyword side degrades gracefully
 // — the vector side keeps working unchanged.
+//
+// embeddings is an EmbeddingClient (interface) so the same
+// VectorOperations can serve either the OpenAI-compat path
+// (Ollama, vLLM, LM Studio, llama.cpp, OpenAI) or the
+// EmbeddingGemma /v2/embed path, depending on which
+// concrete client service.NewService wires in.
 type VectorOperations struct {
 	db          *VectorDB
-	embeddings  *OpenAIEmbeddingClient
+	embeddings  EmbeddingClient
 	searchIndex *SearchIndex
 }
 
 // NewVectorOperations creates a new vector operations handler.
 // Call SetSearchIndex to enable the keyword index for hybrid
 // search; otherwise only semantic search is available.
-func NewVectorOperations(db *VectorDB, embeddings *OpenAIEmbeddingClient) *VectorOperations {
+func NewVectorOperations(db *VectorDB, embeddings EmbeddingClient) *VectorOperations {
 	return &VectorOperations{
 		db:         db,
 		embeddings: embeddings,

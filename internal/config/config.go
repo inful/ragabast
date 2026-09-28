@@ -49,6 +49,27 @@ type Config struct {
 	// Ollama configuration.
 	Ollama OllamaConfig `yaml:"ollama"`
 
+	// EmbeddingProvider selects which embeddings client
+	// ragabast uses. Empty / "openai" — the historical
+	// OpenAI-compat path via ollama.base_url (Ollama,
+	// vLLM, LM Studio, llama.cpp --embedding, OpenAI,
+	// llama-stack). "embedding_gemma" — the EmbeddingGemma
+	// /v2/embed path via embedding_gemma.base_url, which
+	// is NOT OpenAI-compatible: the body is {"texts":
+	// [...]}, the model and dimensions fields are absent,
+	// and there is no Authorization header.
+	//
+	// The default (empty) preserves the historical
+	// behavior so existing config files and operators
+	// don't see any change.
+	EmbeddingProvider string `env:"EMBEDDING_PROVIDER" yaml:"embedding_provider,omitempty"`
+
+	// EmbeddingGemma holds the embedding-gemma /v2/embed
+	// server settings. Only consulted when
+	// EmbeddingProvider is "embedding_gemma". Required
+	// field is BaseURL.
+	EmbeddingGemma EmbeddingGemmaConfig `yaml:"embedding_gemma,omitempty"`
+
 	// Vector database configuration.
 	VectorDB VectorDBConfig `yaml:"vectordb"`
 
@@ -451,6 +472,71 @@ type OllamaConfig struct {
 	Timeout time.Duration `env:"OLLAMA_TIMEOUT" yaml:"timeout"`
 }
 
+// EmbeddingGemmaConfig holds the embedding-gemma /v2/embed
+// server settings. Distinct from OllamaConfig because the
+// wire shape is non-standard:
+//
+//   - Path is /v2/embed, not /v1/embeddings.
+//   - Body is {"texts": [...]}, not {"input": [...], "model": "..."}.
+//   - No Authorization header.
+//   - No `dimensions` request field — the server picks the
+//     dimension; configure vectordb.embedding_dimension to
+//     match what the server returns.
+//
+// Only consulted when Config.EmbeddingProvider is
+// "embedding_gemma". Empty / missing BaseURL is a config
+// error in that case (see Config.Validate).
+type EmbeddingGemmaConfig struct {
+	// BaseURL is the server root. The client appends
+	// "/v2/embed" itself; trailing /v1 segments are
+	// tolerated and stripped (matches the OpenAI
+	// client's normalization so operators can paste
+	// either form).
+	BaseURL string `env:"EMBEDDING_GEMMA_BASE_URL" yaml:"base_url"`
+
+	// Timeout is the per-request HTTP timeout. Default
+	// 30s when <= 0.
+	Timeout time.Duration `env:"EMBEDDING_GEMMA_TIMEOUT" yaml:"timeout"`
+
+	// EmbeddingDimensions is the configured dimension
+	// the operator expects the server to return. 0
+	// disables the mismatch check. The /v2/embed endpoint
+	// does NOT accept a `dimensions` request field —
+	// operators have to match the server-side setting
+	// via vectordb.embedding_dimension. This field is
+	// only used to detect mismatches and log a one-shot
+	// warning if the server returns a different size.
+	EmbeddingDimensions int `env:"EMBEDDING_GEMMA_DIMENSIONS" yaml:"embedding_dimensions"`
+
+	// EmbeddingConcurrency controls the parallel
+	// worker pool that GenerateChunkEmbeddings uses on
+	// the ingest path. Same semantics as
+	// OllamaConfig.EmbeddingConcurrency — chunks are
+	// split into min(concurrency, len(chunks)) equal
+	// sub-batches and processed concurrently. Default 1
+	// (sequential). Set higher to match the upstream
+	// server's request parallelism.
+	EmbeddingConcurrency int `env:"EMBEDDING_GEMMA_CONCURRENCY" yaml:"embedding_concurrency"`
+
+	// EmbeddingDocPrompt is prepended to every chunk
+	// text before POSTing to /v2/embed on the doc side.
+	// Default empty — preserves the historical raw-text
+	// behavior for non-prompted models. Operators
+	// using Google's embedding-gemma should set this to
+	// "title: none | text: " so the model produces
+	// retrieval-optimized document vectors.
+	EmbeddingDocPrompt string `env:"EMBEDDING_GEMMA_DOC_PROMPT" yaml:"embedding_doc_prompt,omitempty"`
+
+	// EmbeddingQueryPrompt is prepended to the user
+	// query before POSTing to /v2/embed on the query
+	// side (EmbedQuery). Same default-empty behavior
+	// as EmbeddingDocPrompt. For embedding-gemma the
+	// recommended value is "task: search result |
+	// query: ". Independent from EmbeddingDocPrompt so
+	// operators can tune the two sides separately.
+	EmbeddingQueryPrompt string `env:"EMBEDDING_GEMMA_QUERY_PROMPT" yaml:"embedding_query_prompt,omitempty"`
+}
+
 // VectorDBConfig holds vector database configuration.
 type VectorDBConfig struct {
 	// Persistence directory.
@@ -664,6 +750,13 @@ func DefaultConfig() *Config {
 	defaultTemp := 0.1
 
 	return &Config{
+		// EmbeddingProvider defaults to empty, which the
+		// factory resolves to "openai" — the historical
+		// Ollama /v1/embeddings path. Operators switching
+		// to the EmbeddingGemma /v2/embed wire format set
+		// this explicitly to "embedding_gemma" (env:
+		// EMBEDDING_PROVIDER, YAML: embedding_provider).
+		EmbeddingProvider: "",
 		Ollama: OllamaConfig{
 			BaseURL:              "http://localhost:11434",
 			ChatBaseURL:          "http://localhost:11434",
@@ -680,6 +773,11 @@ func DefaultConfig() *Config {
 				"num_predict": 512,
 			},
 		},
+		// EmbeddingGemma is empty by default. Validate
+		// only checks BaseURL when EmbeddingProvider is
+		// "embedding_gemma", so a default config still
+		// passes Validate unchanged.
+		EmbeddingGemma: EmbeddingGemmaConfig{},
 		VectorDB: VectorDBConfig{
 			PersistenceDir:     filepath.Join(wd, "data", "vectors"),
 			CollectionName:     "ragabast",
@@ -872,6 +970,43 @@ func (c *Config) ApplyEnvOverrides() {
 		case "0", "false", "f", "no", "n", "off":
 			c.Ragabast.LogChatRequests = false
 		}
+	}
+
+	// Embedding provider selector. Empty means the
+	// historical OpenAI-compat path; "embedding_gemma"
+	// switches to the EmbeddingGemma /v2/embed client.
+	if v := os.Getenv("EMBEDDING_PROVIDER"); v != "" {
+		c.EmbeddingProvider = v
+	}
+
+	// EmbeddingGemma /v2/embed server. Only consulted
+	// when EmbeddingProvider == "embedding_gemma".
+	if v := os.Getenv("EMBEDDING_GEMMA_BASE_URL"); v != "" {
+		c.EmbeddingGemma.BaseURL = v
+	}
+	if v := os.Getenv("EMBEDDING_GEMMA_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.EmbeddingGemma.Timeout = d
+		}
+	}
+	if v, ok := os.LookupEnv("EMBEDDING_GEMMA_DIMENSIONS"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.EmbeddingGemma.EmbeddingDimensions = n
+		}
+	}
+	if v, ok := os.LookupEnv("EMBEDDING_GEMMA_CONCURRENCY"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.EmbeddingGemma.EmbeddingConcurrency = n
+		}
+	}
+	if v, ok := os.LookupEnv("EMBEDDING_GEMMA_DOC_PROMPT"); ok {
+		// LookupEnv (not Getenv) so an explicitly-empty env
+		// var clears the field — same convention as the
+		// Ollama embedding prompts.
+		c.EmbeddingGemma.EmbeddingDocPrompt = v
+	}
+	if v, ok := os.LookupEnv("EMBEDDING_GEMMA_QUERY_PROMPT"); ok {
+		c.EmbeddingGemma.EmbeddingQueryPrompt = v
 	}
 
 	// Ollama config.
@@ -1297,6 +1432,33 @@ func (c *Config) validateAuth() error {
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
 	var errs []string
+
+	// Validate embedding provider selection. The default
+	// (empty) is the OpenAI-compat path; the only other
+	// supported value is "embedding_gemma".
+	if c.EmbeddingProvider != "" && c.EmbeddingProvider != "openai" && c.EmbeddingProvider != "embedding_gemma" {
+		errs = append(errs, fmt.Sprintf(
+			"embedding_provider %q is not recognized (expected \"openai\" or \"embedding_gemma\")",
+			c.EmbeddingProvider,
+		))
+	}
+
+	// When the embedding_gemma provider is selected, its
+	// base URL is required. The OpenAI-compat path is
+	// always validated below against ollama.* — we don't
+	// duplicate that here.
+	if c.EmbeddingProvider == "embedding_gemma" && c.EmbeddingGemma.BaseURL == "" {
+		errs = append(errs, "embedding_gemma.base_url is required when embedding_provider is \"embedding_gemma\"")
+	}
+	if c.EmbeddingGemma.Timeout < 0 {
+		errs = append(errs, "embedding_gemma.timeout must be >= 0")
+	}
+	if c.EmbeddingGemma.EmbeddingDimensions < 0 {
+		errs = append(errs, "embedding_gemma.embedding_dimensions must be >= 0")
+	}
+	if c.EmbeddingGemma.EmbeddingConcurrency < 0 {
+		errs = append(errs, "embedding_gemma.embedding_concurrency must be >= 0")
+	}
 
 	// Validate Ollama config.
 	if c.Ollama.BaseURL == "" {

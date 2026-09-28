@@ -286,22 +286,44 @@ func (c *DoctorCmd) checkPersistenceDirReachable(cfg *config.Config) {
 // the server probe catches everything else (server-side
 // model aliasing, custom finetunes, OpenAI-compat layers
 // that silently substitute models).
+//
+// The probe routes through the same EmbeddingClient factory
+// the server uses at runtime, so an operator pointing at an
+// EmbeddingGemma /v2/embed server gets the right wire shape
+// for the probe too. Doctor probe uses raw text (no task
+// prompts) and concurrency=1 — that's enough for a
+// connect-check, and skipping the worker pool keeps the
+// probe latency to one round-trip.
 func (c *DoctorCmd) checkEmbeddingsServer(cfg *config.Config) {
-	client := vector.NewOpenAIEmbeddingClientWithOptions(
-		cfg.Ollama.BaseURL,
-		cfg.Ollama.EmbeddingModel,
-		cfg.Ollama.EffectiveEmbeddingAPIKey(),
-		cfg.Ollama.Timeout,
-		0,  // probe at the model's full dim — we want to see what the server actually returns
-		1,  // doctor probe is single-call; concurrency knob is for ingest
-		"", // doctor probe uses raw text — no task prompt needed for a connect-check
-		"", // ditto for the query side
-	)
+	client, err := vector.NewEmbeddingClientFromOptions(vector.EmbeddingClientOptions{
+		Provider: vector.EmbeddingProvider(cfg.EmbeddingProvider),
+
+		OpenAIBaseURL:     cfg.Ollama.BaseURL,
+		OpenAIModel:       cfg.Ollama.EmbeddingModel,
+		OpenAIAPIKey:      cfg.Ollama.EffectiveEmbeddingAPIKey(),
+		OpenAITimeout:     cfg.Ollama.Timeout,
+		OpenAIDimensions:  0,  // probe at the model's full dim — we want to see what the server actually returns
+		OpenAIConcurrency: 1,  // doctor probe is single-call; concurrency knob is for ingest
+		OpenAIDocPrompt:   "", // doctor probe uses raw text — no task prompt needed for a connect-check
+		OpenAIQueryPrompt: "", // ditto for the query side
+
+		EmbeddingGemmaBaseURL:     cfg.EmbeddingGemma.BaseURL,
+		EmbeddingGemmaTimeout:     cfg.EmbeddingGemma.Timeout,
+		EmbeddingGemmaDimensions:  0, // ditto
+		EmbeddingGemmaConcurrency: 1, // ditto
+		EmbeddingGemmaDocPrompt:   "",
+		EmbeddingGemmaQueryPrompt: "",
+	})
+	if err != nil {
+		log.Printf("⚠ embeddings provider misconfigured: %v\n", err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := client.ValidateConnection(ctx); err != nil {
-		log.Printf("⚠ embedding server unreachable at %s: %v\n", cfg.Ollama.BaseURL, err)
+	probeErr := client.ValidateConnection(ctx)
+	if probeErr != nil {
+		log.Printf("⚠ embedding server unreachable at %s: %v\n", cfg.Ollama.BaseURL, probeErr)
 		return
 	}
 	log.Printf("✓ embedding server reachable at %s\n", cfg.Ollama.BaseURL)
@@ -316,6 +338,23 @@ func (c *DoctorCmd) checkEmbeddingsServer(cfg *config.Config) {
 	actual := len(vec)
 	if actual == cfg.VectorDB.EmbeddingDimension {
 		log.Printf("✓ server returns %d-dim vectors, matches the configured dim\n", actual)
+		return
+	}
+	// Name the configured model in the message. When the
+	// operator is on the OpenAI-compat path that's
+	// ollama.embedding_model; on the EmbeddingGemma path
+	// the model is server-side and the base URL is the
+	// better identifier. Both messages follow the same
+	// recovery pattern (update vectordb.embedding_dimension
+	// or change the server's model) so operators can act
+	// regardless of which provider they're on.
+	if cfg.EmbeddingProvider == "embedding_gemma" {
+		log.Printf("⚠ server returns %d-dim vectors but vectordb.embedding_dimension is %d. "+
+			"The EmbeddingGemma server at %q is emitting %d-dim vectors; "+
+			"the server picks its own dimension, so fix by either updating "+
+			"vectordb.embedding_dimension: %d in your config, or reconfiguring "+
+			"the upstream server to return %d-dim vectors.\n",
+			actual, cfg.VectorDB.EmbeddingDimension, cfg.EmbeddingGemma.BaseURL, actual, actual, actual)
 		return
 	}
 	log.Printf("⚠ server returns %d-dim vectors but vectordb.embedding_dimension is %d. "+

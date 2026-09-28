@@ -41,6 +41,23 @@ YAML to find the knob they need.
 | `OLLAMA_OPTIONS_JSON` | `options` | `{top_k:20, top_p:0.8, min_p:0.05, num_predict:512}` | Pass-through OpenAI-compat sampling options. JSON-encoded in env. |
 | `OLLAMA_TIMEOUT` | `timeout` | `30s` | Per-request timeout for both embeddings and chat. |
 
+#### `embedding_provider` — which embeddings client to use
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `EMBEDDING_PROVIDER` | `embedding_provider` | `""` (= `"openai"`) | Selects the embeddings client. `""` / `"openai"` — OpenAI-compat `/v1/embeddings`. `"embedding_gemma"` — EmbeddingGemma `/v2/embed`. |
+
+#### `embedding_gemma` — EmbeddingGemma `/v2/embed` provider
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `EMBEDDING_GEMMA_BASE_URL` | `base_url` | `""` (required when provider=`embedding_gemma`) | Server root. Path `/v2/embed` is appended by the client. |
+| `EMBEDDING_GEMMA_TIMEOUT` | `timeout` | `30s` | Per-request HTTP timeout. |
+| `EMBEDDING_GEMMA_DIMENSIONS` | `embedding_dimensions` | `0` (off) | Expected response dimension. Mismatch logs a one-shot WARNING. |
+| `EMBEDDING_GEMMA_CONCURRENCY` | `embedding_concurrency` | `1` | Parallel `/v2/embed` requests in flight on the ingest path. |
+| `EMBEDDING_GEMMA_DOC_PROMPT` | `embedding_doc_prompt` | `""` | Task-name prefix for chunks being indexed. Recommended for embedding-gemma: `title: none | text: `. |
+| `EMBEDDING_GEMMA_QUERY_PROMPT` | `embedding_query_prompt` | `""` | Task-name prefix for user queries. Recommended for embedding-gemma: `task: search result | query: `. |
+
 #### `vectordb` — vector store
 
 | Env var | YAML key | Default | Description |
@@ -746,16 +763,74 @@ one can degrade quality.
 
 ### Google's native Gemini API
 
-`embedding-gemma` is also available via Google's native Gemini
-endpoint, but that API is **not** OpenAI-compat. ragabast does
-not speak the native Gemini embedding protocol — operators
-wanting hosted embedding-gemma would need a proxy that exposes
-`/v1/embeddings`. The same caveat applies to Google's other
-embedding models (`gemini-embedding-001`, `gemini-embedding-2`),
+Google's native Gemini embedding endpoint is **not** OpenAI-compat.
+ragabast speaks it via a separate `embedding_gemma` provider
+(see the [Embedding provider](#embedding-provider) section
+below) — operators pointing at the native Gemini endpoint or any
+`/v2/embed`-style local proxy can switch providers with a single
+config flag.
+
+The same caveat applies to Google's other embedding models
+(`gemini-embedding-001`, `gemini-embedding-2`),
 which work today only because Google's OpenAI-compat shim
 translates the wire format; the `dimensions` field is silently
 ignored by that shim, so Matryoshka truncation has no effect
 against Google-hosted embeddings.
+
+## Embedding provider
+
+ragabast picks the embeddings client from `embedding_provider`
+(env `EMBEDDING_PROVIDER`). Two values are supported:
+
+| Value | Wire | Server |
+|---|---|---|
+| *(empty)* / `openai` | `POST /v1/embeddings`, `{"input": [...], "model": "..."}` | Ollama 0.5+, vLLM, LM Studio, llama.cpp `--embedding`, llama-stack, OpenAI, Google's OpenAI-compat shim |
+| `embedding_gemma` | `POST /v2/embed`, `{"texts": [...]}` | EmbeddingGemma `/v2/embed` endpoint, native Gemini embedding proxy, any custom server speaking this shape |
+
+The `embedding_gemma` provider speaks the wire shape used by
+Google's hosted EmbeddingGemma endpoint and by local proxies
+that wrap it:
+
+```bash
+curl -sS --fail-with-body 'https://embedder.local.net/v2/embed' \
+  -H 'Content-Type: application/json' \
+  --data '{"texts":["text for embedding","second text for embedding"]}'
+```
+
+Key differences from the OpenAI-compat path:
+
+- **No `model` field.** The server picks the model itself. ragabast doesn't send one and the response doesn't have to identify which model produced each vector.
+- **No `dimensions` request field.** Configure `vectordb.embedding_dimension` to match what the server returns; the client only checks for mismatches and warns.
+- **No `Authorization` header.** The `/v2/embed` endpoint is unauthenticated by convention. If your proxy requires auth, front it with a header-injecting middleware or extend the client.
+- **Response shape is probed.** The client accepts `{"embeddings":[[...]]}` (parallel-of-texts, primary), `{"results":[{"embedding":[...]}]}` and `{"data":[{"embedding":[...]}]}`. Unknown shapes surface the raw body in the error so you can pin down what your server actually returns and either patch the client or your proxy.
+
+To switch an existing install to the EmbeddingGemma path:
+
+```yaml
+embedding_provider: embedding_gemma
+embedding_gemma:
+  base_url: https://embedder.local.net
+  embedding_dimensions: 768        # must match what the server returns; mismatch logs a one-shot WARNING
+  embedding_concurrency: 4         # parallel worker pool — same semantics as ollama.embedding_concurrency
+  embedding_doc_prompt: "title: none | text: "      # recommended for embedding-gemma
+  embedding_query_prompt: "task: search result | query: "
+  timeout: 30s
+```
+
+Or via env vars:
+
+```bash
+EMBEDDING_PROVIDER=embedding_gemma
+EMBEDDING_GEMMA_BASE_URL=https://embedder.local.net
+EMBEDDING_GEMMA_DIMENSIONS=768
+EMBEDDING_GEMMA_DOC_PROMPT="title: none | text: "
+EMBEDDING_GEMMA_QUERY_PROMPT="task: search result | query: "
+```
+
+`ragabast doctor` probes the embeddings server with the
+configured provider, so dimension mismatches show up there
+before the first ingest crashes with "vectors must have the
+same length".
 
 ## MCP (Model Context Protocol)
 
