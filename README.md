@@ -723,6 +723,25 @@ Client flow:
 5. **200 with different fingerprint** → source has changed;
    re-ingest via `POST /api/ingest`.
 
+A worked bash example showing the full client loop with
+the multipart `/api/ingest/file` endpoint is in
+[`examples/ingest-with-preflight.sh`](examples/ingest-with-preflight.sh).
+It's a single ~100-line script that takes a UID and a
+markdown file path, computes the local SHA-256, calls
+the preflight endpoint, and only uploads when the
+fingerprints disagree. Requires `bash`, `curl`, `jq`,
+`sha256sum` — all standard on Linux + macOS.
+
+```bash
+export RAGABAST_URL=https://ragabast.example.com
+export AUTH_TOKEN=...
+./examples/ingest-with-preflight.sh adr-001 path/to/adr-001.md
+# skip  adr-001  fingerprint unchanged (3a7f...)
+# ... or
+# ingest adr-001  new document (local fp=3a7f...)
+# {"message":"Document ingested successfully","document_id":"adr-001","chunks":2}
+```
+
 The endpoint is cheap (one chromem-go query against the
 `document_id` metadata filter using a dummy embedding), so
 calling it on every doc in a batch ingest is fine. Auth,
