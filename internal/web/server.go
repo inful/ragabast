@@ -396,13 +396,35 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 // deriveServerBase is the externally-reachable origin
-// (scheme + host + port) the IdP redirects back to.
-// Falls back to http://<address>:<port> when neither TLS
-// nor X-Forwarded-Proto is in play. Operators behind a
-// reverse proxy should set the public-facing URL via a
-// follow-up config knob (the auth flow depends on it
-// matching what the IdP is configured with).
+// (scheme + host [+ port]) the IdP redirects back to.
+// The result is used as the prefix for every OAuth
+// callback URL: `<derived>/auth/<provider-name>/callback`.
+//
+// Resolution order:
+//
+//  1. cfg.Server.PublicURL — operator-provided override
+//     for installs behind a reverse proxy (Traefik, nginx,
+//     Caddy, an L7 cloud LB) where the bind address is a
+//     private hostname but the public URL is something
+//     else entirely. Empty by default; setting it
+//     preserves everything (scheme, host, port, optional
+//     subpath) so the URL the IdP gets matches what the
+//     operator registered at the provider.
+//  2. http://<address>:<port> — historical fallback when
+//     PublicURL is empty. Strips a port from Address if
+//     it already carries one, then re-appends the
+//     configured Port. Default scheme is http because
+//     ragabast doesn't terminate TLS itself; operators
+//     behind a TLS proxy should set PublicURL instead.
+//
+// A trailing slash on PublicURL is trimmed so the
+// concatenation in OAuthProvider.RedirectURL never
+// produces a double slash.
 func deriveServerBase(cfg *config.Config) string {
+	if pub := strings.TrimSpace(cfg.Server.PublicURL); pub != "" {
+		return strings.TrimRight(pub, "/")
+	}
+
 	scheme := "http"
 	addr := cfg.Server.Address
 	port := cfg.Server.Port

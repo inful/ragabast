@@ -150,6 +150,20 @@ vectordb:
 server:
   address: 0.0.0.0
   port: 8080
+
+  # Public-facing origin used to build OAuth callback URLs.
+  # Required when ragabast sits behind a reverse proxy
+  # (Traefik / nginx / cloud L7 LB) and the bind address
+  # doesn't match the public hostname the IdP sees. Leave
+  # empty for single-host / localhost installs — the
+  # callback URL falls back to http://<address>:<port>.
+  #
+  # The IdP callback URL registered with each provider
+  # becomes: <public_url>/auth/<provider-name>/callback
+  #
+  # Env: SERVER_PUBLIC_URL. Trailing slash is trimmed.
+  # public_url: https://ragabast.example.com
+
   enable_cors: true
   # Comma-separated list of origins allowed by CORS. Default
   # (empty) disables cross-origin browser requests. Use "*"

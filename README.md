@@ -73,6 +73,7 @@ YAML to find the knob they need.
 |---|---|---|---|
 | `SERVER_ADDRESS` | `address` | `0.0.0.0` | Bind address. Use `127.0.0.1` for local-only. |
 | `SERVER_PORT` | `port` | `8080` | Listen port. |
+| `SERVER_PUBLIC_URL` | `public_url` | `""` (derived from `address`+`port`) | Override the externally-reachable origin used to build OAuth callback URLs. Set behind a reverse proxy (Traefik / nginx / cloud L7 LB) when `address` doesn't match the public hostname. Trailing slash is trimmed. |
 | `SERVER_ENABLE_CORS` | `enable_cors` | `true` | Master switch for CORS processing. |
 | `SERVER_CORS_ORIGINS` | `cors_origins` | `[]` | Allowed origins (comma-separated). `*` for trusted local-only. |
 | `SERVER_AUTH_TOKEN` | `auth_token` | `""` | Single bearer token. Empty = open access (local-dev default). |
@@ -345,6 +346,40 @@ The IdP must be configured with the callback URL
 `https://<your-ragabast>/auth/<name>/callback` and the matching scopes.
 See [`plans/oauth.md`](plans/oauth.md) for per-provider setup recipes
 (client registration, scopes, callback URLs).
+
+#### Behind a reverse proxy (Traefik / nginx / cloud L7 LB)
+
+When ragabast binds to a private address (e.g. `0.0.0.0` or a
+k8s Service ClusterIP) but is exposed to the internet through a
+reverse proxy, the bind address is not what the IdP sees as the
+callback host. Set `server.public_url` (env `SERVER_PUBLIC_URL`)
+to the externally-reachable origin so the OAuth callback URL
+ragabast sends to the IdP matches what you registered at the
+provider:
+
+```yaml
+server:
+  address: 0.0.0.0       # bind address (private)
+  port: 8080
+  public_url: https://ragabast.example.com   # what the IdP sees
+```
+
+The callback URLs the IdP needs to whitelist become:
+
+- `https://ragabast.example.com/auth/<provider-name>/callback` for every configured provider
+
+```bash
+# Equivalent env-var form:
+SERVER_ADDRESS=0.0.0.0
+SERVER_PORT=8080
+SERVER_PUBLIC_URL=https://ragabast.example.com
+```
+
+`public_url` preserves the scheme, host, optional port, and
+optional subpath exactly as written (a trailing slash is
+trimmed to avoid `<URL>//auth/...`). When unset, ragabast
+falls back to `http://<address>:<port>` — the historical
+behavior for single-host / localhost installs.
 
 Browser UX:
 

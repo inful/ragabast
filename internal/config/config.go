@@ -566,6 +566,30 @@ type ServerConfig struct {
 	// Port to bind the server.
 	Port int `env:"SERVER_PORT" yaml:"port"`
 
+	// PublicURL is the externally-reachable origin
+	// (scheme + host [+ port]) the IdP redirects back
+	// to after a successful OAuth login. When set, it
+	// overrides the URL derived from Address + Port —
+	// required for any install behind a reverse proxy
+	// (Traefik / nginx / Caddy / an L7 cloud LB) where
+	// the bind address is a private hostname but the
+	// public URL is something else entirely.
+	//
+	// The callback URL the IdP needs to whitelist is
+	// `<PublicURL>/auth/<provider-name>/callback` for
+	// every configured provider. deriveServerBase
+	// trims any trailing slash so concatenation never
+	// produces a double slash.
+	//
+	// Must be a fully-qualified http/https URL with a
+	// non-empty host when set. Empty (the default)
+	// preserves the historical Address+Port
+	// derivation, so single-host installs and
+	// localhost dev keep working with zero config.
+	//
+	// Env: SERVER_PUBLIC_URL. YAML: server.public_url.
+	PublicURL string `env:"SERVER_PUBLIC_URL" yaml:"public_url,omitempty"`
+
 	// Enable CORS.
 	EnableCORS bool `env:"SERVER_ENABLE_CORS" yaml:"enable_cors"`
 
@@ -1081,6 +1105,9 @@ func (c *Config) ApplyEnvOverrides() {
 			c.Server.Port = p
 		}
 	}
+	if v := os.Getenv("SERVER_PUBLIC_URL"); v != "" {
+		c.Server.PublicURL = v
+	}
 	if v := os.Getenv("SERVER_AUTH_TOKEN"); v != "" {
 		c.Server.AuthToken = v
 	}
@@ -1502,6 +1529,26 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		errs = append(errs, "server.port must be between 1 and 65535")
+	}
+	if c.Server.PublicURL != "" {
+		// When set, must be a syntactically valid http/https
+		// URL with a non-empty host. Empty host = "we'll
+		// resolve at request time", which is the wrong
+		// failure mode here — catch it at config time.
+		// We don't pin a scheme preference: an operator
+		// proxying TLS off to Traefik but running ragabast
+		// over plain http (the common k8s ingress setup)
+		// legitimately wants http://...:port in the
+		// callback URL to match what the IdP was registered
+		// with.
+		u, parseErr := url.Parse(c.Server.PublicURL)
+		if parseErr != nil {
+			errs = append(errs, fmt.Sprintf("server.public_url is not a valid URL: %s", parseErr.Error()))
+		} else if u.Scheme != "http" && u.Scheme != "https" {
+			errs = append(errs, fmt.Sprintf("server.public_url scheme %q is not one of: http, https", u.Scheme))
+		} else if u.Host == "" {
+			errs = append(errs, "server.public_url must include a host")
+		}
 	}
 	if c.Server.MaxIngestDocumentBytes < 0 {
 		errs = append(errs, "server.max_ingest_document_bytes must be >= 0")
