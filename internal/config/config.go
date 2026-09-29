@@ -286,13 +286,26 @@ func (p OAuthProvider) RequiresDiscovery() bool {
 // than the IdP's basic profile.
 //
 //   - github:  read:user + user:email — the minimal set
-//     that returns a stable user id and a verified email
-//   - gitlab:  openid + profile + email — OIDC-style so
-//     the gitlab.com IdToken carries the claims
+//     that returns a stable user id and a verified email.
+//   - gitlab:  read_user + profile + email — read_user
+//     is the GitLab API scope that grants /api/v4/user
+//     access. Without it, GitLab returns HTTP 403 on
+//     the userinfo fetch regardless of token validity.
+//     profile and email are OIDC claims GitLab populates
+//     on the /oauth/userinfo endpoint when read_user is
+//     granted. openid is intentionally NOT in the default
+//     set — it's only honored on GitLab 16.0+ with OIDC
+//     applications explicitly enabled, and on older GitLabs
+//     requesting it produces a confusing login failure.
+//     Operators on OIDC-enabled GitLab who want the
+//     ID-token path should switch to type=oidc with a
+//     discovery_url instead.
 //   - forgejo: read:user + user:email — matches the
-//     GitHub-compatible Forgejo OAuth shape
+//     GitHub-compatible Forgejo OAuth shape.
 //   - oidc:    openid + profile + email — required by
-//     the OIDC spec for ID-token issuance
+//     the OIDC spec for ID-token issuance. type=oidc
+//     providers always go through the OIDC UserInfo
+//     claim flow, so these are sufficient.
 func (p OAuthProvider) EffectiveScopes() []string {
 	if len(p.Scopes) > 0 {
 		out := make([]string, len(p.Scopes))
@@ -303,7 +316,14 @@ func (p OAuthProvider) EffectiveScopes() []string {
 	switch p.Type {
 	case "github", "forgejo":
 		return []string{"read:user", "user:email"}
-	case "gitlab", "oidc":
+	case "gitlab":
+		// read_user is the GitLab API scope that
+		// unlocks /api/v4/user. profile and email
+		// are the OIDC claims GitLab populates
+		// alongside it. openid is omitted here on
+		// purpose — see the docstring above.
+		return []string{"read_user", "profile", "email"}
+	case "oidc":
 		return []string{"openid", "profile", "email"}
 	default:
 		return []string{"openid", "profile", "email"}

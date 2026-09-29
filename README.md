@@ -336,7 +336,17 @@ auth:
       client_id: ...
       client_secret: ...
       base_url: https://gitlab.example.com   # omit for gitlab.com
-      scopes: [openid, profile, email]
+      # scopes: override the per-type defaults below. The
+      # defaults are tuned to work out of the box:
+      #   type=gitlab:  read_user, profile, email
+      #   type=github:  read:user, user:email
+      #   type=forgejo: read:user, user:email
+      #   type=oidc:    openid, profile, email
+      # For GitLab, read_user is REQUIRED — without it,
+      # /api/v4/user returns HTTP 403 regardless of token
+      # validity. Don't drop it unless you've switched to
+      # type=oidc with a discovery_url (which uses the
+      # OIDC UserInfo claim flow instead of /api/v4/user).
       allowed_users:                          # optional whitelist
         - alice@example.com
         - bob@example.com

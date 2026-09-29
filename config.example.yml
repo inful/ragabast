@@ -308,7 +308,11 @@ auth:
   #   client_id: ...
   #   client_secret: ...
   #   base_url: https://gitlab.example.com
-  #   scopes: [openid, profile, email]
+  #   # scopes defaults to [read_user, profile, email].
+  #   # read_user is REQUIRED — without it /api/v4/user
+  #   # returns HTTP 403 regardless of token validity.
+  #   # Don't drop it unless you've switched to type=oidc
+  #   # with a discovery_url (the OIDC UserInfo claim flow).
   #   default_role: user
 
   # Forgejo / Gitea (base_url required, e.g. codeberg.org):

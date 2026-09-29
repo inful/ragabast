@@ -47,14 +47,27 @@ session's username and verified email.
    self-hosted equivalent at `/-/user_settings/applications`).
 2. **Name**: anything (e.g. "ragabast").
 3. **Redirect URI**: `https://<your-ragabast-host>/auth/<name>/callback`.
-4. **Scopes**: `openid`, `profile`, `email` (the preset defaults).
-   Mark **api** if you also want ragabast to call back into the GitLab
-   API on the user's behalf — not currently used.
+4. **Scopes**: `read_user`, `profile`, `email` (the preset defaults).
+   `read_user` is the GitLab API scope that unlocks `/api/v4/user`
+   — without it, ragabast's userinfo fetch returns HTTP 403
+   regardless of token validity. Mark **api** if you also want
+   ragabast to call back into the GitLab API on the user's behalf
+   — not currently used. `openid` is intentionally omitted from
+   the defaults because only GitLab 16.0+ with OIDC applications
+   enabled honors it; including it on older GitLabs produces a
+   confusing login failure.
 5. Click **Save application**. Copy the **Application ID** (this is
    the client_id) and **Secret** (client_secret) into ragabast.
 
 For self-hosted GitLab, set `base_url` to the GitLab root
 (e.g. `https://gitlab.example.com`).
+
+Operators on OIDC-enabled GitLab (16.0+) who prefer the OIDC
+ID-token path should switch to `type: oidc` with a
+`discovery_url` pointing at `<gitlab>/.well-known/openid-configuration`.
+type=oidc uses the OIDC UserInfo claim flow instead of
+`/api/v4/user`, so the OIDC spec scopes (`openid`, `profile`,
+`email`) are sufficient.
 
 ```yaml
 auth:

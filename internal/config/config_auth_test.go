@@ -123,7 +123,17 @@ func TestOAuthProvider_DefaultScopesForGitHub(t *testing.T) {
 func TestOAuthProvider_DefaultScopesForGitLab(t *testing.T) {
 	p := OAuthProvider{Type: "gitlab", ClientID: "id", ClientSecret: "sec"}
 
-	assert.Equal(t, []string{"openid", "profile", "email"}, p.EffectiveScopes())
+	// read_user is the GitLab API scope that unlocks
+	// /api/v4/user. Without it, GitLab returns HTTP 403 on
+	// the userinfo fetch regardless of token validity —
+	// the v0.9.0 default of [openid, profile, email] caused
+	// exactly this failure in production. openid is
+	// intentionally omitted because only GitLab 16.0+
+	// with OIDC applications explicitly enabled honors it;
+	// including it on older GitLabs produces a confusing
+	// login failure. Operators who want the OIDC ID-token
+	// path should switch to type=oidc with a discovery_url.
+	assert.Equal(t, []string{"read_user", "profile", "email"}, p.EffectiveScopes())
 }
 
 func TestOAuthProvider_DefaultScopesForForgejo(t *testing.T) {
@@ -142,6 +152,36 @@ func TestOAuthProvider_EffectiveScopesOverride(t *testing.T) {
 	p := OAuthProvider{Type: "github", ClientID: "id", ClientSecret: "sec", Scopes: []string{"repo"}}
 
 	assert.Equal(t, []string{"repo"}, p.EffectiveScopes())
+}
+
+// TestOAuthProvider_GitLabDefaultScopesIncludeReadUser pins
+// the v0.9.0→v0.10.3 fix for the GitLab 403 on userinfo
+// fetch. The default GitLab scope set MUST include
+// `read_user`, because:
+//
+//  1. ragabast fetches userinfo via GET /api/v4/user
+//     with the access token in the Authorization header.
+//  2. GitLab enforces scope-level access on that endpoint
+//     — a token without read_user (or api / read_api) gets
+//     HTTP 403 even if it's otherwise valid.
+//  3. The historical default [openid, profile, email] was
+//     OIDC-shaped and didn't include read_user, so every
+//     GitLab login (gitlab.com + self-hosted) failed at
+//     the userinfo step.
+//
+// This test exists so a future "let's clean up the scopes"
+// PR can't silently drop read_user and reintroduce the 403.
+// Operators who want a different scope set can override
+// via Scopes; the default just needs to give the callback
+// handler enough to talk to /api/v4/user successfully.
+func TestOAuthProvider_GitLabDefaultScopesIncludeReadUser(t *testing.T) {
+	t.Helper()
+
+	p := OAuthProvider{Type: "gitlab", ClientID: "id", ClientSecret: "sec"}
+
+	scopes := p.EffectiveScopes()
+	assert.Contains(t, scopes, "read_user",
+		"GitLab default scopes must include read_user so /api/v4/user returns 200; without it GitLab returns HTTP 403 regardless of token validity")
 }
 
 func TestConfig_RoundTripsAuthConfigYAML(t *testing.T) {
