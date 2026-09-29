@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/ragabast/internal/models"
@@ -21,6 +22,16 @@ type documentsResponseBody struct {
 type deleteDocumentResponseBody struct {
 	Message    string `json:"message"`
 	DocumentID string `json:"document_id"`
+}
+
+// documentFingerprintResponseBody is the JSON shape returned
+// by GET /api/documents/{uid}/fingerprint. The IngestedAt
+// timestamp uses RFC3339 — the standard JSON wire format
+// Go's encoding/json uses for time.Time by default.
+type documentFingerprintResponseBody struct {
+	UID         string    `json:"uid"`
+	Fingerprint string    `json:"fingerprint"`
+	IngestedAt  time.Time `json:"ingested_at"`
 }
 
 // pruneDocumentsRequestBody drives POST /api/documents/prune.
@@ -92,7 +103,10 @@ func registerDocumentsOperations(api huma.API, svc serviceAPI) {
 		Limit  int `doc:"Page size; default 25, capped at 1000." query:"limit,omitempty"`
 		Offset int `doc:"Zero-based page offset; clamped to [0, total]." query:"offset,omitempty"`
 	},
-	) (*struct{ Body documentsResponseBody }, error) {
+	) (*struct {
+		Body documentsResponseBody
+	}, error,
+	) {
 		limit := input.Limit
 		if limit == 0 {
 			limit = 25
@@ -118,7 +132,10 @@ func registerDocumentsOperations(api huma.API, svc serviceAPI) {
 	}, func(ctx context.Context, input *struct {
 		DocumentID string `path:"document_id"`
 	},
-	) (*struct{ Body deleteDocumentResponseBody }, error) {
+	) (*struct {
+		Body deleteDocumentResponseBody
+	}, error,
+	) {
 		documentID := strings.TrimSpace(input.DocumentID)
 		if documentID == "" {
 			return nil, huma.Error400BadRequest("document_id is required")
@@ -139,6 +156,50 @@ func registerDocumentsOperations(api huma.API, svc serviceAPI) {
 		}
 
 		return &struct{ Body deleteDocumentResponseBody }{Body: deleteDocumentResponseBody{Message: "Document deleted", DocumentID: documentID}}, nil
+	})
+
+	// GET /api/documents/{uid}/fingerprint — ingest preflight.
+	// Lets a client ask "what fingerprint did you last store
+	// for this UID?" without sending the document body. The
+	// client computes its own fingerprint locally and
+	// decides whether to skip / re-ingest.
+	//
+	// 404 is the canonical "no document with this UID has
+	// ever been ingested" signal. Returns 200 only when the
+	// UID has been seen. The bool-returning service method
+	// is what makes the 200/404 distinction unambiguous
+	// without inventing error sentinels.
+	huma.Register(api, huma.Operation{
+		OperationID: "document-fingerprint",
+		Method:      http.MethodGet,
+		Path:        "/api/documents/{uid}/fingerprint",
+		Summary:     "Get the stored fingerprint for an ingested document",
+		Description: "Returns the content fingerprint ragabast last stored for the document with the given UID, plus when it was ingested. Lets ingest pipelines skip re-sending unchanged documents: compute the fingerprint locally, compare against this value, skip when they match. Returns 404 when no document with the UID has been ingested.",
+	}, func(ctx context.Context, input *struct {
+		UID string `path:"uid"`
+	},
+	) (*struct {
+		Body documentFingerprintResponseBody
+	}, error,
+	) {
+		uid := strings.TrimSpace(input.UID)
+		if uid == "" {
+			return nil, huma.Error400BadRequest("uid is required")
+		}
+		info, exists, err := svc.GetDocumentFingerprint(ctx, uid)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("get document fingerprint failed")
+		}
+		if !exists {
+			return nil, huma.Error404NotFound("no document ingested for uid \"" + uid + "\"")
+		}
+		return &struct {
+			Body documentFingerprintResponseBody
+		}{Body: documentFingerprintResponseBody{
+			UID:         uid,
+			Fingerprint: info.Fingerprint,
+			IngestedAt:  info.IngestedAt,
+		}}, nil
 	})
 
 	huma.Register(api, huma.Operation{

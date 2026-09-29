@@ -225,6 +225,10 @@ func (f *fakeHumaService) GetDocument(context.Context, string) (*models.Document
 	return nil, errFakeUnimplemented
 }
 
+func (f *fakeHumaService) GetDocumentFingerprint(_ context.Context, _ string) (service.DocumentFingerprintInfo, bool, error) {
+	return service.DocumentFingerprintInfo{}, false, nil
+}
+
 func (f *fakeHumaService) ChatSessionHistory(string) []service.ChatMessage {
 	if f.history != nil {
 		return f.history
@@ -322,6 +326,15 @@ type fakeService struct {
 	categories        []string
 	documents         []models.DocumentInfo
 	listErr           error
+
+	// Preflight endpoint stubs. Both default to the "never
+	// ingested" shape so handlers that use the standard
+	// fakeService{} see a 404 on the fingerprint endpoint
+	// — matches what the real service does for an
+	// unknown UID.
+	fingerprintInfo   service.DocumentFingerprintInfo
+	fingerprintExists bool
+	fingerprintErr    error
 }
 
 // appendedTurn is the record the chat handler asks the
@@ -430,6 +443,19 @@ func (f *fakeService) QueryDebugWithOptions(_ context.Context, _ string, _ int, 
 
 func (f *fakeService) GetDocument(context.Context, string) (*models.Document, error) {
 	return nil, errFakeUnimplemented
+}
+
+// GetDocumentFingerprint is the new preflight endpoint stub.
+// Tests that exercise GET /api/documents/{uid}/fingerprint
+// override the fingerprint* fields on the fake; the default
+// behavior is "never ingested" so the standard "fakeService{}"
+// returns the 404 shape — matches what handlers do when the
+// UID hasn't been seen.
+func (f *fakeService) GetDocumentFingerprint(_ context.Context, _ string) (service.DocumentFingerprintInfo, bool, error) {
+	if f.fingerprintErr != nil {
+		return service.DocumentFingerprintInfo{}, false, f.fingerprintErr
+	}
+	return f.fingerprintInfo, f.fingerprintExists, nil
 }
 
 func (f *fakeService) ChatSessionHistory(string) []service.ChatMessage {

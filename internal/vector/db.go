@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/philippgille/chromem-go"
 	"github.com/ragabast/internal/models"
@@ -806,18 +807,43 @@ func (db *VectorDB) SampleEmbeddingLength(ctx context.Context) (int, bool, error
 
 // splitMetadataList moved to metadata.go.
 
-// DocumentFingerprint returns the stored fingerprint for a document if it exists.
-func (db *VectorDB) DocumentFingerprint(ctx context.Context, documentID string) (string, bool, error) {
+// DocumentFingerprintInfo is the metadata a DocumentFingerprint
+// call returns. Fingerprint is the content hash stored at
+// ingest time; IngestedAt is when the chunk row was written
+// (RFC3339, parsed from the document_updated_at metadata
+// field). Zero IngestedAt means the metadata field was
+// absent on the stored chunks — defensive only, since the
+// ingest path always populates it.
+type DocumentFingerprintInfo struct {
+	Fingerprint string
+	IngestedAt  time.Time
+}
+
+// DocumentFingerprint returns the stored fingerprint for a
+// document if it exists. The bool is true when the doc is
+// ingested, false when no chunks with this document_id have
+// been stored — callers can use the bool rather than relying
+// on an empty-fingerprint sentinel to detect "never ingested".
+//
+// `document_id` is the docbuilder UID; the parser pins
+// doc.ID = doc.UID so a UID-keyed lookup is the natural API.
+//
+// Powers the preflight flow: GET /api/documents/{uid}/fingerprint
+// lets a client ask "what fingerprint did you last store for
+// this UID?" without sending the document body. The client
+// compares its locally-computed fingerprint against this
+// value and decides whether to skip or re-ingest.
+func (db *VectorDB) DocumentFingerprint(ctx context.Context, documentID string) (DocumentFingerprintInfo, bool, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 
 	if strings.TrimSpace(documentID) == "" {
-		return "", false, models.ErrInvalidInput
+		return DocumentFingerprintInfo{}, false, models.ErrInvalidInput
 	}
 
 	count := db.collection.Count()
 	if count == 0 {
-		return "", false, nil
+		return DocumentFingerprintInfo{}, false, nil
 	}
 
 	dummyEmbedding := make([]float32, db.embeddingDimension)
@@ -829,17 +855,18 @@ func (db *VectorDB) DocumentFingerprint(ctx context.Context, documentID string) 
 
 	results, err := db.collection.QueryWithOptions(ctx, options)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to query document fingerprint: %w", err)
+		return DocumentFingerprintInfo{}, false, fmt.Errorf("failed to query document fingerprint: %w", err)
 	}
 	if len(results) == 0 {
-		return "", false, nil
+		return DocumentFingerprintInfo{}, false, nil
 	}
 
-	fp := strings.TrimSpace(results[0].Metadata["fingerprint"])
-	if fp == "" {
-		return "", true, nil
+	info := DocumentFingerprintInfo{
+		Fingerprint: strings.TrimSpace(results[0].Metadata["fingerprint"]),
+		IngestedAt:  parseRFC3339(results[0].Metadata["document_updated_at"]),
 	}
-	return fp, true, nil
+
+	return info, true, nil
 }
 
 // DocumentNeedsUpdate returns whether an ingest should replace existing data.
@@ -849,14 +876,14 @@ func (db *VectorDB) DocumentFingerprint(ctx context.Context, documentID string) 
 // - If it exists and fingerprint matches, no-op (false, exists=true).
 // - If it exists and fingerprint differs, replace (true, exists=true).
 func (db *VectorDB) DocumentNeedsUpdate(ctx context.Context, documentID string, fingerprint string) (bool, bool, error) {
-	stored, exists, err := db.DocumentFingerprint(ctx, documentID)
+	info, exists, err := db.DocumentFingerprint(ctx, documentID)
 	if err != nil {
 		return false, false, err
 	}
 	if !exists {
 		return true, false, nil
 	}
-	if strings.TrimSpace(stored) == strings.TrimSpace(fingerprint) {
+	if strings.TrimSpace(info.Fingerprint) == strings.TrimSpace(fingerprint) {
 		return false, true, nil
 	}
 	return true, true, nil

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/vector"
@@ -70,6 +71,51 @@ func (s *Service) GetDocument(ctx context.Context, documentID string) (*models.D
 	}
 
 	return doc, nil
+}
+
+// DocumentFingerprintInfo mirrors vector.DocumentFingerprintInfo
+// at the service layer. The HTTP layer (GET /api/documents/{uid}/
+// fingerprint) returns this shape to ingest pipelines that want
+// to skip re-sending an unchanged document.
+type DocumentFingerprintInfo struct {
+	Fingerprint string    `json:"fingerprint"`
+	IngestedAt  time.Time `json:"ingested_at"`
+}
+
+// GetDocumentFingerprint returns the stored fingerprint for the
+// document with the given UID, plus when it was last ingested.
+// Returns (zero, false, nil) when no document with this UID has
+// been ingested yet — the bool is the canonical "exists" signal;
+// the caller can use ErrNotFound for "no such doc" only when it
+// explicitly wants the error path.
+//
+// Use case: a preflight check before ingesting. The caller
+// computes the fingerprint of the document it is about to
+// ingest, calls this method, and:
+//   - got=false → never been ingested; proceed with /api/ingest
+//   - got=true && same fingerprint → already up to date; skip
+//   - got=true && different fingerprint → source has changed; re-ingest
+//
+// Note: this only requires a vector store lookup (one chromem
+// query with the dummy-embedding trick). No chunk enumeration,
+// no full re-walk of the corpus. Cheap enough to call on every
+// ingest in a batch pipeline.
+func (s *Service) GetDocumentFingerprint(ctx context.Context, uid string) (DocumentFingerprintInfo, bool, error) {
+	uid = strings.TrimSpace(uid)
+	if uid == "" {
+		return DocumentFingerprintInfo{}, false, nil
+	}
+	info, exists, err := s.vectorOps.DocumentFingerprint(ctx, uid)
+	if err != nil {
+		return DocumentFingerprintInfo{}, false, err
+	}
+	if !exists {
+		return DocumentFingerprintInfo{}, false, nil
+	}
+	return DocumentFingerprintInfo{
+		Fingerprint: info.Fingerprint,
+		IngestedAt:  info.IngestedAt,
+	}, true, nil
 }
 
 // DeleteDocument removes a document from the system.

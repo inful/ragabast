@@ -30,6 +30,7 @@ type serviceAPI interface {
 	AppendChatTurn(ctx context.Context, sessionID string, exchange ...service.ChatMessage) error
 	ClearChatSession(sessionID string)
 	GetDocument(ctx context.Context, documentID string) (*models.Document, error)
+	GetDocumentFingerprint(ctx context.Context, uid string) (service.DocumentFingerprintInfo, bool, error)
 	GetNormalizedTags(ctx context.Context) ([]string, error)
 	GetNormalizedCategories(ctx context.Context) ([]string, error)
 	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)

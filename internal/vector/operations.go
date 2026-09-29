@@ -194,6 +194,18 @@ func (vo *VectorOperations) DeleteDocument(ctx context.Context, documentID strin
 	return nil
 }
 
+// DocumentFingerprint returns the stored fingerprint (and the
+// last-ingested timestamp) for the document with the given UID,
+// or (zero, false, nil) when no document with that UID has been
+// ingested. The bool is the canonical "exists" signal.
+//
+// Cheap: a single chromem query against the document_id metadata
+// filter using a dummy embedding. Safe to call from ingest
+// preflight flows on every batch ingest.
+func (vo *VectorOperations) DocumentFingerprint(ctx context.Context, documentID string) (DocumentFingerprintInfo, bool, error) {
+	return vo.db.DocumentFingerprint(ctx, documentID)
+}
+
 // DeleteChunk removes a single chunk from both stores.
 func (vo *VectorOperations) DeleteChunk(ctx context.Context, chunkID string) error {
 	if err := vo.db.DeleteChunk(ctx, chunkID); err != nil {

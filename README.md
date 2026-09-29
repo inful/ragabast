@@ -684,6 +684,52 @@ Response shape:
 The HTTP request counts as ONE call against the rate limiter,
 regardless of how many patches are inside.
 
+### Ingest preflight (skip re-sending unchanged documents)
+
+Ingest pipelines that re-scan a docbuilder tree every few
+minutes can avoid shipping the document body when ragabast
+already has an up-to-date copy. `GET /api/documents/{uid}/fingerprint`
+returns the content fingerprint ragabast last stored for that
+UID; the client compares against its locally-computed
+fingerprint and decides whether to send the full document:
+
+```
+GET /api/documents/adr-001/fingerprint
+```
+
+Response when the doc has been ingested:
+
+```json
+{
+  "uid": "adr-001",
+  "fingerprint": "sha256:abc123...",
+  "ingested_at": "2026-09-29T10:00:00Z"
+}
+```
+
+Response when the UID has never been ingested: `404 Not Found`.
+
+Client flow:
+
+1. Compute the fingerprint of the document locally (same
+   algorithm the docbuilder parser uses — see
+   [`internal/parser/docbuilder.go`](internal/parser/docbuilder.go)
+   for the canonical hash).
+2. `GET /api/documents/{uid}/fingerprint`
+3. **404** → never been ingested; proceed with `POST /api/ingest`.
+4. **200 with matching fingerprint** → already up to date; skip
+   the `POST /api/ingest` entirely (this is the fast path
+   for the steady-state "nothing changed" case).
+5. **200 with different fingerprint** → source has changed;
+   re-ingest via `POST /api/ingest`.
+
+The endpoint is cheap (one chromem-go query against the
+`document_id` metadata filter using a dummy embedding), so
+calling it on every doc in a batch ingest is fine. Auth,
+rate-limit, and per-document size cap semantics are the same
+as `/api/ingest` — a hostile client can't bypass the limits
+by spamming preflight.
+
 ## Health
 
 Two endpoints, both unauthenticated:
