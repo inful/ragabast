@@ -9,12 +9,13 @@
 #   AUTH_TOKEN=... \
 #   ./ingest-with-preflight.sh <uid> <path/to/doc.md>
 #
-# Requires: bash, curl, sha256sum, jq.
+# Requires: bash, curl, awk, jq.
 #
 # What it does:
-#   1. Computes the SHA-256 fingerprint of the local file
-#      (same algorithm the ragabast parser uses for the
-#      auto-generated fingerprint; see internal/parser/docbuilder.go).
+#   1. Reads the `fingerprint:` line from the document's YAML
+#      frontmatter. The frontmatter value is what docbuilder
+#      wrote (mdfp.CalculateFingerprint on the body) and is
+#      what ragabast stored — the same string on both sides.
 #   2. Calls GET /api/documents/<uid>/fingerprint to read what
 #      ragabast has stored for that UID.
 #   3. If the fingerprints match: prints "skip" and exits 0.
@@ -22,10 +23,20 @@
 #      POST /api/ingest/file (multipart/form-data with a `file`
 #      field).
 #
+# We do NOT recompute the fingerprint locally. The frontmatter
+# value is authoritative — docbuilder is the canonical source
+# of the algorithm (sha256 of the body, not the whole file)
+# and the only thing ragabast stores is what the frontmatter
+# says. Recomputing locally would require us to mirror the
+# docbuilder version, parse the frontmatter to strip the
+# fingerprint field, etc. — all of which the frontmatter
+# already does for us.
+#
 # Exit codes:
 #   0  — success (either skipped or ingested)
 #   1  — argument error / curl failure / non-2xx response
 #   2  — auth failure (401/403)
+#   3  — no fingerprint in frontmatter (skip preflight, upload)
 
 set -euo pipefail
 
@@ -40,53 +51,86 @@ if [[ ! -r "$FILE" ]]; then
     exit 1
 fi
 
-# ---------- fingerprint ----------
+# ---------- fingerprint (read from frontmatter) ----------
 #
-# ragabast's auto-generated fingerprint is hex(sha256(content)).
-# When the frontmatter pins an explicit fingerprint: line, that
-# value is used verbatim; this script matches the auto-gen case
-# (frontmatter without an explicit fingerprint) which is the
-# common path for "docbuilder generated this file and never set
-# the field itself".
-fp_local=$(sha256sum "$FILE" | awk '{print $1}')
+# docbuilder writes `fingerprint: <hex>` as the last field of
+# the YAML frontmatter (mdfp.AddFingerprintToFrontmatter).
+# ragabast stores that exact value when ingesting. So the
+# authoritative "what fingerprint does this file have?" answer
+# is whatever's on that line — not whatever we'd compute.
+#
+# awk walks lines, tracks the frontmatter delimiter (`---`)
+# boundaries, and prints the value of the first
+# `fingerprint:` line seen while inside the frontmatter.
+fp_local=$(awk '
+    BEGIN { in_fm = 0; seen_open = 0 }
+    /^---[ \t]*$/ {
+        if (!seen_open) { seen_open = 1; in_fm = 1 }
+        else { in_fm = 0 }
+        next
+    }
+    in_fm && /^fingerprint:[ \t]*/ {
+        # Field name already matched by the regex; $2 is the
+        # value (split on whitespace, so quoted values keep
+        # their quotes — strip them below).
+        val = $2
+        # Strip a single layer of surrounding quotes if present.
+        if ((val ~ /^"/ && val ~ /"$/) || (val ~ /^'\''/ && val ~ /'\''$/)) {
+            val = substr(val, 2, length(val) - 2)
+        }
+        print val
+        exit
+    }
+' "$FILE")
+
+if [[ -z "$fp_local" ]]; then
+    echo "warning: no fingerprint in frontmatter — docbuilder hasn't run on this file?" >&2
+    echo "warning: skipping preflight, will upload unconditionally" >&2
+    fp_status="no-fingerprint"
+else
+    fp_status="$fp_local"
+fi
 
 # ---------- preflight ----------
 #
 # Two cases:
-#   200 -> body is {"uid":"...","fingerprint":"sha256:...","ingested_at":"..."}
+#   200 -> body is {"uid":"...","fingerprint":"...","ingested_at":"..."}
 #   404 -> body is the Huma error envelope; fp_stored stays empty.
 # We always read the body so jq doesn't choke on the error shape.
-response=$(curl -sS \
-    -H "Authorization: Bearer ${AUTH_TOKEN}" \
-    -w '\n%{http_code}' \
-    "${RAGABAST_URL}/api/documents/${UID}/fingerprint")
-status=$(printf '%s' "$response" | tail -n1)
-body=$(printf '%s' "$response" | sed '$d')
+fp_stored=""
+if [[ "$fp_status" != "no-fingerprint" ]]; then
+    response=$(curl -sS \
+        -H "Authorization: Bearer ${AUTH_TOKEN}" \
+        -w '\n%{http_code}' \
+        "${RAGABAST_URL}/api/documents/${UID}/fingerprint")
+    status=$(printf '%s' "$response" | tail -n1)
+    body=$(printf '%s' "$response" | sed '$d')
 
-case "$status" in
-    200) fp_stored=$(printf '%s' "$body" | jq -r '.fingerprint') ;;
-    404) fp_stored="" ;;
-    401|403)
-        echo "error: auth failed (HTTP $status) — check AUTH_TOKEN" >&2
-        exit 2
-        ;;
-    *)
-        echo "error: preflight HTTP $status: $body" >&2
-        exit 1
-        ;;
-esac
+    case "$status" in
+        200) fp_stored=$(printf '%s' "$body" | jq -r '.fingerprint') ;;
+        404) fp_stored="" ;;
+        401|403)
+            echo "error: auth failed (HTTP $status) — check AUTH_TOKEN" >&2
+            exit 2
+            ;;
+        *)
+            echo "error: preflight HTTP $status: $body" >&2
+            exit 1
+            ;;
+    esac
 
-# ---------- decide ----------
-if [[ -n "$fp_stored" && "$fp_stored" == "$fp_local" ]]; then
-    printf 'skip  %s  fingerprint unchanged (%s)\n' "$UID" "$fp_local"
-    exit 0
-fi
+    # ---------- decide ----------
+    if [[ -n "$fp_stored" && "$fp_stored" == "$fp_local" ]]; then
+        printf 'skip  %s  fingerprint unchanged (%s)\n' "$UID" "$fp_local"
+        exit 0
+    fi
 
-if [[ -z "$fp_stored" ]]; then
-    printf 'ingest %s  new document (local fp=%s)\n' "$UID" "$fp_local"
-else
-    printf 'ingest %s  fingerprint changed (stored=%s local=%s)\n' \
-        "$UID" "$fp_stored" "$fp_local"
+    if [[ -z "$fp_stored" ]]; then
+        printf 'ingest %s  new document (frontmatter fp=%s)\n' "$UID" "$fp_local"
+    else
+        printf 'ingest %s  fingerprint changed (stored=%s frontmatter=%s)\n' \
+            "$UID" "$fp_stored" "$fp_local"
+    fi
 fi
 
 # ---------- upload ----------

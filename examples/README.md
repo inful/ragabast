@@ -12,14 +12,17 @@ two endpoints together:
 - `GET /api/documents/{uid}/fingerprint` — preflight check
 - `POST /api/ingest/file` — multipart upload
 
-The script computes the local SHA-256 of a markdown file,
-asks ragabast for the stored fingerprint, and only uploads
-when they disagree. This is the recommended pattern for
-ingest pipelines that re-scan a docbuilder tree on a
-schedule — most invocations become a single cheap GET
-instead of a multi-MB upload.
+The script reads the `fingerprint:` value from the
+document's YAML frontmatter (the same value ragabast
+stored at ingest time — see the **frontmatter-is-
+authoritative** contract in the main README's preflight
+section), asks ragabast for the stored fingerprint, and
+only uploads when they disagree. This is the recommended
+pattern for ingest pipelines that re-scan a docbuilder
+tree on a schedule — most invocations become a single
+cheap GET instead of a multi-MB upload.
 
-**Requires:** `bash`, `curl`, `jq`, `sha256sum`.
+**Requires:** `bash`, `curl`, `awk`, `jq`.
 
 **Run:**
 
@@ -41,6 +44,21 @@ Exit codes:
 - `0` — success (skipped or ingested)
 - `1` — argument / curl / non-2xx response
 - `2` — auth failure (HTTP 401/403)
+
+**Why read the frontmatter instead of computing the
+fingerprint locally?** Because docbuilder is the canonical
+source of the algorithm (today: `sha256(body)` where body
+is the markdown content minus frontmatter delimiters and
+the fingerprint line itself). The client would have to
+mirror that algorithm AND parse the frontmatter to strip
+the fingerprint line before hashing — both of which the
+frontmatter already does for us, so reading the value is
+strictly simpler and avoids drift if docbuilder changes
+the algorithm in a future release. If the frontmatter has
+no `fingerprint:` line (the file was hand-written or
+docbuilder never ran on it), the script skips preflight
+and uploads unconditionally — the ragabast parser will
+auto-generate a fingerprint at ingest time.
 
 ## Adding new examples
 
