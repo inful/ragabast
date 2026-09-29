@@ -288,6 +288,153 @@ func TestEmbeddingGemmaClient_UnknownResponseShapeLogsBody(t *testing.T) {
 		"error must include the response body so the operator can see the actual shape")
 }
 
+// TestEmbeddingGemmaClient_ResponseShapeFloatWrapper pins
+// the canonical EmbeddingGemma wire shape:
+//
+//	{"embeddings": {"float": [[...], [...]]}}
+//
+// This is the Cohere-style `embeddings_by_type` response —
+// the server names the embedding dtype with a key, so the
+// same response can carry `float`, `int8`, `uint8`,
+// `binary`, `ubinary` siblings for quantized forms. We
+// only consume `float` today; the probe extracts the
+// `float` key and falls through to the bare-array probe
+// only when `embeddings` is a direct array.
+//
+// Real-world fixture: the operator's /v2/embed server
+// returned exactly this shape with the keys `embeddings`,
+// `texts`, `meta`, `response_type`, `id`. We only need
+// `embeddings.float` to parse, but the test confirms the
+// presence of the sibling fields doesn't trip the
+// decoder.
+func TestEmbeddingGemmaClient_ResponseShapeFloatWrapper(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Read the request so the stub returns a
+		// matching number of vectors. A static stub
+		// would mismatch and trip the count check
+		// before the shape probe gets a chance to
+		// prove itself.
+		var req struct {
+			Texts []string `json:"texts"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+
+		// Real response shape from an EmbeddingGemma
+		// server (truncated for the test). The sibling
+		// fields — `id`, `texts`, `meta`, `response_type` —
+		// are ignored by the decoder; only
+		// `embeddings.float` is consumed.
+		vecs := make([][]float32, len(req.Texts))
+		for i := range req.Texts {
+			vecs[i] = []float32{0.1, 0.2, 0.3}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "embd-test",
+			"embeddings": map[string]any{
+				"float": vecs,
+			},
+			"texts":         req.Texts,
+			"meta":          map[string]any{"api_version": map[string]any{"version": "2"}, "billed_units": map[string]any{"input_tokens": len(req.Texts), "image_tokens": 0}},
+			"response_type": "embeddings_by_type",
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewEmbeddingGemmaClientWithOptions(srv.URL, 5*time.Second, 0, 1, "", "")
+
+	out, err := client.GenerateEmbedding(context.Background(), "a")
+	require.NoError(t, err)
+	require.Equal(t, []float32{0.1, 0.2, 0.3}, out,
+		"must extract the first vector from embeddings.float")
+}
+
+// TestEmbeddingGemmaClient_ResponseShapeFloatWrapperBatch
+// pins the float-wrapper shape on the batch path: when
+// the server returns embeddings.float with N entries,
+// the batch returns N vectors in input order.
+func TestEmbeddingGemmaClient_ResponseShapeFloatWrapperBatch(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Echo back a per-input float vector. Reads
+		// the request text length to set distinct values
+		// so the test can spot input/output reordering.
+		var req struct {
+			Texts []string `json:"texts"`
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &req)
+		vecs := make([][]float32, len(req.Texts))
+		for i, t := range req.Texts {
+			// First element = input index; second element
+			// = input length. Lets the test detect any
+			// reordering or drop.
+			vecs[i] = []float32{float32(i), float32(len(t))}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"embeddings": map[string]any{
+				"float": vecs,
+			},
+			"texts":         req.Texts,
+			"response_type": "embeddings_by_type",
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewEmbeddingGemmaClientWithOptions(srv.URL, 5*time.Second, 0, 1, "", "")
+
+	chunks := []*models.Chunk{
+		{ID: "c0", Content: "short", DocumentID: "d", DocumentTitle: "t", Fingerprint: "f"},
+		{ID: "c1", Content: "a much longer chunk text", DocumentID: "d", DocumentTitle: "t", Fingerprint: "f"},
+		{ID: "c2", Content: "medium chunk", DocumentID: "d", DocumentTitle: "t", Fingerprint: "f"},
+	}
+	out, err := client.GenerateChunkEmbeddings(context.Background(), chunks)
+	require.NoError(t, err)
+	require.Len(t, out, 3)
+	// [0] = {0, 5}  — index 0, length 5
+	// [1] = {1, 24} — index 1, length 24
+	// [2] = {2, 12} — index 2, length 12
+	require.Equal(t, []float32{0, 5}, out[0])
+	require.Equal(t, []float32{1, 24}, out[1])
+	require.Equal(t, []float32{2, 12}, out[2])
+}
+
+// TestEmbeddingGemmaClient_ResponseShapeEmbeddingsWrongType
+// pins the failure mode for a server that returns
+// `embeddings` as an object missing the `float` key (e.g.
+// an EmbeddingGemma server that's configured to emit
+// `int8` vectors instead). The error must surface the
+// body so the operator can see what dtype the server
+// returned and either patch the client or switch the
+// server's dtype setting.
+func TestEmbeddingGemmaClient_ResponseShapeEmbeddingsWrongType(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Same shape as the canonical response, but the
+		// `float` key is missing — the server is emitting
+		// `int8` instead. Our probe can't extract vectors
+		// and must surface the body.
+		_, _ = w.Write([]byte(`{"embeddings":{"int8":[[1,2,3]]}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewEmbeddingGemmaClientWithOptions(srv.URL, 5*time.Second, 0, 1, "", "")
+
+	_, err := client.GenerateEmbedding(context.Background(), "hi")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "embeddings",
+		"error must name the field so the operator knows where the parse failed")
+	require.Contains(t, err.Error(), "int8",
+		"error must include the body so the operator sees the server's actual dtype key")
+}
+
 // TestEmbeddingGemmaClient_EmptyTextReturnsError pins the
 // contract that the single-text path refuses an empty
 // input. Empty embeddings are a common silent failure —

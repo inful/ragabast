@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -403,22 +404,31 @@ func (c *EmbeddingGemmaClient) embed(ctx context.Context, texts []string) ([][]f
 }
 
 // decodeEmbeddingGemmaResponse parses an /v2/embed
-// response body in any of the three accepted shapes and
+// response body in any of the four accepted shapes and
 // returns the vectors in input order. On an unrecognized
 // shape the error wraps the raw body so the operator can
 // see what the server actually returned.
 //
 // Probe order:
 //
-//  1. {"embeddings": [[...], [...]]} — most common; parallel-of-texts.
-//  2. {"results":     [{"embedding": [...]}]} — common wrapper form.
-//  3. {"data":        [{"embedding": [...]}]} — OpenAI-style, kept for
+//  1. {"embeddings": {"float": [[...], [...]]}} — canonical
+//     EmbeddingGemma shape (matches Cohere's
+//     `embeddings_by_type` response). The `float` key
+//     names the embedding dtype; servers may also expose
+//     `int8`, `uint8`, `binary`, `ubinary` siblings for
+//     quantized forms. Operators needing a non-float dtype
+//     can extend this client; today we only consume float.
+//  2. {"embeddings": [[...], [...]]} — bare parallel-of-texts,
+//     seen on some local proxies.
+//  3. {"results":     [{"embedding": [...]}]} — common wrapper form.
+//  4. {"data":        [{"embedding": [...]}]} — OpenAI-style, kept for
 //     servers that reuse the OpenAI response shape on /v2/embed.
 //
 // The probe order matters when a response happens to
-// contain more than one of these fields. `embeddings` is
-// preferred because that's the canonical EmbeddingGemma
-// shape — if it's present we trust it.
+// contain more than one of these fields. The `embeddings`
+// field (in either shape) is preferred because that's the
+// canonical EmbeddingGemma response — if it's present we
+// trust it.
 func decodeEmbeddingGemmaResponse(body []byte, expectedCount int) ([][]float32, error) {
 	// Cap the body we echo back in errors so a multi-MB
 	// server error doesn't blow up logs.
@@ -437,16 +447,25 @@ func decodeEmbeddingGemmaResponse(body []byte, expectedCount int) ([][]float32, 
 		return nil, fmt.Errorf("failed to decode response: %w (body: %s)", err, preview)
 	}
 
-	// Probe 1: {"embeddings": [...]} (parallel-of-texts).
-	if vecsAny, ok := raw["embeddings"]; ok {
-		vecs, err := decodeEmbeddingList(vecsAny, expectedCount, preview, "embeddings")
-		if err != nil {
-			return nil, err
-		}
-		return vecs, nil
+	// Probe 1+2: `embeddings` field. Two shapes accepted:
+	//
+	//   - {"embeddings": {"float": [[...], [...]]}} — canonical
+	//     EmbeddingGemma / Cohere-style. The `float` key names
+	//     the embedding dtype; sibling keys like `int8`, `uint8`,
+	//     `binary`, `ubinary` are ignored (only `float` is
+	//     consumed today).
+	//   - {"embeddings": [[...], [...]]} — bare parallel-of-texts,
+	//     seen on some local proxies.
+	//
+	// Both shapes share the `embeddings` field name, so we
+	// probe inside the same branch. Extracted to a helper to
+	// keep the cyclomatic complexity of this function under
+	// the lint cap.
+	if vecs, ok, err := probeEmbeddingsField(raw, expectedCount, preview); err != nil || ok {
+		return vecs, err
 	}
 
-	// Probe 2: {"results": [{"embedding": [...]}]}.
+	// Probe 3: {"results": [{"embedding": [...]}]}.
 	if resultsAny, ok := raw["results"]; ok {
 		vecs, err := decodeEmbeddingObjects(resultsAny, expectedCount, preview, "results")
 		if err != nil {
@@ -455,7 +474,7 @@ func decodeEmbeddingGemmaResponse(body []byte, expectedCount int) ([][]float32, 
 		return vecs, nil
 	}
 
-	// Probe 3: {"data": [{"embedding": [...]}]}.
+	// Probe 4: {"data": [{"embedding": [...]}]}.
 	if dataAny, ok := raw["data"]; ok {
 		vecs, err := decodeEmbeddingObjects(dataAny, expectedCount, preview, "data")
 		if err != nil {
@@ -465,6 +484,71 @@ func decodeEmbeddingGemmaResponse(body []byte, expectedCount int) ([][]float32, 
 	}
 
 	return nil, fmt.Errorf("embeddings response missing expected fields (embeddings/results/data); body: %s", preview)
+}
+
+// probeEmbeddingsField handles probes 1+2: the `embeddings`
+// field, in either the wrapper-object form (`{"float":
+// [...]}`) or the bare-array form. Returns (vecs, true, nil)
+// when the field was present and decoded; (nil, false, nil)
+// when the field is absent so the caller can fall through
+// to the next probe; (nil, false, err) when the field was
+// present but malformed.
+//
+// Extracted from decodeEmbeddingGemmaResponse to keep the
+// probe function's cyclomatic complexity under the lint
+// cap. The wrapper detection is a small state machine:
+// float-wrapper → bare-array → "unexpected shape" error,
+// in that order.
+func probeEmbeddingsField(raw embeddingGemmaResponse, expectedCount int, preview string) ([][]float32, bool, error) {
+	vecsAny, ok := raw["embeddings"]
+	if !ok {
+		return nil, false, nil
+	}
+
+	// Shape A: {"embeddings": {"float": [[...], [...]]}}.
+	// Detect by checking the type assertion to map first —
+	// only the wrapper object has the `float` key.
+	if obj, isObj := vecsAny.(map[string]any); isObj {
+		floatAny, hasFloat := obj["float"]
+		if !hasFloat {
+			// The wrapper object is present but
+			// doesn't have `float` — likely a
+			// different dtype key (int8, binary,
+			// etc.). Surface the body so the
+			// operator can see what their server
+			// actually returned.
+			return nil, false, fmt.Errorf("embeddings field is an object but missing the \"float\" key (got keys: %v); body: %s", mapKeys(obj), preview)
+		}
+		vecs, err := decodeEmbeddingList(floatAny, expectedCount, preview, "embeddings.float")
+		if err != nil {
+			return nil, false, err
+		}
+		return vecs, true, nil
+	}
+
+	// Shape B: {"embeddings": [[...], [...]]} (bare array).
+	list, isList := vecsAny.([]any)
+	if !isList {
+		return nil, false, fmt.Errorf("embeddings field %q has unexpected shape (want array or object with \"float\" key); body: %s", "embeddings", preview)
+	}
+	vecs, err := decodeEmbeddingList(list, expectedCount, preview, "embeddings")
+	if err != nil {
+		return nil, false, err
+	}
+	return vecs, true, nil
+}
+
+// mapKeys returns the sorted keys of a map. Used to
+// surface a server's actual dtype keys (int8, binary,
+// etc.) when the wrapper-object form is detected but
+// the `float` key is missing.
+func mapKeys(m map[string]any) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // decodeEmbeddingList decodes the {"embeddings": [[...],

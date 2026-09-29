@@ -802,7 +802,7 @@ Key differences from the OpenAI-compat path:
 - **No `model` field.** The server picks the model itself. ragabast doesn't send one and the response doesn't have to identify which model produced each vector.
 - **No `dimensions` request field.** Configure `vectordb.embedding_dimension` to match what the server returns; the client only checks for mismatches and warns.
 - **No `Authorization` header.** The `/v2/embed` endpoint is unauthenticated by convention. If your proxy requires auth, front it with a header-injecting middleware or extend the client.
-- **Response shape is probed.** The client accepts `{"embeddings":[[...]]}` (parallel-of-texts, primary), `{"results":[{"embedding":[...]}]}` and `{"data":[{"embedding":[...]}]}`. Unknown shapes surface the raw body in the error so you can pin down what your server actually returns and either patch the client or your proxy.
+- **Response shape is probed.** The client accepts `{"embeddings":{"float":[[...]]}}` (canonical EmbeddingGemma / Cohere-style — this is what most production EmbeddingGemma servers return), `{"embeddings":[[...]]}` (bare parallel-of-texts), `{"results":[{"embedding":[...]}]}`, and `{"data":[{"embedding":[...]}]}`. Unknown shapes surface the raw body in the error so you can pin down what your server actually returns and either patch the client or your proxy.
 
 To switch an existing install to the EmbeddingGemma path:
 
