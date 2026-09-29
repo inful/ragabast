@@ -38,7 +38,7 @@ YAML to find the knob they need.
 | `OLLAMA_CHAT_API_KEY` | `chat_api_key` | `""` | Chat-specific bearer token. Wins over `api_key` for chat only. |
 | `OLLAMA_EMBEDDING_API_KEY` | `embedding_api_key` | `""` | Embeddings-specific bearer token. Wins over `api_key` for embeddings only. |
 | `OLLAMA_TEMPERATURE` | `temperature` | `0.1` | LLM sampling temperature. Pointer field — unset in env keeps the YAML default. |
-| `OLLAMA_OPTIONS_JSON` | `options` | `{top_k:20, top_p:0.8, min_p:0.05, num_predict:512}` | Pass-through OpenAI-compat sampling options. JSON-encoded in env. |
+| `OLLAMA_OPTIONS_JSON` | `options` | `{top_k:20, top_p:0.8, num_predict:512}` | Pass-through sampling options merged into the top-level `/v1/chat/completions` request body. JSON-encoded in env. `min_p` is intentionally NOT in the defaults — it's not in OpenAI's spec and vLLM rejects it (HTTP 400) when speculative decoding is enabled. Operators on Ollama / llama.cpp / non-spec-decoding vLLM can opt in via `OLLAMA_OPTIONS_JSON='{"min_p":0.05, ...}'`. |
 | `OLLAMA_TIMEOUT` | `timeout` | `30s` | Per-request timeout for both embeddings and chat. |
 
 #### `embedding_provider` — which embeddings client to use

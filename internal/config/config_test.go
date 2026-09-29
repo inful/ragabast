@@ -46,6 +46,33 @@ func TestLoad_FallsBackToDefaultsWhenNoFile(t *testing.T) {
 	require.Equal(t, 8080, loaded.Server.Port)
 }
 
+// TestDefaultConfig_OptionsDoesNotIncludeMinP pins the
+// v0.10.4 fix for the vLLM-with-speculative-decoding 400:
+// the default Options map must NOT include `min_p`.
+//
+// `min_p` is not in OpenAI's chat completions spec and
+// vLLM rejects it with HTTP 400 when speculative decoding
+// is enabled — even on operators who want it. The
+// historical default shipped `min_p: 0.05` from v0.1.0
+// onward, which made ragabast unusable against the
+// default config of any vLLM install with a draft model.
+//
+// Operators who DO want `min_p` (Ollama, llama.cpp,
+// non-spec-decoding vLLM) can opt back in via:
+//   - YAML: ollama.options.min_p: 0.05
+//   - env:  OLLAMA_OPTIONS_JSON='{"min_p": 0.05, ...}'
+//
+// This test pins the absence so a future "let's add
+// back the RAG-friendly defaults" PR can't silently
+// reintroduce the bug.
+func TestDefaultConfig_OptionsDoesNotIncludeMinP(t *testing.T) {
+	t.Helper()
+
+	cfg := DefaultConfig()
+	require.NotContains(t, cfg.Ollama.Options, "min_p",
+		"default Options must not include min_p; vLLM rejects it with HTTP 400 when speculative decoding is enabled. Operators who want it should opt in via ollama.options.min_p or OLLAMA_OPTIONS_JSON")
+}
+
 func TestLoad_AppliesOllamaTemperatureEnvOverride(t *testing.T) {
 	tmp := t.TempDir()
 	t.Chdir(tmp)

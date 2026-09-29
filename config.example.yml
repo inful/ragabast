@@ -83,7 +83,11 @@ ollama:
   options:
     top_k: 40
     top_p: 0.9
-    min_p: 0.05
+    # `min_p` is intentionally NOT shipped in the defaults. It's not in
+    # OpenAI's chat completions spec and vLLM rejects it with HTTP 400
+    # when speculative decoding is enabled. Operators running Ollama,
+    # llama.cpp, or vLLM without a draft model can opt in by uncommenting:
+    # min_p: 0.05
     num_predict: 512
   timeout: 30s
 

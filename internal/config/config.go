@@ -808,12 +808,27 @@ func DefaultConfig() *Config {
 			EmbeddingModel:       "nomic-embed-text:v1.5",
 			Timeout:              30 * time.Second,
 			EmbeddingConcurrency: 4,
-			// RAG-friendly defaults: low temperature + conservative sampling.
+			// RAG-friendly defaults: low temperature + conservative
+			// sampling. The default Options map contains only params that
+			// are universal across the OpenAI-compat ecosystem — `top_p`
+			// is in the OpenAI chat completions spec; `top_k` and
+			// `num_predict` are vendor extensions (Ollama / llama.cpp /
+			// vLLM) but supported by every server ragabast targets.
+			//
+			// `min_p` is NOT in the defaults even though it's a
+			// reasonable sampling knob — it's not in OpenAI's spec and
+			// vLLM rejects it (with HTTP 400) when speculative
+			// decoding is enabled, even on operators who want it.
+			// Operators running Ollama / llama.cpp / non-spec-decoding
+			// vLLM can opt back in via:
+			//   - YAML:   ollama.options.min_p: 0.05
+			//   - env:    OLLAMA_OPTIONS_JSON='{"min_p": 0.05, ...}'
+			// The validateOllamaOptions range check still catches
+			// out-of-range opt-ins.
 			Temperature: &defaultTemp,
 			Options: map[string]any{
 				"top_k":       20,
 				"top_p":       0.8,
-				"min_p":       0.05,
 				"num_predict": 512,
 			},
 		},
