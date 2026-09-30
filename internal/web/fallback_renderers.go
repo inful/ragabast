@@ -114,8 +114,13 @@ type ingestSuccessFallbackData struct {
 // the page size. -1 sentinel on PrevOffset/NextOffset means
 // "no link" — the template suppresses the corresponding
 // button.
+//
+// CsrfToken is embedded in every per-row Delete form so the
+// handler can verify the POST against the same double-submit
+// cookie the rest of the form-mounted endpoints use.
 type documentsFallbackData struct {
 	Title        string
+	CsrfToken    string
 	Documents    []documentsFallbackRow
 	Total        int
 	Limit        int
@@ -132,6 +137,13 @@ type documentsFallbackData struct {
 // the template can show a friendly identifier even when the
 // parent document has no H1; computed by the handler that builds
 // the row so the template stays presentation-only.
+//
+// The Delete form is rendered inline with the row — POST to
+// /documents/{id}/delete with the csrf token and a required
+// `confirm=1` checkbox. The browser-side required attribute is
+// the primary guard against accidental deletes; the handler
+// also enforces it server-side so a forged POST that omits the
+// checkbox gets a 400.
 type documentsFallbackRow struct {
 	DisplayLabel string
 	Title        string
@@ -139,6 +151,7 @@ type documentsFallbackRow struct {
 	Tags         []string
 	Category     string
 	Chunks       int
+	CsrfToken    string
 }
 
 // newFallbackTemplates parses every fallback template body.
@@ -388,6 +401,13 @@ const ingestSuccessFallbackBody = `<!DOCTYPE html>
 // Security: every row's Title (H1 header), ID (UID), Tags
 // (frontmatter tags), and Category (frontmatter categories)
 // are attacker-controllable. html/template escapes them all.
+//
+// Each row carries a Delete form that POSTs to
+// /documents/{id}/delete. The form requires the operator to
+// tick a `confirm` checkbox before submit (browser-side guard);
+// the handler also enforces the checkbox server-side (defense
+// in depth against a forged POST). CSRF token is embedded per
+// row; the csrf middleware already rejects mismatches.
 const documentsFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
@@ -400,7 +420,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
     <a href="/" class="button is-light mb-4">Back</a>
     {{ if .Documents }}
     <table class="table is-fullwidth is-striped">
-        <thead><tr><th>Title</th><th>ID</th><th>Tags</th><th>Category</th><th>Chunks</th></tr></thead>
+        <thead><tr><th>Title</th><th>ID</th><th>Tags</th><th>Category</th><th>Chunks</th><th></th></tr></thead>
         <tbody>
         {{ range .Documents }}
             <tr>
@@ -409,6 +429,15 @@ const documentsFallbackBody = `<!DOCTYPE html>
                 <td>{{ .Tags }}</td>
                 <td>{{ .Category }}</td>
                 <td>{{ .Chunks }}</td>
+                <td>
+                    <form method="post" action="/documents/{{ .ID }}/delete" style="display:inline">
+                        <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
+                        <label class="checkbox is-small">
+                            <input type="checkbox" name="confirm" value="1" required> confirm
+                        </label>
+                        <button class="button is-small is-danger" type="submit">Delete</button>
+                    </form>
+                </td>
             </tr>
         {{ end }}
         </tbody>

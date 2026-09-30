@@ -335,6 +335,7 @@ type fakeService struct {
 	fingerprintInfo   service.DocumentFingerprintInfo
 	fingerprintExists bool
 	fingerprintErr    error
+	deletedIDs        []string
 }
 
 // appendedTurn is the record the chat handler asks the
@@ -416,7 +417,8 @@ func (f *fakeService) ListDocumentsPaged(context.Context, int, int) ([]models.Do
 	return []models.DocumentInfo{}, 0, nil
 }
 
-func (f *fakeService) DeleteDocument(context.Context, string) error {
+func (f *fakeService) DeleteDocument(_ context.Context, documentID string) error {
+	f.deletedIDs = append(f.deletedIDs, documentID)
 	return nil
 }
 

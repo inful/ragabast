@@ -488,6 +488,7 @@ func (s *Server) registerRoutes() {
 	s.router.Get("/ingest", s.handleIngestPage)
 	s.router.Post("/ingest", s.handleIngestSubmit)
 	s.router.Get("/documents", s.handleDocumentsPage)
+	s.router.Post("/documents/{document_id}/delete", s.handleDocumentDelete)
 
 	s.router.Get("/static/*", s.handleStatic)
 

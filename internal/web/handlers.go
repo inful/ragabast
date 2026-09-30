@@ -145,6 +145,7 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 	case "documents.html":
 		s.renderFallback(w, "documents.html", documentsFallbackData{
 			Title:        titleFromMap(data, "RAGabast - Documents"),
+			CsrfToken:    stringFromMap(data, "CsrfToken"),
 			Documents:    docsRowsFromMap(data),
 			Total:        intFromMap(data, "Total"),
 			Limit:        intFromMap(data, "Limit"),
@@ -312,7 +313,9 @@ func tagsFromMap(data any) []string {
 // documentsFallbackRow slice that the fallback template expects.
 // DisplayLabel is computed here (via models.DocumentInfo.DisplayLabel)
 // so the template stays presentation-only; the same fallback chain
-// powers chat sources and search results.
+// powers chat sources and search results. The CSRF token is read
+// once and threaded into every row so each delete form embeds it
+// without the template doing a context lookup per row.
 //
 // Every field that flows into the page is HTML-escaped by
 // html/template at render time; this helper only changes types.
@@ -325,6 +328,7 @@ func docsRowsFromMap(data any) []documentsFallbackRow {
 	if !ok {
 		return nil
 	}
+	csrf := stringFromMap(data, "CsrfToken")
 	out := make([]documentsFallbackRow, 0, len(raw))
 	for _, item := range raw {
 		out = append(out, documentsFallbackRow{
@@ -334,6 +338,7 @@ func docsRowsFromMap(data any) []documentsFallbackRow {
 			Tags:         item.Tags,
 			Category:     firstOrEmpty(item.Categories),
 			Chunks:       item.ChunkCount,
+			CsrfToken:    csrf,
 		})
 	}
 	return out
@@ -776,6 +781,7 @@ func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {
 
 	s.renderTemplate(w, "documents.html", map[string]any{
 		"Title":        "RAGabast - Documents",
+		"CsrfToken":    CsrfTokenFromContext(r.Context()),
 		"Documents":    docs,
 		"Total":        total,
 		"Limit":        limit,
@@ -786,6 +792,48 @@ func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {
 		"EndShowing":   endShowing,
 		"Header":       s.pageHeaderFromContext(r),
 	})
+}
+
+// handleDocumentDelete is the form-mounted delete endpoint for
+// the /documents UI. Three layers of guard against accidental or
+// forged deletes:
+//
+//   - chi path param {document_id} must be non-empty (empty is
+//     a 400, not a 404 from the mux — explicit operator-facing
+//     failure)
+//   - the form must carry confirm=1, a required checkbox the
+//     /documents template emits. Without it the browser-side
+//     required attribute blocks the submit; a forged POST that
+//     omits it gets a 400 here
+//   - csrf middleware (already on the route) requires a matching
+//     csrf_token form value; mismatches get a 403
+//
+// On success the handler calls svc.DeleteDocument and 302s to
+// /documents so the operator lands back on the list with the
+// row gone. Errors during delete (e.g. concurrent re-ingest)
+// bubble through internalError as a 500.
+func (s *Server) handleDocumentDelete(w http.ResponseWriter, r *http.Request) {
+	documentID := strings.TrimSpace(chi.URLParam(r, "document_id"))
+	if documentID == "" {
+		http.Error(w, "document_id is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Failed to parse form", http.StatusBadRequest)
+		return
+	}
+	if r.FormValue("confirm") != "1" {
+		http.Error(w, "confirm=1 is required to delete a document", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.service.DeleteDocument(r.Context(), documentID); err != nil {
+		internalError(w, r, "delete document", err)
+		return
+	}
+
+	http.Redirect(w, r, "/documents", http.StatusFound)
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
