@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"sort"
 	"strings"
 	"testing"
 
@@ -425,4 +426,288 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 		require.NotContains(t, body, "cdn.jsdelivr.net",
 			"documents fallback must not reference cdn.jsdelivr.net")
 	})
+}
+
+// TestChatFallback_NoInlineStyle pins that the chat landing
+// page does not carry an inline <style> block. The strict CSP
+// ships style-src 'self' (no 'unsafe-inline'), so any inline
+// <style> the server emits would be silently rejected by the
+// browser and the chat page would render unstyled.
+//
+// Historically the chat fallback shipped a <style> block
+// holding the chat-log / chat-msg / htmx-indicator classes
+// because there was no /static/chat.css. That block is now
+// in /static/chat.css and the template references it via
+// <link rel="stylesheet" href="/static/chat.css">.
+func TestChatFallback_NoInlineStyle(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+	s.templates = nil // force fallback renderer
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// Must NOT contain a <style> block — every <style> block
+	// would be blocked by the strict CSP.
+	require.NotRegexp(t, `(?i)<style\b`, body,
+		"chat fallback must not contain an inline <style> block (CSP blocks it)")
+
+	// Must reference the external stylesheet instead.
+	require.Contains(t, body, `href="/static/chat.css"`,
+		"chat fallback must load chat-specific styles from /static/chat.css")
+}
+
+// TestChatFallback_HtmxConfigDisablesEval pins that the chat
+// landing page sets htmx.config.allowEval = false before
+// htmx processes the page. htmx wraps every Function/eval
+// call in a check on config.allowEval; with it false, htmx
+// silently skips hx-on attribute processing and never calls
+// eval() or new Function() at runtime. The browser's CSP
+// therefore never blocks an eval attempt because no eval
+// attempt is ever made.
+//
+// The configuration is delivered through the
+// <meta name="htmx-config"> tag, which htmx reads at init
+// time. Inline <script> would need 'unsafe-inline' to
+// execute — the meta tag avoids that round-trip entirely.
+func TestChatFallback_HtmxConfigDisablesEval(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+	s.templates = nil
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	require.Contains(t, body, `name="htmx-config"`,
+		"chat fallback must declare <meta name=\"htmx-config\"> so htmx reads its config from JSON")
+	require.Contains(t, body, `"allowEval":false`,
+		"htmx-config must set allowEval to false so eval() / Function() are never called at runtime")
+}
+
+// TestChatFallback_NoHxOnAttributes pins that the chat
+// landing page does not use hx-on::* attributes. With
+// allowEval disabled, htmx would silently ignore them — the
+// chat form would submit but the loading-state UX (is-loading
+// class, form reset, focus return) would silently fail.
+//
+// The replacement lives in /static/chat.js which wires the
+// same UX via htmx:beforeRequest / htmx:afterRequest /
+// htmx:responseError event listeners. That file loads via
+// <script src="/static/chat.js" defer>, so the strict CSP
+// (script-src 'self', no 'unsafe-inline', no 'unsafe-eval')
+// lets it through.
+func TestChatFallback_NoHxOnAttributes(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+	s.templates = nil
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	require.NotContains(t, body, "hx-on",
+		"chat fallback must not use hx-on::* attributes (would silently fail with allowEval=false)")
+	require.Contains(t, body, `src="/static/chat.js"`,
+		"chat fallback must load /static/chat.js to wire htmx event listeners")
+}
+
+// TestChatFallback_LoadsExternalChatJS pins that the chat
+// landing page wires the htmx event listeners via an external
+// script (rather than an inline <script>, which the strict
+// CSP would block). The script must come from /static so the
+// script-src 'self' directive allows it.
+//
+// The count-and-src assertion pins both halves of the contract:
+// exactly the two expected <script> tags are present AND each
+// carries a src= attribute (no inline bodies). A bare
+// <script>...</script> block would inflate the count without
+// matching the src= regex below.
+func TestChatFallback_LoadsExternalChatJS(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+	s.templates = nil
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	require.Contains(t, body, `<script src="/static/chat.js"`,
+		"chat fallback must load /static/chat.js as an external script (CSP blocks inline <script>)")
+	require.Contains(t, body, `src="/static/htmx.min.js"`,
+		"chat fallback must load htmx from /static/htmx.min.js")
+
+	// Every <script> tag must have a src= attribute. The
+	// count must equal the number of src=" matches so a
+	// future contributor can't sneak in an inline <script>
+	// block — that would inflate the count without adding a
+	// src=" match, and the CSP would block the load.
+	scriptTagCount := strings.Count(body, "<script")
+	scriptSrcCount := strings.Count(body, `src="/static/`)
+	require.Equal(t, scriptSrcCount, scriptTagCount,
+		"every <script> tag must have a src= attribute (got %d <script> tags but %d src=\" matches)",
+		scriptTagCount, scriptSrcCount)
+	require.GreaterOrEqual(t, scriptTagCount, 2,
+		"chat fallback must include htmx.min.js and chat.js (got %d <script> tags)",
+		scriptTagCount)
+}
+
+// TestStaticHandler_ServesChatCSS pins that the new
+// /static/chat.css file is reachable via the static handler
+// with the correct Content-Type. The chat fallback template
+// references this path; if the asset is missing or served
+// with the wrong MIME, the browser refuses to apply the
+// stylesheet and the chat layout breaks.
+func TestStaticHandler_ServesChatCSS(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/chat.css", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	ct := w.Header().Get("Content-Type")
+	require.True(t, strings.HasPrefix(ct, "text/css"),
+		"/static/chat.css Content-Type must start with text/css (got %q)", ct)
+	require.NotEmpty(t, w.Body.Bytes(), "/static/chat.css body must not be empty")
+	// Sanity: chat-specific classes from the old <style>
+	// block must be present so the file actually carries
+	// what the chat page relies on.
+	body := w.Body.String()
+	require.Contains(t, body, ".chat-log",
+		"chat.css must carry the .chat-log class")
+	require.Contains(t, body, ".chat-msg",
+		"chat.css must carry the .chat-msg class")
+	require.Contains(t, body, ".htmx-indicator",
+		"chat.css must carry the .htmx-indicator class")
+}
+
+// TestStaticHandler_ServesChatJS pins that the new
+// /static/chat.js file is reachable via the static handler
+// with the correct Content-Type. Without it the chat form's
+// loading-state UX (is-loading class, form reset, focus
+// return) is unwired because hx-on was removed.
+func TestStaticHandler_ServesChatJS(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/chat.js", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	ct := w.Header().Get("Content-Type")
+	require.True(t,
+		strings.HasPrefix(ct, "application/javascript") || strings.HasPrefix(ct, "text/javascript"),
+		"/static/chat.js Content-Type must be a JS MIME (got %q)", ct)
+	require.NotEmpty(t, w.Body.Bytes(), "/static/chat.js body must not be empty")
+	body := w.Body.String()
+	// Sanity: chat.js must wire the three event listeners
+	// that replace the hx-on::* attributes.
+	require.Contains(t, body, "htmx:beforeRequest",
+		"chat.js must listen for htmx:beforeRequest to set the loading class")
+	require.Contains(t, body, "htmx:afterRequest",
+		"chat.js must listen for htmx:afterRequest to reset form and remove loading")
+	require.Contains(t, body, "htmx:responseError",
+		"chat.js must listen for htmx:responseError to clean up on failure")
+}
+
+// TestStaticHandler_ServesLoginCSS pins that the new
+// /static/login.css file is reachable via the static handler
+// with the correct Content-Type. login.html historically
+// shipped an inline <style> block; moving it to an external
+// stylesheet lets the strict CSP (no 'unsafe-inline') apply
+// to the login page too.
+func TestStaticHandler_ServesLoginCSS(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/login.css", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	ct := w.Header().Get("Content-Type")
+	require.True(t, strings.HasPrefix(ct, "text/css"),
+		"/static/login.css Content-Type must start with text/css (got %q)", ct)
+	require.NotEmpty(t, w.Body.Bytes(), "/static/login.css body must not be empty")
+	body := w.Body.String()
+	// Sanity: login-specific selectors must be present.
+	require.Contains(t, body, "ul.providers",
+		"login.css must carry the ul.providers selector")
+}
+
+// TestLoginTemplate_NoInlineStyle pins that login.html does
+// not carry an inline <style> block — same rationale as
+// TestChatFallback_NoInlineStyle, applied to the OAuth login
+// page. The styles now live in /static/login.css.
+//
+// The /auth/login handler short-circuits to 302 (single
+// provider auto-redirect) or 503 (no providers). To exercise
+// the chooser page that actually renders templates/login.html,
+// the test wires up two stub providers via
+// config.AuthConfig.Providers. We don't need working IdPs —
+// we only need the chooser markup to render so we can inspect
+// it.
+func TestLoginTemplate_NoInlineStyle(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Auth.Providers = []config.OAuthProvider{
+		{Name: "gh", Type: "github", ClientID: "id", ClientSecret: "sec"},
+		{Name: "gl", Type: "gitlab", ClientID: "id", ClientSecret: "sec"},
+	}
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/login", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"/auth/login must render the chooser page when at least two providers are configured (single-provider setup auto-redirects to that provider)")
+	body := w.Body.String()
+
+	require.NotRegexp(t, `(?i)<style\b`, body,
+		"login template must not contain an inline <style> block (CSP blocks it)")
+	require.Contains(t, body, `href="/static/login.css"`,
+		"login template must load login-specific styles from /static/login.css")
+}
+
+// TestStaticAssets_AllowListIsExact pins that the staticAssets
+// allow-list in static.go only contains the bundled assets.
+// A file dropped into internal/web/static/ but missing from
+// the allow-list would be invisible to the static handler,
+// surfacing as a 404 with no obvious cause. This test pins
+// the current contract so a future contributor who adds an
+// asset gets a compile-time reminder to register it.
+func TestStaticAssets_AllowListIsExact(t *testing.T) {
+	expected := []string{
+		"bulma.min.css",
+		"chat.css",
+		"chat.js",
+		"htmx.min.js",
+		"login.css",
+	}
+
+	actual := make([]string, 0, len(staticAssets))
+	for name := range staticAssets {
+		actual = append(actual, name)
+	}
+	sort.Strings(actual)
+	sort.Strings(expected)
+
+	require.Equal(t, expected, actual,
+		"staticAssets allow-list drifted; a new bundled asset must be registered here")
 }

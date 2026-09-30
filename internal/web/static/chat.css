@@ -1,0 +1,68 @@
+/* chat.css — page-specific styles for the chat landing page
+ * (and the chat-message response fragment swapped into it).
+ *
+ * Why this is an external file: the strict CSP rules out inline
+ * `<style>` blocks (style-src 'self', no 'unsafe-inline'), so
+ * every page's styles have to live in /static. The chat page
+ * historically carried an inline `<style>` block in the
+ * fallback renderer; it now lives here so the styles load under
+ * the strict CSP.
+ *
+ * Selectors cover three surfaces:
+ *   - The chat message log box (.chat-log).
+ *   - The chat message rows swapped in by htmx (.chat-msg),
+ *     shared with the chat_message.html fragment so the
+ *     styles apply to the response content too.
+ *   - The htmx-driven loading indicator (.htmx-indicator).
+ *     htmx adds the .htmx-request class while a request is
+ *     in flight; the .htmx-indicator visibility toggles on
+ *     that class via the cascade below.
+ */
+
+/* Chat log box — capped height so the page doesn't grow
+ * unbounded as messages accumulate; vertical scroll for
+ * overflow. */
+.chat-log {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* Chat message rows. The word-break rules prevent a single
+ * long token (a long URL, a long markdown code span) from
+ * stretching the box horizontally; overflow-wrap + break-word
+ * is the modern equivalent of word-wrap: break-word. */
+.chat-msg {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+pre.chat-msg {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: hidden;
+}
+
+.chat-msg a {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-msg pre,
+.chat-msg code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* htmx loading indicator: hidden by default, visible while a
+ * request tagged with hx-indicator is in flight. The
+ * .htmx-request class is added/removed by htmx automatically. */
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request.htmx-indicator {
+  display: inline-block;
+}

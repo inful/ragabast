@@ -194,7 +194,7 @@ Every response, regardless of route, carries:
 - `X-Frame-Options: DENY`
 - `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`
 
-> Note: the CSP is strictly self-hosted. Bulma (CSS) and htmx (JS) ship inside the binary at `internal/web/static/` and are served from `/static/*`; no third-party CDN is reachable for page chrome. The historical build whitelisted `https://unpkg.com` and `https://cdn.jsdelivr.net` for those libraries — bundling them removed the requirement.
+> Note: the CSP is strictly self-hosted and uses neither `'unsafe-inline'` nor `'unsafe-eval'`. Every page's styles live under `internal/web/static/` and are served from `/static/*`; templates and fallback renderers never emit an inline `<style>` block, and chat.js wires the loading-state UX via DOM event listeners instead of `hx-on::*` (which htmx would evaluate with `eval()`/`new Function()`). The htmx config `<meta name="htmx-config" content='{"allowEval":false}'>` is set on every page that loads htmx, so the runtime never tries to evaluate attribute JS even if a future contributor re-introduces `hx-on`. The historical build whitelisted `https://unpkg.com` and `https://cdn.jsdelivr.net` for Bulma and htmx; bundling them, then moving page-specific styles to `/static/chat.css` and `/static/login.css`, removed both those CDN allowances and the inline-script / inline-style requirements that drove the `unsafe-*` exemptions in the first place.
 - `Strict-Transport-Security: max-age=63072000; includeSubDomains`
 
 Every request body is capped at 10 MiB (Huma endpoints use Huma's own

@@ -1,0 +1,78 @@
+/* login.css — page-specific styles for the OAuth login chooser
+ * (templates/login.html).
+ *
+ * Why this is an external file: the strict CSP rules out inline
+ * `<style>` blocks (style-src 'self', no 'unsafe-inline'), so
+ * every page's styles must live in /static. login.html
+ * historically carried an inline `<style>` block; it now lives
+ * here so the styles load under the strict CSP.
+ *
+ * The page is intentionally dark-themed to match the
+ * GitHub-style provider list the operator is used to from
+ * other OAuth flows; the colors are hard-coded rather than
+ * driven by Bulma variables because this page is rendered
+ * before authentication has completed (no session, no
+ * preference cookies).
+ */
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: #0e1116;
+  color: #e6edf3;
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+main {
+  max-width: 28rem;
+  width: 100%;
+  padding: 2rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem 0;
+}
+
+p.lead {
+  color: #8b949e;
+  margin: 0 0 1.5rem 0;
+  font-size: 0.9rem;
+}
+
+ul.providers {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.5rem 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+ul.providers a {
+  display: block;
+  padding: 0.75rem 1rem;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e6edf3;
+  text-decoration: none;
+  font-weight: 500;
+  transition: border-color 0.15s;
+}
+
+ul.providers a:hover,
+ul.providers a:focus {
+  border-color: #58a6ff;
+  outline: none;
+}
+
+.meta {
+  color: #6e7681;
+  font-size: 0.8rem;
+  text-align: center;
+  margin-top: 1rem;
+}

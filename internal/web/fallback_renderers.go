@@ -240,21 +240,23 @@ func (s *Server) renderFallback(w http.ResponseWriter, name string, data any) {
 // Security: every user-controllable value flows through
 // html/template's {{ }} context, which escapes HTML-significant
 // characters automatically.
+//
+// CSP compliance:
+//   - Styles live in /static/chat.css (no inline <style>
+//     block; the strict CSP forbids 'unsafe-inline').
+//   - The htmx config meta tag disables eval()/Function() so
+//     htmx never tries to evaluate hx-on::* attributes. The
+//     loading-state UX that used to be hx-on::* is wired
+//     instead by /static/chat.js via DOM event listeners.
 const chatFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
 	<title>{{ .Title }}</title>
+	<meta name="htmx-config" content='{"allowEval":false}'>
 	<link rel="stylesheet" href="/static/bulma.min.css">
-	<script src="/static/htmx.min.js"></script>
-	<style>
-		.chat-log { max-height: 60vh; overflow-y: auto; }
-		.chat-msg { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
-		pre.chat-msg { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; overflow-x: hidden; }
-		.chat-msg a { overflow-wrap: anywhere; word-break: break-word; }
-		.chat-msg pre, .chat-msg code { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
-		.htmx-indicator { display: none; }
-		.htmx-request.htmx-indicator { display: inline-block; }
-	</style>
+	<link rel="stylesheet" href="/static/chat.css">
+	<script src="/static/htmx.min.js" defer></script>
+	<script src="/static/chat.js" defer></script>
 </head>
 <body class="container mt-4">
 	{{ template "header" .Header }}
@@ -271,7 +273,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 		<a id="chat-export" class="button is-small is-light" href="/api/chat/export?session_id={{ .SessionID }}">Export transcript (.md)</a>
 	</div>
 
-	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input" hx-on::before-request="document.getElementById('chat-send')?.classList.add('is-loading')" hx-on::after-request="this.reset(); document.getElementById('chat-send')?.classList.remove('is-loading'); document.getElementById('chat-input')?.focus()" hx-on::response-error="document.getElementById('chat-send')?.classList.remove('is-loading')">
+	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input">
 		<input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
 		<input type="hidden" name="session_id" value="{{ .SessionID }}">
 		<div class="field">

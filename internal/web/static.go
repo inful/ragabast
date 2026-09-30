@@ -44,12 +44,38 @@ var staticFS embed.FS
 // directory. Adding a new bundled asset requires adding the
 // filename here AND updating a template / fallback renderer to
 // reference it.
+//
+// The current set is:
+//   - bulma.min.css  — Bulma v0.9.4 (MIT). Loaded by every page.
+//   - htmx.min.js    — htmx v1.9.10 (BSD-2-Clause). Loaded by
+//     the chat landing page and search.
+//   - chat.css      — page-specific styles for the chat page.
+//     Extracted from a former inline <style>
+//     block so the strict CSP (no
+//     'unsafe-inline') applies.
+//   - chat.js       — wires the chat form's loading-state UX
+//     via htmx event listeners. Replaces the
+//     former hx-on::* attributes, which would
+//     fail under the strict CSP because htmx
+//     processes them with eval()/Function().
+//   - login.css     — page-specific styles for the OAuth login
+//     chooser. Extracted from a former inline
+//     <style> block in templates/login.html.
 var staticAssets = map[string]staticAsset{
 	"bulma.min.css": {
 		contentType: "text/css; charset=utf-8",
 	},
 	"htmx.min.js": {
 		contentType: "application/javascript; charset=utf-8",
+	},
+	"chat.css": {
+		contentType: "text/css; charset=utf-8",
+	},
+	"chat.js": {
+		contentType: "application/javascript; charset=utf-8",
+	},
+	"login.css": {
+		contentType: "text/css; charset=utf-8",
 	},
 }
 
