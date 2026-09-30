@@ -13,13 +13,16 @@ import (
 	"github.com/ragabast/internal/config"
 )
 
-// TestFallbackHeader_NotRenderedWhenOAuthNotConfigured pins
-// the historical single-user / bearer-token behavior: with
-// no OAuth providers, the page chrome renders no nav bar.
-// Operators running ragabast locally without configuring
-// auth should see exactly what they saw before the sign-in
-// work landed — no "Sign in" link, no surprises.
-func TestFallbackHeader_NotRenderedWhenOAuthNotConfigured(t *testing.T) {
+// TestFallbackHeader_AlwaysOnNavWithoutAuth pins the fix for
+// issue #85: a basic top nav (Chat | Search | Documents | Ingest)
+// renders on every page regardless of OAuth configuration.
+// Operators running ragabast locally without configuring auth can
+// navigate between pages without typing URLs or clicking the
+// per-page Back button. Auth-specific bits (user display name,
+// Sign in / Sign out) only render when OAuth is also
+// configured — that conditional is exercised by the SignInLink
+// and SignOutButton tests below.
+func TestFallbackHeader_AlwaysOnNavWithoutAuth(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeHumaService{})
 	s.templates = nil // force fallback renderer
@@ -30,9 +33,37 @@ func TestFallbackHeader_NotRenderedWhenOAuthNotConfigured(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	assert.NotContains(t, body, "<nav", "no nav bar should render when OAuth is not configured")
+	assert.Contains(t, body, "<nav", "a basic nav must render even without OAuth so /search, /documents, /ingest are discoverable")
+	assert.Contains(t, body, `href="/"`, "nav must link back to the chat landing page")
+	assert.Contains(t, body, `href="/search"`, "nav must link to /search")
+	assert.Contains(t, body, `href="/documents"`, "nav must link to /documents")
+	assert.Contains(t, body, `href="/ingest"`, "nav must link to /ingest")
 	assert.NotContains(t, body, "Sign in", "no sign-in link should render when OAuth is not configured")
 	assert.NotContains(t, body, "Sign out", "no sign-out button should render when OAuth is not configured")
+}
+
+// TestFallbackHeader_NavLinksPresentOnEveryPage pins the
+// discovery contract: the always-on nav appears on every
+// fallback page (chat, ingest, documents) so the operator can
+// move between sections without typing URLs.
+func TestFallbackHeader_NavLinksPresentOnEveryPage(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeHumaService{})
+	s.templates = nil
+
+	for _, path := range []string{"/", "/ingest", "/documents"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+
+			require.Equal(t, http.StatusOK, w.Code)
+			body := w.Body.String()
+			for _, link := range []string{`href="/"`, `href="/search"`, `href="/documents"`, `href="/ingest"`} {
+				assert.Contains(t, body, link, "%s must surface the always-on nav link %q", path, link)
+			}
+		})
+	}
 }
 
 // TestFallbackHeader_SignInLinkWhenOAuthConfiguredAndNotSignedIn

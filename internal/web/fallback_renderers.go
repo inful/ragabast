@@ -178,7 +178,13 @@ func mustParseWithHeader(name, body string) *template.Template {
 // when AuthEnabled is false (the historical single-user
 // install has no login concept); when true, it shows the
 // signed-in user + sign-out button, OR the "Sign in" link
-// when the visitor is unauthenticated.
+// The basic nav (Chat | Search | Documents | Ingest) renders on
+// every page regardless of OAuth configuration — operators
+// running ragabast locally without configuring auth can still
+// navigate between sections without typing URLs or clicking
+// per-page Back buttons. When auth is enabled, the user
+// display name and Sign in / Sign out bits render on the
+// right-hand end of the nav, on top of the basic links.
 //
 // Bulma navbar markup keeps the visual language consistent
 // with the rest of the page chrome (chat-message, search,
@@ -195,12 +201,18 @@ func mustParseWithHeader(name, body string) *template.Template {
 // single-user open-access install (AuthEnabled=false).
 const pageHeaderFallbackBody = `
 {{ define "header" -}}
-{{- if .AuthEnabled -}}
 <nav class="navbar is-light" role="navigation" aria-label="main navigation">
   <div class="navbar-brand">
     <a class="navbar-item" href="/">ragabast</a>
   </div>
   <div class="navbar-menu is-active">
+    <div class="navbar-start">
+      <a class="navbar-item" href="/">Chat</a>
+      <a class="navbar-item" href="/search">Search</a>
+      <a class="navbar-item" href="/documents">Documents</a>
+      <a class="navbar-item" href="/ingest">Ingest</a>
+    </div>
+    {{- if .AuthEnabled }}
     <div class="navbar-end">
       {{- if .SignedIn }}
       <span class="navbar-item has-text-grey">{{ .DisplayName }}</span>
@@ -214,9 +226,9 @@ const pageHeaderFallbackBody = `
       <a class="navbar-item" href="{{ .SignInURL }}">Sign in</a>
       {{- end }}
     </div>
+    {{- end }}
   </div>
 </nav>
-{{- end -}}
 {{- end -}}
 `
 
