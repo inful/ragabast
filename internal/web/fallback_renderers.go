@@ -367,7 +367,6 @@ const ingestFallbackBody = `<!DOCTYPE html>
         <div class="field">
             <div class="control">
                 <button class="button is-primary" type="submit">Ingest</button>
-                <a href="/" class="button is-light">Back</a>
             </div>
         </div>
     </form>
@@ -429,7 +428,6 @@ const documentsFallbackBody = `<!DOCTYPE html>
 <body class="container mt-4">
     {{ template "header" .Header }}
     <h1 class="title">Ingested Documents</h1>
-    <a href="/" class="button is-light mb-4">Back</a>
     {{ if .Documents }}
     <table class="table is-fullwidth is-striped">
         <thead><tr><th>Title</th><th>ID</th><th>Tags</th><th>Category</th><th>Chunks</th><th></th></tr></thead>

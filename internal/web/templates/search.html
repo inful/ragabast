@@ -12,12 +12,6 @@
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
-    <nav class="breadcrumb" aria-label="breadcrumbs">
-        <ul>
-            <li><a href="/">Home</a></li>
-            <li class="is-active"><a href="#" aria-current="page">Search</a></li>
-        </ul>
-    </nav>
 
     <h1 class="title">Search Documents</h1>
     <p class="subtitle">Hybrid search: vector similarity plus keyword fallback, with tag / category / document-id filters.</p>
@@ -95,12 +89,9 @@
             </div>
         </div>
 
-        <div class="field is-grouped">
+        <div class="field">
             <div class="control">
                 <button class="button is-info" type="submit">Search</button>
-            </div>
-            <div class="control">
-                <a href="/" class="button is-light">Back</a>
             </div>
         </div>
     </form>
