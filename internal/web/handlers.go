@@ -363,11 +363,28 @@ func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 		tags = nil
 		categories = nil
 	}
+
+	// Document ID autocomplete (issue #90). The list is small
+	// in practice (operators with thousands of docs would already
+	// have switched to programmatic ingest pipelines); the
+	// ListDocumentsPaged call is bounded by the existing
+	// pagination defaults so the page chrome doesn't grow
+	// unbounded. A failure here is also best-effort UX — no
+	// datalist means the input still works, just without
+	// browser autocomplete.
+	var documentIDs []string
+	if docs, _, listErr := s.service.ListDocumentsPaged(r.Context(), 1000, 0); listErr == nil {
+		for _, d := range docs {
+			documentIDs = append(documentIDs, d.UID)
+		}
+	}
+
 	s.renderTemplate(w, "search.html", map[string]any{
-		"Title":      "Search",
-		"Tags":       tags,
-		"Categories": categories,
-		"CsrfToken":  CsrfTokenFromContext(r.Context()),
+		"Title":       "Search",
+		"Tags":        tags,
+		"Categories":  categories,
+		"DocumentIDs": documentIDs,
+		"CsrfToken":   CsrfTokenFromContext(r.Context()),
 	})
 }
 

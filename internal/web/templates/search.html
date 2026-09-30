@@ -70,9 +70,17 @@
             <label class="label" for="document_id">Document ID</label>
             <div class="control">
                 <input class="input" id="document_id" type="text" name="document_id"
+                       list="document_id_options" autocomplete="off"
                        placeholder="(any document)">
             </div>
-            <p class="help">Optional. Restrict the search to a single docbuilder document.</p>
+            {{ if .DocumentIDs }}
+            <datalist id="document_id_options">
+                {{ range .DocumentIDs }}
+                <option value="{{ . }}">{{ . }}</option>
+                {{ end }}
+            </datalist>
+            {{ end }}
+            <p class="help">Optional. Restrict the search to a single docbuilder document. Pick from the corpus with autocomplete or type a UID.</p>
         </div>
 
         <div class="field">

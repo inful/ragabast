@@ -137,6 +137,61 @@ func TestHandleSearchSubmit_PassesFilters(t *testing.T) {
 	require.Equal(t, "doc-42", svc.lastSearchFilters.DocumentID)
 }
 
+// TestHandleSearchPage_RendersDocumentIDAutocomplete pins the
+// fix for issue #90: the Document ID filter on /search now
+// carries a <datalist> of the corpus's UIDs and titles so the
+// browser can autocomplete the field. Before the fix the
+// field was a plain text input — the operator had to remember
+// the exact UID or copy it from /documents. The datalist is
+// populated from ListDocumentsPaged on every page render (a
+// paginated walk so a 10k-corpus operator doesn't pull every
+// doc into the page chrome).
+func TestHandleSearchPage_RendersDocumentIDAutocomplete(t *testing.T) {
+	chdirToRepoRoot(t)
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{documents: []models.DocumentInfo{
+		{ID: "arch-overview", UID: "arch-overview", Title: "Architecture Overview"},
+		{ID: "deployment-guide", UID: "deployment-guide", Title: "Deployment Guide"},
+		{ID: "doc-without-title", UID: "doc-without-title"}, // no title — should still appear by UID
+	}})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/search", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	require.Contains(t, body, `<datalist id="document_id_options">`,
+		"/search must render a datalist to power Document ID autocomplete")
+	require.Contains(t, body, `<option value="arch-overview">`,
+		"the datalist must include each document's UID as an option value")
+	require.Contains(t, body, `<option value="deployment-guide">`,
+		"every doc in the corpus must appear, not just the first")
+	require.Contains(t, body, `<option value="doc-without-title">`,
+		"docs without a Title must appear by UID alone (no skipped rows)")
+	require.Contains(t, body, `list="document_id_options"`,
+		"the Document ID input must reference the datalist via list= so the browser can autocomplete")
+}
+
+// TestHandleSearchPage_NoDocuments_OmitsDatalist pins the
+// empty-corpus branch: with zero documents the datalist is
+// omitted (rather than rendered as an empty <datalist></datalist>
+// that some browsers render as a visible empty dropdown).
+func TestHandleSearchPage_NoDocuments_OmitsDatalist(t *testing.T) {
+	chdirToRepoRoot(t)
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/search", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.NotContains(t, w.Body.String(), `<datalist id="document_id_options">`,
+		"with no documents the datalist must be omitted entirely")
+}
+
 // TestHandleSearchSubmit_EmptyQuery_RendersNotification pins the
 // input contract: an empty query is a client-visible error, not a
 // search. The handler returns 200 with a Bulma notification fragment
