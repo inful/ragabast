@@ -3,6 +3,7 @@ package web
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -129,6 +130,8 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 		s.renderFallback(w, "ingest.html", ingestFallbackData{
 			Title:     titleFromMap(data, "RAGabast - Ingest"),
 			CsrfToken: stringFromMap(data, "CsrfToken"),
+			Error:     stringFromMap(data, "Error"),
+			Content:   stringFromMap(data, "Content"),
 			Header:    header,
 		})
 	case "ingest_success.html":
@@ -626,6 +629,20 @@ func (s *Server) handleIngestPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleIngestSubmit processes a docbuilder POST. Three outcomes:
+//
+//   - happy path → ingest_success.html (200)
+//   - client-side rejection (validation, oversize) → ingest.html
+//     re-render with the actual reason and the user's original
+//     content preserved (4xx). The operator can correct and retry
+//     without guessing what went wrong.
+//   - genuine server-side failure (embedding crash, vector DB
+//     unreachable) → generic message + request id (500). The
+//     detail belongs in the server log, not the browser.
+//
+// errors.Is is used to classify the service-layer error so adding
+// new validation sentinels in models/errors.go automatically gets
+// the right UX treatment here.
 func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "Failed to parse form", http.StatusBadRequest)
@@ -634,7 +651,7 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 
 	content := r.FormValue("content")
 	if content == "" {
-		http.Error(w, "Content is required", http.StatusBadRequest)
+		s.renderIngestError(w, r, http.StatusBadRequest, "Paste docbuilder content before submitting.", content)
 		return
 	}
 
@@ -644,13 +661,19 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 	// the smaller per-document cap protects the chunker and
 	// embedding model from being pinned by one giant input.
 	if maxBytes := s.config.Server.MaxIngestDocumentBytes; maxBytes > 0 && len(content) > maxBytes {
-		http.Error(w, "Document exceeds server.max_ingest_document_bytes", http.StatusRequestEntityTooLarge)
+		s.renderIngestError(w, r, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("Document exceeds server.max_ingest_document_bytes (%d bytes).", maxBytes),
+			content)
 		return
 	}
 
 	// Ingest document
 	doc, err := s.service.IngestDocument(r.Context(), content)
 	if err != nil {
+		if isClientIngestError(err) {
+			s.renderIngestError(w, r, http.StatusBadRequest, err.Error(), content)
+			return
+		}
 		internalError(w, r, "ingest", err)
 		return
 	}
@@ -662,6 +685,45 @@ func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
 		"Tags":       doc.Tags,
 		"Header":     s.pageHeaderFromContext(r),
 	})
+}
+
+// renderIngestError re-renders the ingest form with an inline
+// error banner. Used for validation errors and oversize bodies so
+// the user sees the actual reason and can correct and retry
+// without guessing.
+func (s *Server) renderIngestError(w http.ResponseWriter, r *http.Request, status int, message, originalContent string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	s.renderTemplate(w, "ingest.html", map[string]any{
+		"Title":     "RAGabast - Ingest",
+		"CsrfToken": CsrfTokenFromContext(r.Context()),
+		"Error":     message,
+		"Content":   originalContent,
+		"Header":    s.pageHeaderFromContext(r),
+	})
+}
+
+// isClientIngestError reports whether err is a deterministic
+// client-side rejection (validation, malformed frontmatter,
+// empty document, etc.) and therefore deserves a 4xx with a
+// useful message, vs. a genuine server-side failure that should
+// return a generic 500. Adding a new sentinel to models/errors.go
+// makes the new case fall into the right bucket automatically.
+func isClientIngestError(err error) bool {
+	for _, sentinel := range []error{
+		models.ErrMissingFingerprint,
+		models.ErrMissingUID,
+		models.ErrMissingContent,
+		models.ErrInvalidFrontmatter,
+		models.ErrParseFailed,
+		models.ErrInvalidFormat,
+		models.ErrEmptyDocument,
+	} {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {

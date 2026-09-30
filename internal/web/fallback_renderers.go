@@ -79,9 +79,16 @@ type chatFallbackData struct {
 }
 
 // ingestFallbackData is the data shape for the GET /ingest page.
+// Error and Content are populated only when the page is re-rendered
+// after a failed POST /ingest submission — Error carries the
+// human-readable reason the content was rejected, and Content is
+// the user's original submission so they can correct and retry
+// without losing what they typed.
 type ingestFallbackData struct {
 	Title     string
 	CsrfToken string
+	Error     string
+	Content   string
 	Header    pageHeaderData
 }
 
@@ -294,7 +301,11 @@ const chatFallbackBody = `<!DOCTYPE html>
 </body>
 </html>`
 
-// ingestFallbackBody renders the GET /ingest page.
+// ingestFallbackBody renders the GET /ingest page. When Error is
+// non-empty (a failed POST re-render), the form shows a Bulma
+// `is-danger` notification with the human-readable reason and
+// pre-fills the textarea with the user's original submission so
+// they can correct and retry without losing what they typed.
 const ingestFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
@@ -304,12 +315,17 @@ const ingestFallbackBody = `<!DOCTYPE html>
 <body class="container mt-4">
     {{ template "header" .Header }}
     <h1 class="title">Ingest Document</h1>
+    {{ if .Error }}
+    <div class="notification is-danger">
+        <strong>Ingest failed:</strong> {{ .Error }}
+    </div>
+    {{ end }}
     <form method="post" action="/ingest">
         <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
         <div class="field">
             <label class="label">Docbuilder Content</label>
             <div class="control">
-                <textarea class="textarea" name="content" rows="15" placeholder="Paste your docbuilder markdown content here..." required></textarea>
+                <textarea class="textarea" name="content" rows="15" placeholder="Paste your docbuilder markdown content here..." required>{{ .Content }}</textarea>
             </div>
             <p class="help">Include YAML frontmatter with fingerprint, uid, tags, categories, and URLs</p>
         </div>
