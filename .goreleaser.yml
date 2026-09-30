@@ -182,6 +182,15 @@ release:
 # The Dockerfile builds the Go binary inside Docker using TARGETARCH,
 # so a single Dockerfile works for every platform goreleaser asks for.
 # Tags: exact version, major.minor, and `latest` (only on the default branch).
+#
+# extra_files is REQUIRED for THIRD_PARTY_LICENSES.md because the
+# goreleaser Docker build context only contains Dockerfile +
+# linux/<arch>/<binary>; project-root files are not automatically
+# added. The Dockerfile's COPY THIRD_PARTY_LICENSES.md line needs
+# the file in the context, so we list it here. goreleaser both
+# adds it to the context AND copies it to the dst path inside the
+# image — without removing the Dockerfile COPY, the file would
+# be present twice (harmless, but redundant).
 # ---------------------------------------------------------------------------
 dockers_v2:
   - id: ragabast
@@ -195,6 +204,8 @@ dockers_v2:
     platforms:
       - linux/amd64
       - linux/arm64
+    extra_files:
+      - THIRD_PARTY_LICENSES.md:/usr/share/doc/ragabast/THIRD_PARTY_LICENSES.md
     labels:
       org.opencontainers.image.title: ragabast
       org.opencontainers.image.description: >-
