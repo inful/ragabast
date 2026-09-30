@@ -15,6 +15,14 @@
     document_id chip so the user can still see what was
     cited.
 
+    The sources disclosure renders open by default so the
+    citations the system worked to surface are immediately
+    visible — a small "N sources" line was easy to miss
+    entirely. The disclosure is placed inside the assistant's
+    reply box so it visually attaches to the message it
+    justifies, rather than floating between the reply and
+    the input form.
+
     The source label comes from SearchResult.DisplayLabel,
     which prefers title → filename (basename without
     extension) → document_id. Using the helper keeps the
@@ -32,24 +40,23 @@
     <div class="box has-background-light">
         <p class="has-text-weight-semibold">Assistant</p>
         <div class="chat-msg content">{{ .AnswerHTML }}</div>
+        {{ if .Sources }}
+        <details class="mt-2" open>
+            <summary>Sources ({{ len .Sources }})</summary>
+            <ol class="mt-2">
+                {{ range .Sources }}
+                <li>
+                    {{ .DisplayLabel }}
+                    ({{ if .DocbuilderURL }}
+                        <a href="{{ .DocbuilderURL }}" target="_blank" rel="noopener">direct link</a>
+                    {{ else }}
+                        <code>{{ .DocumentID }}</code>
+                    {{ end }})
+                    — similarity {{ printf "%.2f" .Similarity }}
+                </li>
+                {{ end }}
+            </ol>
+        </details>
+        {{ end }}
     </div>
 </div>
-
-{{ if .Sources }}
-<details class="mt-2">
-    <summary>{{ len .Sources }} source{{ if ne (len .Sources) 1 }}s{{ end }}</summary>
-    <ol class="mt-2">
-        {{ range .Sources }}
-        <li>
-            {{ .DisplayLabel }}
-            ({{ if .DocbuilderURL }}
-                <a href="{{ .DocbuilderURL }}" target="_blank" rel="noopener">direct link</a>
-            {{ else }}
-                <code>{{ .DocumentID }}</code>
-            {{ end }})
-            — similarity {{ printf "%.2f" .Similarity }}
-        </li>
-        {{ end }}
-    </ol>
-</details>
-{{ end }}
