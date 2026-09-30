@@ -385,6 +385,7 @@ func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 		"Categories":  categories,
 		"DocumentIDs": documentIDs,
 		"CsrfToken":   CsrfTokenFromContext(r.Context()),
+		"Header":      s.pageHeaderFromContext(r),
 	})
 }
 

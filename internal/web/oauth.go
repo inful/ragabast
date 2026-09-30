@@ -24,7 +24,24 @@ import (
 // embedded templatesFS at package init so the per-request
 // handler can render it without paying template.Parse
 // cost on every GET /auth/login.
+//
+// ParseFS parses the file under its base name ("login.html"),
+// which is what Execute runs by default — we don't wrap in
+// template.New(...) because that creates an empty "login"
+// sibling that Execute would pick over "login.html" instead.
+//
+// The init() block below registers the shared `header`
+// template block (issue #85 follow-on) so the {{ template
+// "header" }} call inside login.html resolves to the navbar
+// partial. NewServer does the same for the rest of the
+// embedded templates/ set.
 var loginTpl = template.Must(template.ParseFS(templatesFS, "templates/login.html"))
+
+func init() { //nolint:gochecknoinits // registers the header block on loginTpl; see comment above
+	if _, err := loginTpl.Parse(pageHeaderFallbackBody); err != nil {
+		panic("oauth: failed to register header block on loginTpl: " + err.Error())
+	}
+}
 
 // oauthStateCookieName is the short-lived cookie that
 // carries the OAuth state token across the redirect. It is

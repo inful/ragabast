@@ -214,6 +214,20 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	default:
 		templates, err = template.ParseFS(templatesFS, "templates/*.html")
 	}
+	// Register the shared `header` template block (issue #85
+	// follow-on) so embedded page templates can invoke it via
+	// {{ template "header" .Header }}. Without this the embedded
+	// templates/ (which is the default) would render with no
+	// navbar — only the fallback Go-string templates include the
+	// header today. Parse errors here are logged and ignored;
+	// the navbar missing is recoverable: a template that calls
+	// {{ template "header" }} simply no-ops if the block is
+	// missing (and the page renders fine without the nav).
+	if templates != nil {
+		if _, parseErr := templates.Parse(pageHeaderFallbackBody); parseErr != nil {
+			log.Printf("web: failed to register header block on embedded templates: %v", parseErr)
+		}
+	}
 	if err != nil {
 		log.Printf("web: failed to load templates: %v", err)
 		templates = template.New("base")

@@ -186,18 +186,17 @@ func mustParseWithHeader(name, body string) *template.Template {
 	return template.Must(t.Parse(body))
 }
 
-// pageHeaderFallbackBody defines the "header" block every page
-// includes at the top of <body>. The block renders nothing
-// when AuthEnabled is false (the historical single-user
-// install has no login concept); when true, it shows the
-// signed-in user + sign-out button, OR the "Sign in" link
-// The basic nav (Chat | Search | Documents | Ingest) renders on
-// every page regardless of OAuth configuration — operators
-// running ragabast locally without configuring auth can still
-// navigate between sections without typing URLs or clicking
-// per-page Back buttons. When auth is enabled, the user
-// display name and Sign in / Sign out bits render on the
-// right-hand end of the nav, on top of the basic links.
+// pageHeaderFallbackBody is the navbar HTML wrapped in a
+// `header` template block. NewServer parses this into the
+// embedded template set so per-page embedded templates can
+// invoke it via {{ template "header" .Header }}; the fallback
+// renderer parses this with the page body string in
+// mustParseWithHeader.
+//
+// The basic links (Chat | Search | Documents | Ingest) render
+// on every page regardless of OAuth configuration; the user
+// display name and Sign in / Sign out bits render on top when
+// auth is also enabled. Issue #85.
 //
 // Bulma navbar markup keeps the visual language consistent
 // with the rest of the page chrome (chat-message, search,
