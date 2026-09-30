@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -88,9 +89,16 @@ func NewVectorDBWithOptions(opts Options) (*VectorDB, error) {
 
 	// Create DB with persistence if directory is provided
 	if opts.PersistenceDir != "" {
-		// Ensure the directory exists
-		if err := os.MkdirAll(opts.PersistenceDir, 0o755); err != nil {
-			return nil, fmt.Errorf("failed to create persistence directory: %w", err)
+		// Ensure the directory exists AND the binary can write
+		// to it. MkdirAll alone is insufficient: it is a no-op
+		// when the target already exists, so a pre-existing
+		// directory owned by another uid (the typical K8s PVC
+		// scenario when fsGroup is not configured) passes
+		// MkdirAll silently. The probe file surfaces the real
+		// problem at startup, before chromem-go's first index
+		// write fails several layers deep in its state machine.
+		if err := ensureWritableDir(opts.PersistenceDir); err != nil {
+			return nil, fmt.Errorf("persistence directory %q: %w", opts.PersistenceDir, err)
 		}
 
 		// Check the model marker before opening chromem-go.
@@ -1032,6 +1040,73 @@ func (db *VectorDB) GetUniqueDocumentsPaged(ctx context.Context, limit, offset i
 }
 
 // splitNonEmptyLines and parseRFC3339 moved to metadata.go.
+
+// ensureWritableDir creates dir (and any missing parents) and
+// verifies the running process can write to it. The probe
+// file is what catches the "directory exists but is owned by
+// another uid" failure mode that MkdirAll's no-op-on-exists
+// semantics otherwise mask. The probe is removed before
+// returning on success so the operator doesn't see noise in
+// their vector DB dir.
+//
+// On EACCES — the failure mode operators actually hit on K8s
+// when running as the distroless `nonroot` uid 65532 against
+// a PVC whose root is owned by another uid — the returned
+// error names the offending path, the running uid/gid, and
+// the securityContext.fsGroup fix so the operator doesn't
+// have to guess. The underlying fs.ErrPermission is wrapped
+// for callers that want to branch on it programmatically.
+func ensureWritableDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return wrapDirPermission(dir, err)
+	}
+
+	probe, err := os.CreateTemp(dir, ".ragabast-write-probe-*")
+	if err != nil {
+		return wrapDirPermission(dir, err)
+	}
+	probeName := probe.Name()
+	// Best-effort cleanup; a failed Remove is non-fatal
+	// because the next startup will overwrite or skip the
+	// probe, but log it so operators can clean up manually
+	// if it accumulates.
+	if closeErr := probe.Close(); closeErr != nil {
+		_ = os.Remove(probeName)
+		return fmt.Errorf("persistence directory %q: probe close: %w", dir, closeErr)
+	}
+	if removeErr := os.Remove(probeName); removeErr != nil {
+		return fmt.Errorf("persistence directory %q: probe cleanup: %w", dir, removeErr)
+	}
+
+	return nil
+}
+
+// wrapDirPermission annotates a permission-denied error from
+// MkdirAll or os.CreateTemp with the deployment-footgun
+// guidance the operator needs to fix it: the running uid/gid,
+// and the securityContext.fsGroup fix that closes the gap on
+// Kubernetes. Non-permission errors pass through unwrapped so
+// the underlying message (e.g. ENOSPC, EROFS) is preserved.
+//
+// The "persistence" descriptor is hardcoded because the only
+// caller is ensureWritableDir, which guards the chromem-go
+// vector DB persistence dir specifically. Other dirs
+// (keyword index, async ingest queue) currently surface
+// their own errors via the standard MkdirAll path; widening
+// this helper to cover them is a one-liner if the message
+// starts to confuse operators.
+func wrapDirPermission(dir string, err error) error {
+	if !errors.Is(err, fs.ErrPermission) {
+		return fmt.Errorf("persistence directory %q: %w", dir, err)
+	}
+	return fmt.Errorf(
+		"persistence directory %q is not writable by the running process (uid=%d, gid=%d): %w. "+
+			"On Kubernetes, set securityContext.fsGroup to the binary's uid/gid "+
+			"(the published image runs as nonroot uid 65532); on a host volume, "+
+			"chown the directory to the binary's uid; or run an init container "+
+			"that fixes the ownership before the main container starts",
+		dir, os.Getuid(), os.Getgid(), err)
+}
 
 // Close cleans up resources.
 func (db *VectorDB) Close() error {

@@ -211,6 +211,55 @@ Notes:
 - Use a specific config file: `ragabast serve --config ./config.yml`
 - Create a starter config: `ragabast config init` (or `ragabast init`) (writes `config.yml` with mode `0600`)
 
+### Kubernetes deployment
+
+The published image runs as the distroless `nonroot` user (uid/gid 65532). When mounting a PVC at `DATA_DIR`, set the pod's `securityContext.fsGroup` to the binary's uid/gid so the volume is group-writable:
+
+```yaml
+spec:
+  securityContext:
+    fsGroup: 65532          # nonroot uid; matches the binary's gid
+    fsGroupChangePolicy: OnRootMismatch
+  containers:
+    - name: ragabast
+      image: ghcr.io/inful/ragabast:v0.10.10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      env:
+        - name: DATA_DIR
+          value: /data
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: ragabast-data
+```
+
+Without `fsGroup: 65532`, the PVC is provisioned for some other uid (typically 0) and the binary's startup fails with a clear "permission denied" error that points at this `securityContext.fsGroup` fix. Two more options if `fsGroup` is unavailable:
+
+- An init container that chowns the volume before the main container starts:
+
+  ```yaml
+  initContainers:
+    - name: chown-data
+      image: busybox:1.36
+      command: ["chown", "-R", "65532:65532", "/data"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  ```
+- A host-mount volume (e.g. a `hostPath` mount) where the directory is pre-created with the right ownership on the host.
+
+The `fsGroup` approach is the standard Kubernetes pattern and what the rest of this README assumes.
+
 ## Search
 
 ragabast exposes a hybrid search endpoint that combines an embedding
