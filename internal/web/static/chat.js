@@ -91,5 +91,60 @@
         sendBtn.classList.remove('is-loading');
       }
     });
+
+    // Issue #88: "Jump to latest" affordance for long chat
+    // sessions. The chat log scrolls independently of the
+    // page; once the user scrolls up to read history they
+    // can lose track of where new messages are landing.
+    // The button is rendered inside the chat-log container
+    // (chatFallbackBody) and stays pinned to its
+    // bottom-right via .jump-to-latest CSS. chat.js toggles
+    // the .is-visible class on every scroll event so the
+    // button only shows when the operator is not at the
+    // tail. Click → smooth scroll to the bottom.
+    var log = document.getElementById('chat-messages');
+    var jumpBtn = document.getElementById('jump-to-latest');
+    if (log && jumpBtn) {
+      var NEAR_BOTTOM_PX = 48;
+
+      function isNearBottom(el) {
+        // scrollTop + clientHeight within a small threshold
+        // of scrollHeight → operator is at the tail.
+        return el.scrollTop + el.clientHeight >= el.scrollHeight - NEAR_BOTTOM_PX;
+      }
+
+      function updateJumpVisibility() {
+        if (isNearBottom(log)) {
+          jumpBtn.classList.remove('is-visible');
+        } else {
+          jumpBtn.classList.add('is-visible');
+        }
+      }
+
+      jumpBtn.addEventListener('click', function () {
+        // scrollIntoView with smooth behavior animates the
+        // jump; falls back to instant scroll in older browsers.
+        log.scrollTo({top: log.scrollHeight, behavior: 'smooth'});
+      });
+
+      log.addEventListener('scroll', updateJumpVisibility, {passive: true});
+
+      // On every new message (htmx:afterRequest fires after
+      // the chat-form POST and the response fragment is
+      // beforeend-swapped into the log), check whether the
+      // operator was already at the tail. If yes, follow
+      // the new content; if no, leave them where they were
+      // — but show the button so they can choose to jump.
+      form.addEventListener('htmx:afterRequest', function () {
+        if (isNearBottom(log)) {
+          log.scrollTop = log.scrollHeight;
+        }
+        updateJumpVisibility();
+      });
+
+      // Initial state — empty log is "near the bottom" so
+      // the button stays hidden until the first reply.
+      updateJumpVisibility();
+    }
   });
 })();

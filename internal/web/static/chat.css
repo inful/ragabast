@@ -66,3 +66,24 @@ pre.chat-msg {
 .htmx-request.htmx-indicator {
   display: inline-block;
 }
+
+/* Jump-to-latest button (issue #88): pinned to the
+ * bottom-right corner of the chat-log container so it stays
+ * visible as the log scrolls. Hidden by default — chat.js
+ * toggles the .is-visible class on when the user has
+ * scrolled away from the bottom of the log. The container
+ * uses `position: relative` (set on .chat-log above) so
+ * `position: absolute` here pins the button to the
+ * container's bottom-right, not the viewport. */
+.jump-to-latest {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  display: none;
+}
+
+.jump-to-latest.is-visible {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}

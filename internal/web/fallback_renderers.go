@@ -304,6 +304,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 		<div class="content" id="chat-messages-placeholder">
 			<p class="has-text-grey">No messages yet.</p>
 		</div>
+		<button id="jump-to-latest" class="button is-small jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
 	</div>
 
 	<div class="box">
