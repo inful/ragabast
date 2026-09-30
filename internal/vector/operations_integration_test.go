@@ -187,3 +187,56 @@ func TestVectorOperations_IngestDocument_NoSearchIndexIsGraceful(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, dbCount)
 }
+
+// TestVectorOperations_IngestDocument_PropagatesFilePath pins the
+// fix for the "reference links show the UUID" complaint: when a
+// parent document has FilePath set, IngestDocument mirrors that
+// path onto every chunk so search results can render a friendly
+// filename in DisplayLabel. The mirror happens in operations.go
+// next to the other Document→Chunk field assignments; if a
+// future refactor drops it, this test fails.
+func TestVectorOperations_IngestDocument_PropagatesFilePath(t *testing.T) {
+	t.Parallel()
+
+	vo, db, _ := fixtureVO(t)
+	vo.embeddings = stubEmbeddings(t)
+
+	doc := testDoc(t, "doc-1", "alpha", "kubernetes")
+	doc.FilePath = "/var/docs/adr-001.md"
+	// The testDoc helper leaves the chunk's DocumentFilePath
+	// empty so the mirror is exercised on the empty branch.
+	doc.Chunks[0].DocumentFilePath = ""
+
+	require.NoError(t, vo.IngestDocument(context.Background(), doc))
+
+	// Look the chunk up directly and confirm the mirror ran.
+	restored, err := db.GetChunk(context.Background(), doc.Chunks[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, restored)
+	assert.Equal(t, "/var/docs/adr-001.md", restored.DocumentFilePath,
+		"IngestDocument must mirror Document.FilePath onto every chunk")
+}
+
+// TestVectorOperations_IngestDocument_PreservesChunkFilePath pins
+// the precedence rule: a chunk that already carries a file path
+// keeps it; the parent document's FilePath only fills in blanks.
+// Useful for future chunkers that might slice one document across
+// several files.
+func TestVectorOperations_IngestDocument_PreservesChunkFilePath(t *testing.T) {
+	t.Parallel()
+
+	vo, db, _ := fixtureVO(t)
+	vo.embeddings = stubEmbeddings(t)
+
+	doc := testDoc(t, "doc-1", "alpha", "kubernetes")
+	doc.FilePath = "/var/docs/parent.md"
+	doc.Chunks[0].DocumentFilePath = "/var/docs/child.md"
+
+	require.NoError(t, vo.IngestDocument(context.Background(), doc))
+
+	restored, err := db.GetChunk(context.Background(), doc.Chunks[0].ID)
+	require.NoError(t, err)
+	require.NotNil(t, restored)
+	assert.Equal(t, "/var/docs/child.md", restored.DocumentFilePath,
+		"a chunk's own DocumentFilePath wins over the parent document's FilePath")
+}

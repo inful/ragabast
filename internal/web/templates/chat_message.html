@@ -14,6 +14,12 @@
     when that field is empty, we fall back to the
     document_id chip so the user can still see what was
     cited.
+
+    The source label comes from SearchResult.DisplayLabel,
+    which prefers title → filename (basename without
+    extension) → document_id. Using the helper keeps the
+    fallback chain in sync with the inline-link text in
+    service.InlineSourceLinks.
 -->
 
 <div hx-swap-oob="delete" id="chat-messages-placeholder"></div>
@@ -35,7 +41,7 @@
     <ol class="mt-2">
         {{ range .Sources }}
         <li>
-            {{ if .DocumentTitle }}{{ .DocumentTitle }}{{ else }}{{ .DocumentID }}{{ end }}
+            {{ .DisplayLabel }}
             ({{ if .DocbuilderURL }}
                 <a href="{{ .DocbuilderURL }}" target="_blank" rel="noopener">direct link</a>
             {{ else }}

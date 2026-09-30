@@ -636,6 +636,7 @@ func (db *VectorDB) Search(ctx context.Context, queryEmbedding []float32, limit 
 			Similarity:         result.Similarity,
 			Fingerprint:        result.Metadata["fingerprint"],
 			UID:                result.Metadata["uid"],
+			DocumentFilePath:   result.Metadata["document_file_path"],
 		}
 		// Document-level timestamps for date-range filtering
 		// (#38). parseRFC3339 returns the zero time on a

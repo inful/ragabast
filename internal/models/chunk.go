@@ -65,6 +65,14 @@ type Chunk struct {
 
 	// DocumentUpdatedAt is the parent document update time.
 	DocumentUpdatedAt time.Time `bson:"document_updated_at" json:"document_updated_at"`
+
+	// DocumentFilePath mirrors the parent document's FilePath so
+	// search results can show a friendly filename when the
+	// document has no title. Empty when the document was
+	// ingested before this field existed, or when no path was
+	// known (e.g. "web_upload" placeholder). Persisted under
+	// the "document_file_path" metadata key.
+	DocumentFilePath string `bson:"document_file_path" json:"document_file_path,omitempty"`
 }
 
 // NewChunk creates a new chunk with default values.
@@ -145,4 +153,11 @@ type SearchResult struct {
 	// keep working.
 	DocumentCreatedAt *time.Time `json:"document_created_at,omitempty"`
 	DocumentUpdatedAt *time.Time `json:"document_updated_at,omitempty"`
+
+	// DocumentFilePath is the parent document's FilePath,
+	// used by DisplayLabel as a fallback when a cited
+	// source has no DocumentTitle. Empty for chunks ingested
+	// before the field was added; callers must tolerate the
+	// empty value.
+	DocumentFilePath string `json:"document_file_path,omitempty"`
 }

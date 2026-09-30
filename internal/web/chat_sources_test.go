@@ -117,3 +117,44 @@ func TestHandleChatMessage_NoSources_OmitsPanel(t *testing.T) {
 	require.NotContains(t, strings.ToLower(body), "source",
 		"a sources panel must not appear when Results is empty")
 }
+
+// TestHandleChatMessage_SourcesShowFilenameFallback pins the
+// fix for the "reference links show the UUID" complaint: a
+// source with no DocumentTitle but a known file path renders
+// the basename (without extension) in the chat sources panel.
+// Previously the UI fell back to the document_id, which is
+// unreadable.
+func TestHandleChatMessage_SourcesShowFilenameFallback(t *testing.T) {
+	cfg := config.DefaultConfig()
+	svc := &fakeService{
+		queryAnswer: "Here is what I found.",
+		queryDebug: &service.QueryDebugInfo{
+			Results: []models.SearchResult{
+				{
+					ChunkID:          "c1",
+					DocumentID:       "doc-1",
+					DocumentFilePath: "/var/docs/adr-001.md",
+					UID:              "adr-001",
+					Similarity:       0.91,
+					// no DocbuilderURL — exercises the URL-free
+					// branch of the template too
+				},
+			},
+		},
+	}
+	s := NewServer(cfg, svc)
+
+	form := "message=what+does+adr-001+say"
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/chat/message", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// The friendly filename must appear in the rendered panel.
+	require.Contains(t, body, "adr-001",
+		"a source with no title must surface its filename (basename without extension)")
+}

@@ -163,3 +163,46 @@ func TestHandleSearchSubmit_EmptyQuery_RendersNotification(t *testing.T) {
 		"empty-query response must contain a user-readable error")
 	require.Empty(t, svc.lastSearchQuery, "an empty query must not reach the service")
 }
+
+// TestHandleSearchSubmit_RendersFilenameFallback pins the fix for
+// the "search results show the UUID" complaint: a result with no
+// DocumentTitle but with a known file path renders the basename
+// (without extension) as the heading. The template uses
+// SearchResult.DisplayLabel so the fallback chain matches the
+// inline-link text in service.InlineSourceLinks.
+func TestHandleSearchSubmit_RendersFilenameFallback(t *testing.T) {
+	chdirToRepoRoot(t)
+	cfg := config.DefaultConfig()
+	svc := &fakeService{
+		searchResults: []models.SearchResult{
+			{
+				ChunkID:          "c1",
+				DocumentID:       "doc-1",
+				DocumentFilePath: "/var/docs/adr-001.md",
+				HeaderPath:       "Introduction",
+				Level:            1,
+				Content:          "ragabast is a RAG service",
+				Similarity:       0.87,
+			},
+		},
+	}
+	s := NewServer(cfg, svc)
+
+	form := url.Values{}
+	form.Set("query", "what is ragabast")
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/search", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	require.NotPanics(t, func() {
+		s.router.ServeHTTP(w, req)
+	})
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// The friendly filename must appear as the result heading.
+	require.Contains(t, body, "adr-001",
+		"a result with no title must show the filename (basename without extension) as the heading")
+}

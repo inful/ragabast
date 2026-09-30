@@ -49,6 +49,14 @@ func chunkToMetadata(chunkID string, chunk *models.Chunk) map[string]string {
 	if chunk.ParentID != "" {
 		meta["parent_id"] = chunk.ParentID
 	}
+	if chunk.DocumentFilePath != "" {
+		// Used by SearchResult.DisplayLabel as the friendly
+		// fallback when a cited document has no title. Empty
+		// for documents ingested before this field existed —
+		// the metadata stays lean and the caller treats the
+		// empty DocumentFilePath as "no path known".
+		meta["document_file_path"] = chunk.DocumentFilePath
+	}
 	return meta
 }
 
@@ -88,6 +96,7 @@ func metadataToChunk(meta map[string]string, content string) *models.Chunk {
 		DocumentCategories: splitNonEmptyLines(meta["document_categories"]),
 		DocumentCreatedAt:  parseRFC3339(meta["document_created_at"]),
 		DocumentUpdatedAt:  parseRFC3339(meta["document_updated_at"]),
+		DocumentFilePath:   meta["document_file_path"],
 	}
 }
 

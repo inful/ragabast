@@ -68,9 +68,12 @@ func TestInlineSourceLinks_NoURLEmitsBareTitle(t *testing.T) {
 }
 
 // TestInlineSourceLinks_NoTitleFallsBackToDocumentID pins the
-// case where the source has no DocumentTitle: we use the
-// DocumentID as the link text so the user still sees
-// *something* identifying.
+// legacy fallback chain: when neither title nor file_path is
+// available, the link text falls back to DocumentID. This is the
+// pre-fix behavior for documents that were ingested before
+// file_path was tracked — the legacy chunks carry no
+// document_file_path metadata, so DisplayLabel skips the
+// filename stage and lands on DocumentID.
 func TestInlineSourceLinks_NoTitleFallsBackToDocumentID(t *testing.T) {
 	sources := []models.SearchResult{
 		{
@@ -82,7 +85,28 @@ func TestInlineSourceLinks_NoTitleFallsBackToDocumentID(t *testing.T) {
 	require.Equal(t,
 		"See [doc-42](https://docs.example.com/_uid/doc-42/).",
 		got,
-		"no title must fall back to DocumentID for the link text")
+		"no title and no file_path must fall back to DocumentID for the link text")
+}
+
+// TestInlineSourceLinks_NoTitleFallsBackToFilename pins the fix:
+// a source with no DocumentTitle but with a known file path shows
+// the basename (without extension) so the user sees a friendly
+// filename instead of the UUID. The file_path is propagated from
+// the parent document through the chunk metadata; this test
+// exercises the SearchResult path end-to-end.
+func TestInlineSourceLinks_NoTitleFallsBackToFilename(t *testing.T) {
+	sources := []models.SearchResult{
+		{
+			DocumentID:       "doc-42",
+			DocumentFilePath: "/var/docs/adr-001.md",
+			DocbuilderURL:    "https://docs.example.com/_uid/doc-42/",
+		},
+	}
+	got := InlineSourceLinks("See [src:0].", sources)
+	require.Equal(t,
+		"See [adr-001](https://docs.example.com/_uid/doc-42/).",
+		got,
+		"no title must fall back to the file's basename (without extension)")
 }
 
 // TestInlineSourceLinks_OutOfBoundsLeavesMarker pins the case

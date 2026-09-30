@@ -107,6 +107,15 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 		if chunks[i].DocumentUpdatedAt.IsZero() {
 			chunks[i].DocumentUpdatedAt = doc.UpdatedAt
 		}
+		// Mirror the parent document's file path so search
+		// results can show a friendly filename when the doc
+		// has no title. Empty doc.FilePath (e.g. web upload
+		// that the parser never tied to a disk location) is
+		// left alone — DisplayLabel falls through to the
+		// document_id in that case.
+		if chunks[i].DocumentFilePath == "" {
+			chunks[i].DocumentFilePath = doc.FilePath
+		}
 	}
 
 	embeddings, err := vo.embeddings.GenerateChunkEmbeddings(ctx, chunks)

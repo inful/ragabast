@@ -31,6 +31,7 @@ func TestChunkToMetadata_AllOptionalFieldsPopulated(t *testing.T) {
 		Fingerprint:        "fp-1",
 		UID:                "uid-1",
 		ParentID:           "parent-1",
+		DocumentFilePath:   "/var/docs/setup.md",
 	}
 
 	meta := chunkToMetadata(chunk.ID, chunk)
@@ -50,6 +51,7 @@ func TestChunkToMetadata_AllOptionalFieldsPopulated(t *testing.T) {
 	require.Equal(t, "fp-1", meta["fingerprint"])
 	require.Equal(t, "uid-1", meta["uid"])
 	require.Equal(t, "parent-1", meta["parent_id"])
+	require.Equal(t, "/var/docs/setup.md", meta["document_file_path"])
 }
 
 // TestChunkToMetadata_OmitsEmptyOptionalFields ensures the
@@ -72,6 +74,7 @@ func TestChunkToMetadata_OmitsEmptyOptionalFields(t *testing.T) {
 	_, hasFP := meta["fingerprint"]
 	_, hasUID := meta["uid"]
 	_, hasParent := meta["parent_id"]
+	_, hasFilePath := meta["document_file_path"]
 
 	require.False(t, hasURLs, "empty URLs should not produce a metadata entry")
 	require.False(t, hasTags, "empty tags should not produce a metadata entry")
@@ -81,6 +84,7 @@ func TestChunkToMetadata_OmitsEmptyOptionalFields(t *testing.T) {
 	require.False(t, hasFP, "empty fingerprint should not produce a metadata entry")
 	require.False(t, hasUID, "empty UID should not produce a metadata entry")
 	require.False(t, hasParent, "empty ParentID should not produce a metadata entry")
+	require.False(t, hasFilePath, "empty DocumentFilePath should not produce a metadata entry")
 }
 
 // TestMetadataToChunk_RoundTrips pins that the metadata→chunk
@@ -107,6 +111,7 @@ func TestMetadataToChunk_RoundTrips(t *testing.T) {
 		Fingerprint:        "fp-1",
 		UID:                "uid-1",
 		ParentID:           "parent-1",
+		DocumentFilePath:   "/var/docs/setup.md",
 	}
 
 	meta := chunkToMetadata(original.ID, original)
@@ -128,4 +133,5 @@ func TestMetadataToChunk_RoundTrips(t *testing.T) {
 	require.Equal(t, original.Fingerprint, restored.Fingerprint)
 	require.Equal(t, original.UID, restored.UID)
 	require.Equal(t, original.ParentID, restored.ParentID)
+	require.Equal(t, original.DocumentFilePath, restored.DocumentFilePath)
 }

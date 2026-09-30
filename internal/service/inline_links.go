@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"regexp"
-	"strings"
 
 	"github.com/ragabast/internal/models"
 )
@@ -23,10 +22,10 @@ var sourceMarkerRegex = regexp.MustCompile(`\[src:(\d+)\]`)
 
 // InlineSourceLinks replaces each [src:N] marker in the LLM's
 // reply with a markdown link to the Nth source. The link text is
-// the source's DocumentTitle (falling back to DocumentID if no
-// title), and the link target is the source's DocbuilderURL
-// (falling back to the first DocumentURLs entry, or bare text if
-// no URL is configured).
+// the source's DisplayLabel (title → filename → document_id), and
+// the link target is the source's DocbuilderURL (falling back to
+// the first DocumentURLs entry, or bare text if no URL is
+// configured).
 //
 // Index out of range: the marker is left in place (e.g. "[src:7]")
 // so the user (and any future debugging) sees what the model tried
@@ -74,14 +73,14 @@ func InlineSourceLinks(answer string, sources []models.SearchResult) string {
 }
 
 // sourceLinkText returns the human-readable label to use as the
-// link text for a cited source. Falls back to the document_id
-// when no title is set so the user still sees *something*
-// identifying.
+// link text for a cited source. Delegates to SearchResult.DisplayLabel,
+// which falls back through title → filename (basename without
+// extension) → document_id so the user always sees something
+// identifying. The filename fallback matters for documents that
+// have no H1 (so no title) but were ingested from disk — the
+// on-disk name is more useful than the UUID.
 func sourceLinkText(s models.SearchResult) string {
-	if t := strings.TrimSpace(s.DocumentTitle); t != "" {
-		return t
-	}
-	return s.DocumentID
+	return s.DisplayLabel()
 }
 
 // sourceLinkURL returns the URL to link to for a cited source.

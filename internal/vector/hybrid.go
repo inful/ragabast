@@ -332,6 +332,7 @@ func chunkToSearchResult(chunk *models.Chunk, score float32) models.SearchResult
 		Similarity:         score,
 		Fingerprint:        chunk.Fingerprint,
 		UID:                chunk.UID,
+		DocumentFilePath:   chunk.DocumentFilePath,
 	}
 }
 
