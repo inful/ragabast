@@ -1004,6 +1004,11 @@ func (db *VectorDB) GetUniqueDocumentsPaged(ctx context.Context, limit, offset i
 				info.UpdatedAt = updated
 			}
 		}
+		if info.FilePath == "" {
+			if fp := result.Metadata["document_file_path"]; fp != "" {
+				info.FilePath = fp
+			}
+		}
 
 		info.ChunkCount++
 		docMap[docID] = info

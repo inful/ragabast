@@ -310,6 +310,10 @@ func tagsFromMap(data any) []string {
 // docsRowsFromMap adapts the []models.DocumentInfo slice that
 // handleDocumentsPage passes through into the strongly-typed
 // documentsFallbackRow slice that the fallback template expects.
+// DisplayLabel is computed here (via models.DocumentInfo.DisplayLabel)
+// so the template stays presentation-only; the same fallback chain
+// powers chat sources and search results.
+//
 // Every field that flows into the page is HTML-escaped by
 // html/template at render time; this helper only changes types.
 func docsRowsFromMap(data any) []documentsFallbackRow {
@@ -324,11 +328,12 @@ func docsRowsFromMap(data any) []documentsFallbackRow {
 	out := make([]documentsFallbackRow, 0, len(raw))
 	for _, item := range raw {
 		out = append(out, documentsFallbackRow{
-			Title:    item.Title,
-			ID:       item.ID,
-			Tags:     item.Tags,
-			Category: firstOrEmpty(item.Categories),
-			Chunks:   item.ChunkCount,
+			DisplayLabel: item.DisplayLabel(),
+			Title:        item.Title,
+			ID:           item.ID,
+			Tags:         item.Tags,
+			Category:     firstOrEmpty(item.Categories),
+			Chunks:       item.ChunkCount,
 		})
 	}
 	return out

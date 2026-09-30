@@ -33,6 +33,7 @@ func TestVectorDB_GetUniqueDocuments_PopulatesMetadata(t *testing.T) {
 			DocumentCategories: []string{"c1"},
 			DocumentCreatedAt:  createdAt,
 			DocumentUpdatedAt:  updatedAt,
+			DocumentFilePath:   "/var/docs/setup.md",
 		},
 		{
 			ID:            "chunk-2",
@@ -63,4 +64,6 @@ func TestVectorDB_GetUniqueDocuments_PopulatesMetadata(t *testing.T) {
 	require.Equal(t, createdAt, docs[0].CreatedAt)
 	require.Equal(t, updatedAt, docs[0].UpdatedAt)
 	require.Equal(t, 2, docs[0].ChunkCount)
+	require.Equal(t, "/var/docs/setup.md", docs[0].FilePath,
+		"GetUniqueDocuments must surface DocumentFilePath so /documents can fall back to the filename when no title is set")
 }

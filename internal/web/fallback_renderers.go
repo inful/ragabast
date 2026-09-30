@@ -128,12 +128,17 @@ type documentsFallbackData struct {
 }
 
 // documentsFallbackRow is one row of the documents table.
+// DisplayLabel is the resolved title (title → filename → id) so
+// the template can show a friendly identifier even when the
+// parent document has no H1; computed by the handler that builds
+// the row so the template stays presentation-only.
 type documentsFallbackRow struct {
-	Title    string
-	ID       string
-	Tags     []string
-	Category string
-	Chunks   int
+	DisplayLabel string
+	Title        string
+	ID           string
+	Tags         []string
+	Category     string
+	Chunks       int
 }
 
 // newFallbackTemplates parses every fallback template body.
@@ -387,7 +392,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
         <tbody>
         {{ range .Documents }}
             <tr>
-                <td>{{ .Title }}</td>
+                <td>{{ .DisplayLabel }}</td>
                 <td><code>{{ .ID }}</code></td>
                 <td>{{ .Tags }}</td>
                 <td>{{ .Category }}</td>

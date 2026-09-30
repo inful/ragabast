@@ -2,6 +2,7 @@ package models
 
 import (
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,6 +119,12 @@ type DocumentInfo struct {
 	Tags        []string `json:"tags"`
 	Categories  []string `json:"categories"`
 	URLs        []string `json:"urls"`
+	// FilePath is the on-disk path the parent document was
+	// ingested from, mirrored from the chunk metadata so the
+	// /documents page can fall back to the filename when a
+	// document has no title. Empty for documents ingested
+	// before this field was added.
+	FilePath string `json:"file_path,omitempty"`
 	// DocbuilderURL is the synthetic permalink derived from
 	// ragabast.docbuilder_base_url + UID, populated by the
 	// service layer. Empty when the base URL is not configured.
@@ -125,4 +132,27 @@ type DocumentInfo struct {
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	ChunkCount    int       `json:"chunk_count"`
+}
+
+// DisplayLabel returns the human-readable label for the document.
+// The preference order mirrors SearchResult.DisplayLabel:
+//
+//  1. Title (set from the parent document's H1 by the parser)
+//  2. FilenameFromPath(FilePath) (the basename without its
+//     extension — the on-disk filename the operator recognizes)
+//  3. UID (the existing fallback, the user-defined unique id)
+//
+// Sharing the same fallback chain across chat sources,
+// /search results, and /documents means a future change to the
+// label logic only has to be made in one place.
+func (d DocumentInfo) DisplayLabel() string {
+	if t := strings.TrimSpace(d.Title); t != "" {
+		return t
+	}
+	if path := strings.TrimSpace(d.FilePath); path != "" {
+		if name := FilenameFromPath(path); name != "" {
+			return name
+		}
+	}
+	return d.UID
 }

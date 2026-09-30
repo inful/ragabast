@@ -124,3 +124,28 @@ func TestSearchResult_DisplayLabel_WhitespaceFilename(t *testing.T) {
 	}
 	require.Equal(t, "doc-1", s.DisplayLabel())
 }
+
+// TestDocumentInfo_DisplayLabel_TitleWins mirrors the SearchResult
+// test for the /documents list page. Title still wins.
+func TestDocumentInfo_DisplayLabel_TitleWins(t *testing.T) {
+	d := DocumentInfo{Title: "ADR 001", UID: "adr-001", FilePath: "/var/docs/adr-001.md"}
+	require.Equal(t, "ADR 001", d.DisplayLabel())
+}
+
+// TestDocumentInfo_DisplayLabel_FallsBackToFilename pins the fix
+// for issue #84: when /documents surfaces a doc with no title,
+// the row must show the filename (basename without extension),
+// not the opaque UID.
+func TestDocumentInfo_DisplayLabel_FallsBackToFilename(t *testing.T) {
+	d := DocumentInfo{UID: "doc-without-title", FilePath: "/tmp/data/documents/untitled-ramble.md"}
+	require.Equal(t, "untitled-ramble", d.DisplayLabel())
+}
+
+// TestDocumentInfo_DisplayLabel_FallsBackToID pins the legacy
+// behavior preserved when neither title nor file_path is set —
+// that's the case for chunks written before file_path was added
+// to the chunk metadata.
+func TestDocumentInfo_DisplayLabel_FallsBackToID(t *testing.T) {
+	d := DocumentInfo{UID: "legacy-doc"}
+	require.Equal(t, "legacy-doc", d.DisplayLabel())
+}

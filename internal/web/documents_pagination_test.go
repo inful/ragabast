@@ -106,3 +106,34 @@ func docsForPagination(n int) []models.DocumentInfo {
 	}
 	return out
 }
+
+// TestDocumentsPage_NoTitleShowsFilenameFallback pins the fix
+// for issue #84: a document with no Title and a known FilePath
+// must surface the filename (basename without extension) as the
+// row's title cell. Before the fix, /documents left the cell
+// empty, which looked like a render bug. After the fix, the
+// /documents template uses DocumentInfo.DisplayLabel which
+// shares the title → filename → id chain used by chat sources
+// and search results.
+func TestDocumentsPage_NoTitleShowsFilenameFallback(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Paths.TemplatesDir = "" // force the unsafe fallback path
+	s := NewServer(cfg, &fakeService{documents: []models.DocumentInfo{
+		{ID: "doc-without-title", UID: "doc-without-title", FilePath: "/tmp/data/documents/untitled-ramble.md"},
+	}})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/documents", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	require.Contains(t, body, "untitled-ramble",
+		"a doc with no Title must show its filename (basename without extension) in the row")
+	// Pin the row shape (Title cell populated, ID code present)
+	// so a regression in the template (e.g. switching back to
+	// {{ .Title }} which is empty here) shows up immediately.
+	// We use a regex because html/template keeps the source
+	// whitespace between adjacent {{ }} interpolations.
+	require.Regexp(t, `<td>\s*untitled-ramble\s*</td>\s*<td><code>\s*doc-without-title\s*</code>`,
+		body, "the no-title fallback must populate the Title cell next to the ID chip")
+}
