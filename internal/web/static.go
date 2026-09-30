@@ -53,11 +53,17 @@ var staticFS embed.FS
 //     Extracted from a former inline <style>
 //     block so the strict CSP (no
 //     'unsafe-inline') applies.
+//   - chat-dark.css — issue #94: dark-mode override for the
+//     chat UI. Loaded on every page that renders
+//     the navbar so the toggle button (which
+//     lives in the navbar) works regardless of
+//     which page the operator is on.
 //   - chat.js       — wires the chat form's loading-state UX
 //     via htmx event listeners. Replaces the
 //     former hx-on::* attributes, which would
 //     fail under the strict CSP because htmx
 //     processes them with eval()/Function().
+//     Also wires the dark-mode toggle.
 //   - login.css     — page-specific styles for the OAuth login
 //     chooser. Extracted from a former inline
 //     <style> block in templates/login.html.
@@ -69,6 +75,9 @@ var staticAssets = map[string]staticAsset{
 		contentType: "application/javascript; charset=utf-8",
 	},
 	"chat.css": {
+		contentType: "text/css; charset=utf-8",
+	},
+	"chat-dark.css": {
 		contentType: "text/css; charset=utf-8",
 	},
 	"chat.js": {

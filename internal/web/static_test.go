@@ -695,6 +695,7 @@ func TestLoginTemplate_NoInlineStyle(t *testing.T) {
 func TestStaticAssets_AllowListIsExact(t *testing.T) {
 	expected := []string{
 		"bulma.min.css",
+		"chat-dark.css",
 		"chat.css",
 		"chat.js",
 		"htmx.min.js",
