@@ -205,7 +205,7 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     extra_files:
-      - THIRD_PARTY_LICENSES.md:/usr/share/doc/ragabast/THIRD_PARTY_LICENSES.md
+      - THIRD_PARTY_LICENSES.md
     labels:
       org.opencontainers.image.title: ragabast
       org.opencontainers.image.description: >-

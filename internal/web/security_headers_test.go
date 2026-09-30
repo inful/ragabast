@@ -34,6 +34,10 @@ import (
 // (Bulma); bundling those assets lets the CSP drop those
 // origins entirely, which is strictly more secure.
 //
+// The Huma-rendered /docs page is the single carve-out (see
+// TestSecurityHeaders_DocsPageAllowsUnpkg): it has to whitelist
+// unpkg.com so Stoplight Elements can load.
+//
 // Adding a new third-party origin means updating this
 // middleware AND adding SRI hashes to the <link>/<script> tag
 // in the template that loads it.
@@ -60,11 +64,43 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	// script-src and style-src must be 'self' only — Bulma
 	// and htmx ship embedded via go:embed. Any third-party
 	// origin in the CSP is a regression against the bundled
-	// asset contract.
+	// asset contract. The single /docs carve-out is tested
+	// separately in TestSecurityHeaders_DocsPageAllowsUnpkg.
 	require.NotContains(t, csp, "https://unpkg.com",
-		"CSP must not whitelist unpkg.com (htmx is now embedded)")
+		"CSP must not whitelist unpkg.com for app routes (htmx is now embedded)")
 	require.NotContains(t, csp, "cdn.jsdelivr.net",
-		"CSP must not whitelist cdn.jsdelivr.net (Bulma is now embedded)")
+		"CSP must not whitelist cdn.jsdelivr.net for app routes (Bulma is now embedded)")
+}
+
+// TestSecurityHeaders_DocsPageAllowsUnpkg pins the one carve-
+// out in the strict CSP: the Huma-rendered /docs OpenAPI
+// viewer embeds Stoplight Elements via <link> + <script> tags
+// pointing at unpkg.com (with an SRI hash pinned by Huma).
+// Without unpkg.com in script-src / style-src the developer
+// docs page renders blank.
+//
+// /docs does not render any user input — Huma serves a fixed
+// template populated with the server-generated OpenAPI doc —
+// so the wider trusted-script-origin set is bounded to a
+// known surface. Per-route CSP applies via a path-prefix
+// check in securityHeadersMiddleware.
+func TestSecurityHeaders_DocsPageAllowsUnpkg(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeHumaService{}) // healthy CheckHealth by default
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/docs", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	csp := w.Header().Get("Content-Security-Policy")
+	require.Contains(t, csp, "https://unpkg.com",
+		"/docs CSP must whitelist unpkg.com so Stoplight Elements can load")
+	require.Contains(t, csp, "default-src 'self'",
+		"even the docs carve-out keeps the rest of the policy strict")
+	require.Contains(t, csp, "frame-ancestors 'none'",
+		"docs page must still be clickjack-protected")
 }
 
 // TestSecurityHeaders_AppliedToAPIRoutes confirms the
@@ -83,6 +119,15 @@ func TestSecurityHeaders_AppliedToAPIRoutes(t *testing.T) {
 	require.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
 	require.Equal(t, "no-referrer", w.Header().Get("Referrer-Policy"))
 	require.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
+
+	// API endpoints stay on the strict CSP — only the
+	// /docs HTML page gets the unpkg.com carve-out. JSON
+	// responses don't execute script so they have no need
+	// for a more permissive policy.
+	require.NotContains(t, w.Header().Get("Content-Security-Policy"), "https://unpkg.com",
+		"/api/* must use the strict CSP, not the docs carve-out")
+	require.NotContains(t, w.Header().Get("Content-Security-Policy"), "cdn.jsdelivr.net",
+		"/api/* must use the strict CSP, not the docs carve-out")
 }
 
 // TestMaxBytesReader_RejectsOversizedBody pins the body-size
