@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -275,6 +276,147 @@ func TestApplyEnvOverrides_DefaultsSurviveResolvePath(t *testing.T) {
 		"DefaultConfig's data_dir must survive ApplyEnvOverrides untouched")
 	require.Equal(t, vecDirBefore, before.VectorDB.PersistenceDir,
 		"DefaultConfig's persistence_dir must survive ApplyEnvOverrides untouched")
+}
+
+// TestApplyEnvOverrides_DataDirMovesPersistenceDir pins the
+// deployment-footgun fix: when DATA_DIR is set explicitly
+// (env or YAML) and vectordb.persistence_dir is at its
+// DefaultConfig value (cwd-relative), the persistence dir
+// must be re-derived to live under DATA_DIR. Otherwise the
+// operator's "DATA_DIR is where data goes" mental model is
+// broken — the chromem-go vector DB would land at
+// <cwd>/data/vectors which on a distroless container is
+// /home/nonroot/data/vectors, outside any mounted PVC.
+//
+// The equality check vs DefaultConfig()'s persistence dir
+// is the gate: an explicit VECTOR_DB_DIR override must win
+// over the derivation (TestApplyEnvOverrides_ExplicitVECTOR_DB_DIR_BeatsDerivation
+// pins that). The fix is a re-derivation when the field is
+// still at the original default.
+func TestApplyEnvOverrides_DataDirMovesPersistenceDir(t *testing.T) {
+	wd, _ := os.Getwd()
+	defaultPersistenceDir := filepath.Join(wd, "data", "vectors")
+
+	cases := []struct {
+		name    string
+		dataDir string
+	}{
+		{"absolute", "/var/lib/ragabast"},
+		{"tilde", "~/ragabast-data"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("HOME", tmp)
+			t.Setenv("USERPROFILE", tmp)
+			t.Setenv("DATA_DIR", tc.dataDir)
+			t.Setenv("VECTOR_DB_DIR", "")
+
+			cfg := DefaultConfig()
+			cfg.ApplyEnvOverrides()
+
+			// ApplyEnvOverrides tilde-expands DataDir on the
+			// way in (the prior commit), so the post-call
+			// value is the expanded absolute path, not the
+			// literal "~/" that came in. Compute what we
+			// expect the field to hold.
+			expectedDataDir := tc.dataDir
+			if strings.HasPrefix(tc.dataDir, "~/") {
+				expectedDataDir = filepath.Join(tmp, tc.dataDir[2:])
+			} else if tc.dataDir == "~" {
+				expectedDataDir = tmp
+			}
+			require.Equal(t, expectedDataDir, cfg.Paths.DataDir,
+				"DATA_DIR=%q must expand to %q through ApplyEnvOverrides", tc.dataDir, expectedDataDir)
+
+			require.NotEqual(t, defaultPersistenceDir, cfg.VectorDB.PersistenceDir,
+				"persistence_dir must NOT stay at the cwd-relative default (%q) when DATA_DIR is set — that's the deployment bug",
+				defaultPersistenceDir)
+
+			expected := filepath.Join(expectedDataDir, "vectors")
+			require.Equal(t, expected, cfg.VectorDB.PersistenceDir,
+				"persistence_dir must be re-derived to <DATA_DIR>/vectors when DATA_DIR is set")
+		})
+	}
+}
+
+// TestApplyEnvOverrides_ExplicitVECTOR_DB_DIR_BeatsDerivation
+// pins the "explicit wins" half of the contract: an operator
+// who sets VECTOR_DB_DIR explicitly must NOT have their value
+// silently rewritten to <DATA_DIR>/vectors. The derivation
+// only fires when persistence_dir is still at the original
+// cwd-relative default.
+func TestApplyEnvOverrides_ExplicitVECTOR_DB_DIR_BeatsDerivation(t *testing.T) {
+	wd, _ := os.Getwd()
+	defaultPersistenceDir := filepath.Join(wd, "data", "vectors")
+
+	cfg := DefaultConfig()
+	require.Equal(t, defaultPersistenceDir, cfg.VectorDB.PersistenceDir,
+		"sanity: DefaultConfig() must set PersistenceDir to the cwd-relative default so the test below has a meaningful 'still at default' state")
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("DATA_DIR", "/var/lib/ragabast")
+	t.Setenv("VECTOR_DB_DIR", "/elsewhere/chromem")
+
+	cfg.ApplyEnvOverrides()
+
+	require.Equal(t, "/elsewhere/chromem", cfg.VectorDB.PersistenceDir,
+		"explicit VECTOR_DB_DIR must win over the DATA_DIR-based derivation")
+}
+
+// TestApplyEnvOverrides_NoDataDir_KeepsCwdRelativeDefault
+// pins the "do no harm" half: when DATA_DIR is NOT set,
+// persistence_dir stays at the cwd-relative default. We
+// don't want to migrate existing single-binary installs
+// (running on a workstation with no env overrides) onto the
+// new path-derivation code path.
+func TestApplyEnvOverrides_NoDataDir_KeepsCwdRelativeDefault(t *testing.T) {
+	wd, _ := os.Getwd()
+	defaultDataDir := filepath.Join(wd, "data")
+	defaultPersistenceDir := filepath.Join(wd, "data", "vectors")
+
+	cfg := DefaultConfig()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("DATA_DIR", "")
+	t.Setenv("VECTOR_DB_DIR", "")
+
+	cfg.ApplyEnvOverrides()
+
+	require.Equal(t, defaultDataDir, cfg.Paths.DataDir,
+		"DATA_DIR empty must leave the cwd-relative default untouched")
+	require.Equal(t, defaultPersistenceDir, cfg.VectorDB.PersistenceDir,
+		"persistence_dir must stay at the cwd-relative default when DATA_DIR is empty")
+}
+
+// TestApplyEnvOverrides_DataDirInYAML_DerivesPersistenceDir
+// pins the YAML counterpart of the env-var test. Setting
+// data_dir in YAML must trigger the same re-derivation of
+// persistence_dir as setting DATA_DIR in the environment;
+// both go through ApplyEnvOverrides after yaml.Unmarshal
+// has populated the field, so the test only needs to
+// exercise ApplyEnvOverrides with the field already set.
+func TestApplyEnvOverrides_DataDirInYAML_DerivesPersistenceDir(t *testing.T) {
+	wd, _ := os.Getwd()
+	defaultPersistenceDir := filepath.Join(wd, "data", "vectors")
+
+	cfg := DefaultConfig()
+	cfg.Paths.DataDir = "/var/lib/ragabast"
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("USERPROFILE", t.TempDir())
+	t.Setenv("DATA_DIR", "")
+	t.Setenv("VECTOR_DB_DIR", "")
+
+	cfg.ApplyEnvOverrides()
+
+	require.Equal(t, "/var/lib/ragabast", cfg.Paths.DataDir,
+		"paths.data_dir set in YAML must survive ApplyEnvOverrides")
+	require.Equal(t, "/var/lib/ragabast/vectors", cfg.VectorDB.PersistenceDir,
+		"persistence_dir must be re-derived when paths.data_dir is set in YAML")
+	require.NotEqual(t, defaultPersistenceDir, cfg.VectorDB.PersistenceDir,
+		"persistence_dir must NOT stay at the cwd-relative default when paths.data_dir is set in YAML")
 }
 
 // TestLoadConfig_DataDirTildeInYAML pins that a leading "~/"

@@ -62,7 +62,7 @@ YAML to find the knob they need.
 
 | Env var | YAML key | Default | Description |
 |---|---|---|---|
-| `VECTOR_DB_DIR` | `persistence_dir` | `<cwd>/data/vectors` | On-disk chromem-go directory. Changing requires re-ingest. |
+| `VECTOR_DB_DIR` | `persistence_dir` | `<cwd>/data/vectors` (or `<DATA_DIR>/vectors` if `DATA_DIR` is set) | On-disk chromem-go directory. Changing requires re-ingest. |
 | `VECTOR_DB_KEYWORD_INDEX_DIR` | `keyword_index_dir` | `""` (→ `<persistence_dir>/search`) | bleve keyword index path. Override when persistence is on NFS. |
 | `VECTOR_DB_COLLECTION` | `collection_name` | `ragabast` | chromem-go collection name. |
 | `VECTOR_DB_DIMENSION` | `embedding_dimension` | `768` | Embedding vector size. Must match the truncated dimension if `OLLAMA_EMBEDDING_DIMENSIONS > 0`. |
@@ -111,8 +111,16 @@ YAML to find the knob they need.
 
 | Env var | YAML key | Default | Description |
 |---|---|---|---|
-| `DATA_DIR` | `data_dir` | `<cwd>/data` | Root for all on-disk data. |
+| `DATA_DIR` | `data_dir` | `<cwd>/data` | Root for all on-disk data. When set, also re-derives `vectordb.persistence_dir` (see below). |
 | `TEMPLATES_DIR` | `templates_dir` | `""` (→ embedded templates) | Override the HTML template set without rebuilding. |
+
+##### `DATA_DIR` re-derives `vectordb.persistence_dir`
+
+When `DATA_DIR` is set explicitly (env var or YAML) and `vectordb.persistence_dir` is still at its `DefaultConfig()` value (the cwd-relative `<cwd>/data/vectors`), the persistence dir is re-derived to `<DATA_DIR>/vectors` during config load. The "explicit wins" half: an explicit `VECTOR_DB_DIR` or `vectordb.persistence_dir:` value is preserved verbatim — the derivation only fires when the persistence dir is still at its original default.
+
+The rationale is a deployment footgun: on a workstation install the cwd-relative default lands at `<project>/data/vectors`, which is fine. On a containerized install the published image has `WORKDIR=/home/nonroot` (the distroless `nonroot` variant), so the default lands at `/home/nonroot/data/vectors` — outside any PVC the operator mounted at `/data`. Setting `DATA_DIR=/data` alone, with the PVC at `/data`, was previously insufficient: the chromem-go vector DB kept writing to `/home/nonroot/data/vectors` and was wiped on every pod restart. The re-derivation closes the gap.
+
+The keyword index (`vectordb.keyword_index_dir`) follows automatically: when empty it falls back to `<vectordb.persistence_dir>/search`, so re-derived persistence_dir carries the bleve index along with it. The async ingest queue (`server.async_ingest_queue_dir`) is independent — it stays empty (async ingest disabled) until the operator opts in.
 
 ##### Tilde expansion on path fields
 

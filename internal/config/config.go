@@ -1029,6 +1029,14 @@ func (c *Config) SaveConfig(path string) error {
 
 // ApplyEnvOverrides applies environment variable overrides to config fields.
 func (c *Config) ApplyEnvOverrides() {
+	// Capture the cwd-relative default for VectorDB.PersistenceDir
+	// so the DATA_DIR re-derivation step at the end of this
+	// method can tell the operator's explicit VECTOR_DB_DIR
+	// override apart from the DefaultConfig() default.
+	// See the long comment on the derivation block below for
+	// the deployment bug this gates against.
+	defaultPersistenceDir := c.VectorDB.PersistenceDir
+
 	// Ragabast config.
 	if v := os.Getenv("RAGABAST_DOCBUILDER_BASE_URL"); v != "" {
 		c.Ragabast.DocbuilderBaseURL = v
@@ -1310,6 +1318,39 @@ func (c *Config) ApplyEnvOverrides() {
 	c.VectorDB.PersistenceDir = resolvePath(c.VectorDB.PersistenceDir)
 	c.VectorDB.KeywordIndexDir = resolvePath(c.VectorDB.KeywordIndexDir)
 	c.Server.AsyncIngestQueueDir = resolvePath(c.Server.AsyncIngestQueueDir)
+
+	// DATA_DIR re-derivation for vectordb.persistence_dir.
+	//
+	// Why: DefaultConfig sets VectorDB.PersistenceDir to
+	// <filepath>.Join(wd, "data", "vectors")</filepath>. That
+	// default is cwd-relative. On a workstation install where
+	// the operator runs `./ragabast serve` from a project
+	// directory, the default lands at <project>/data/vectors
+	// — fine. On a containerized install, the published
+	// distroless image has WORKDIR=/home/nonroot (the
+	// `nonroot` variant), so the default lands at
+	// /home/nonroot/data/vectors — outside any PVC the
+	// operator mounted at /data. The operator's mental
+	// model is "DATA_DIR is where data goes", so they set
+	// DATA_DIR=/data and the PVC to /data, but the vector DB
+	// still ends up in /home/nonroot/data/vectors and is
+	// wiped on every pod restart.
+	//
+	// The fix: when DATA_DIR is set (env or YAML) and the
+	// persistence_dir field is still at the cwd-relative
+	// default (the equality check against defaultPersistenceDir
+	// captured at the top of this method), re-derive it to
+	// <DataDir>/vectors. An explicit VECTOR_DB_DIR override
+	// moves PersistenceDir away from the default, fails the
+	// equality check, and is preserved verbatim — the
+	// operator's explicit choice always wins.
+	//
+	// This is the deployment-footgun fix; TestApplyEnvOverrides_DataDirMovesPersistenceDir
+	// and TestApplyEnvOverrides_ExplicitVECTOR_DB_DIR_BeatsDerivation
+	// pin both halves of the contract.
+	if c.Paths.DataDir != "" && c.VectorDB.PersistenceDir == defaultPersistenceDir {
+		c.VectorDB.PersistenceDir = filepath.Join(c.Paths.DataDir, "vectors")
+	}
 }
 
 // validateDocbuilderBaseURL checks that the configured
