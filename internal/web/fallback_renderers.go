@@ -298,7 +298,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 <body class="container mt-4">
 	{{ template "header" .Header }}
 	<h1 class="title">Chat</h1>
-	<p class="subtitle">Ask questions against the ingested documents.</p>
+	<p class="subtitle">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
 
 	<div id="chat-messages" class="box chat-log">
 		<div class="content" id="chat-messages-placeholder">
