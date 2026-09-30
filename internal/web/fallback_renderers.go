@@ -343,6 +343,9 @@ const ingestFallbackBody = `<!DOCTYPE html>
 <head>
     <title>{{ .Title }}</title>
     <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/chat.css">
+    <link rel="stylesheet" href="/static/chat-dark.css">
+    <script src="/static/chat.js" defer></script>
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
@@ -381,6 +384,9 @@ const ingestSuccessFallbackBody = `<!DOCTYPE html>
 <head>
     <title>{{ .Title }}</title>
     <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/chat.css">
+    <link rel="stylesheet" href="/static/chat-dark.css">
+    <script src="/static/chat.js" defer></script>
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
@@ -415,6 +421,10 @@ const documentsFallbackBody = `<!DOCTYPE html>
 <head>
     <title>{{ .Title }}</title>
     <link rel="stylesheet" href="/static/bulma.min.css">
+    <link rel="stylesheet" href="/static/chat.css">
+    <link rel="stylesheet" href="/static/chat-dark.css">
+    <script src="/static/htmx.min.js" defer></script>
+    <script src="/static/chat.js" defer></script>
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
