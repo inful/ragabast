@@ -1,0 +1,78 @@
+/* chat-dark.css — dark-mode override for the ragabast web UI.
+ *
+ * Why this exists: the bundled Bulma is 0.x (no native dark
+ * theme via data-theme). Upgrading Bulma to 1.x is a much
+ * larger surface change — every Bulma class we'd want to
+ * restyle ships new colors in 1.x. Until then, this file
+ * carries the smallest viable dark surface so operators who
+ * run ragabast in long sessions (or on OLED screens) have an
+ * opt-in dark theme.
+ *
+ * Scoping: every rule is gated by [data-theme="dark"] so the
+ * default light theme is unaffected. JS toggles data-theme on
+ * <html> (chat.js #theme-toggle click handler) and persists the
+ * choice in localStorage.
+ *
+ * Coverage is intentionally minimal — just the highest-impact
+ * surfaces (page background, text, boxes, navbar, chat-log). A
+ * future contributor can extend this file as needed; the tests
+ * in static_dark_theme_test.go pin the contract that the file
+ * exists and scopes correctly.
+ */
+
+[data-theme="dark"] {
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] body {
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .box {
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .navbar {
+  background-color: #2a2a2a !important;
+  border-bottom: 1px solid #3a3a3a;
+}
+
+[data-theme="dark"] .navbar-item,
+[data-theme="dark"] .navbar-end .navbar-item {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .input,
+[data-theme="dark"] .textarea,
+[data-theme="dark"] .select select {
+  background-color: #1a1a1a;
+  color: #e0e0e0;
+  border-color: #3a3a3a;
+}
+
+[data-theme="dark"] .chat-log {
+  background-color: #232323;
+}
+
+[data-theme="dark"] .chat-msg {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .subtitle,
+[data-theme="dark"] .has-text-grey {
+  color: #a0a0a0 !important;
+}
+
+[data-theme="dark"] code {
+  background-color: #2a2a2a;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .notification.is-danger {
+  background-color: #4a1a1a;
+  color: #ffe0e0;
+}

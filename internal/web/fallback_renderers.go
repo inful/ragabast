@@ -225,8 +225,9 @@ const pageHeaderFallbackBody = `
       <a class="navbar-item" href="/documents">Documents</a>
       <a class="navbar-item" href="/ingest">Ingest</a>
     </div>
-    {{- if .AuthEnabled }}
     <div class="navbar-end">
+      <button id="theme-toggle" class="button is-small is-light" type="button" aria-label="Toggle dark mode">Dark mode</button>
+      {{- if .AuthEnabled }}
       {{- if .SignedIn }}
       <span class="navbar-item has-text-grey">{{ .DisplayName }}</span>
       <div class="navbar-item">
@@ -238,8 +239,8 @@ const pageHeaderFallbackBody = `
       {{- else if .ShowSignIn }}
       <a class="navbar-item" href="{{ .SignInURL }}">Sign in</a>
       {{- end }}
+      {{- end }}
     </div>
-    {{- end }}
   </div>
 </nav>
 {{- end -}}
@@ -292,6 +293,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<meta name="htmx-config" content='{"allowEval":false}'>
 	<link rel="stylesheet" href="/static/bulma.min.css">
 	<link rel="stylesheet" href="/static/chat.css">
+	<link rel="stylesheet" href="/static/chat-dark.css">
 	<script src="/static/htmx.min.js" defer></script>
 	<script src="/static/chat.js" defer></script>
 </head>
