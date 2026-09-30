@@ -301,9 +301,9 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<h1 class="title">Chat</h1>
 	<p class="subtitle">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
 
-	<div id="chat-messages" class="box chat-log">
+	<div id="chat-messages" class="box chat-log" role="log" aria-live="polite" aria-label="Chat transcript">
 		<div class="content" id="chat-messages-placeholder">
-			<p class="has-text-grey">No messages yet.</p>
+			<p class="has-text-grey">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
 		</div>
 		<button id="jump-to-latest" class="button is-small jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
 	</div>

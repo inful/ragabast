@@ -32,7 +32,18 @@
 
 <div hx-swap-oob="delete" id="chat-messages-placeholder"></div>
 
-<div class="content">
+<!--
+    One chat turn wraps the user question and the assistant
+    reply in a single .chat-turn container so multi-turn
+    sessions are easy to scan. The <hr> divider sits
+    between turns, not within one — a 1px subtle line that
+    gives the eye an anchor without competing with the
+    message boxes. Aria: the wrapper carries no role of its
+    own; the role="log" + aria-live="polite" on the parent
+    #chat-messages container (in fallback_renderers.go)
+    handles screen-reader announcements.
+-->
+<div class="content chat-turn">
     <div class="box">
         <p class="has-text-weight-semibold">You</p>
         <pre class="chat-msg">{{ .User }}</pre>
@@ -60,3 +71,4 @@
         {{ end }}
     </div>
 </div>
+<hr class="chat-turn-divider">

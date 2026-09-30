@@ -21,10 +21,18 @@
 
 /* Chat log box — capped height so the page doesn't grow
  * unbounded as messages accumulate; vertical scroll for
- * overflow. */
+ * overflow.
+ *
+ * position: relative is the anchor for .jump-to-latest
+ * below: the button is `position: absolute` and would
+ * otherwise pin to the initial containing block (the
+ * viewport) and follow the user down the page. Pinning
+ * to the chat-log container keeps it visually attached
+ * to the message list. */
 .chat-log {
   max-height: 60vh;
   overflow-y: auto;
+  position: relative;
 }
 
 /* Chat message rows. The word-break rules prevent a single
@@ -114,4 +122,22 @@ pre.chat-msg {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+}
+
+/* Chat turn divider (issue #89 follow-on): a 1px subtle
+ * horizontal rule between conversation turns. The visual
+ * weight is intentionally light — the message boxes are
+ * the primary reading units; the divider just gives the
+ * eye an anchor when scanning a long session. margin-block
+ * keeps the rhythm consistent with Bulma's default box
+ * spacing. */
+.chat-turn-divider {
+  border: 0;
+  border-top: 1px solid hsl(0 0% 86%);
+  margin-block: 1.25rem;
+  margin-inline: 0;
+}
+
+[data-theme="dark"] .chat-turn-divider {
+  border-top-color: hsl(0 0% 22%);
 }
