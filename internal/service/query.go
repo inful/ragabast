@@ -3,10 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
 	"maps"
 	"strings"
-	"sync"
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service/querycache"
@@ -141,45 +139,16 @@ const (
 	ModeKeyword  = vector.ModeKeyword
 )
 
-// deprecatedChatOnce guards the warning so it fires at most
-// once per method name across the whole process. Without this
-// the log would spam on every request. Adding a new chat-mode
-// method? Just call warnDeprecated with the method name.
-var deprecatedChatOnce sync.Map // map[string]*sync.Once
-
-// resetDeprecatedForTest clears the per-method deprecation
-// log-once state. Test-only: lets the deprecation test run
-// repeatedly within the same process (e.g. `go test -count=N`)
-// without the second-and-later runs silently passing because
-// the warning already fired.
-func resetDeprecatedForTest() {
-	deprecatedChatOnce.Range(func(k, _ any) bool {
-		deprecatedChatOnce.Delete(k)
-		return true
-	})
-}
-
-// warnDeprecated logs a one-shot deprecation notice pointing at
-// the find-docs replacement. It does not change behavior; the
-// deprecated method still runs. The notice is a soft nudge.
-func warnDeprecated(method string) {
-	v, _ := deprecatedChatOnce.LoadOrStore(method, &sync.Once{})
-	once := v.(*sync.Once)
-	once.Do(func() {
-		log.Printf("DEPRECATED: Service.%s synthesizes an LLM answer; ragabast's primary mode is now find-docs, prefer Service.Search with filters and Service.FindDocuments. This method will be removed in a future release.", method)
-	})
-}
-
 // Query performs a search and generates a natural language response using LLM.
 //
-// Deprecated: ragabast's primary mode is "point users to the right
-// documentation page". Prefer Service.Search (with filters) or
-// Service.FindDocuments for ranked document hits, and ask the
-// LLM to synthesize only when you really need prose. The chat-mode
-// surface remains available but will be removed in a future
-// release; a one-shot runtime warning fires on first use.
+// The README documents Service.Search + Service.FindDocuments
+// as the find-docs replacement, but FindDocuments is not yet
+// implemented and the chat handler still calls this method on
+// every POST /chat/message. Issue #89 used to emit a one-shot
+// runtime deprecation here; that warning was removed because it
+// pointed at a method that did not exist, which made the message
+// misleading. Re-add a deprecation once FindDocuments lands.
 func (s *Service) Query(ctx context.Context, query string, limit int) (string, error) {
-	warnDeprecated("Query")
 	response, _, err := s.QueryDebugWithOptions(ctx, query, limit, LLMOptions{})
 	return response, err
 }
@@ -187,9 +156,8 @@ func (s *Service) Query(ctx context.Context, query string, limit int) (string, e
 // QueryDebugWithOptions performs a search and generates a response, returning
 // debug information about the retrieved chunks and constructed prompt.
 //
-// Deprecated: see Service.Query.
+// See the note on Service.Query about the deprecation timeline.
 func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts LLMOptions) (string, *QueryDebugInfo, error) {
-	warnDeprecated("QueryDebugWithOptions")
 	results, err := s.vectorOps.Search(ctx, query, limit, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("search failed: %w", err)
