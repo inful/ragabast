@@ -1151,6 +1151,9 @@ func (c *Config) ApplyEnvOverrides() {
 	if dir := os.Getenv("VECTOR_DB_DIR"); dir != "" {
 		c.VectorDB.PersistenceDir = dir
 	}
+	if dir := os.Getenv("VECTOR_DB_KEYWORD_INDEX_DIR"); dir != "" {
+		c.VectorDB.KeywordIndexDir = dir
+	}
 	if coll := os.Getenv("VECTOR_DB_COLLECTION"); coll != "" {
 		c.VectorDB.CollectionName = coll
 	}
@@ -1267,6 +1270,46 @@ func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv("AUTH_DEFAULT_PROVIDER_NAME"); v != "" {
 		c.Auth.DefaultProviderName = v
 	}
+
+	// Tilde expansion for path fields.
+	//
+	// resolvePath() expands a leading "~/" or "~" to the user's
+	// home directory. We already apply it to the config FILE
+	// path inside LoadConfig (the argument to --config /
+	// LoadConfig) so `ragabast --config ~/.ragabast.yml`
+	// works without shell tilde expansion. The path FIELDS
+	// inside the config (paths.data_dir,
+	// paths.templates_dir, vectordb.persistence_dir,
+	// vectordb.keyword_index_dir,
+	// server.async_ingest_queue_dir) used to be stored
+	// verbatim regardless of source, so `data_dir: ~/data` in
+	// YAML or `DATA_DIR=~/data` in the environment produced a
+	// literal "~/data" string that failed downstream the
+	// moment the OS tried to open it.
+	//
+	// We normalize every path field here, after YAML + env
+	// merge, so:
+	//
+	//   - YAML values like `data_dir: ~/data` get expanded.
+	//   - Env-var values like `DATA_DIR=~/data` get expanded
+	//     the same way (ApplyEnvOverrides reads the env
+	//     directly, then this block normalizes).
+	//   - Absolute paths (`/var/lib/ragabast`) and relative
+	//     paths (`data/sub`) pass through unchanged.
+	//   - Empty strings stay empty — empty is the "use the
+	//     default" signal for every path field and must not
+	//     silently turn into the user's home directory.
+	//
+	// resolvePath itself is safe-by-default: if HOME /
+	// USERPROFILE lookup fails for any reason, it returns the
+	// input unchanged, so a missing home dir surfaces as a
+	// downstream "no such file" error rather than a mangled
+	// path.
+	c.Paths.DataDir = resolvePath(c.Paths.DataDir)
+	c.Paths.TemplatesDir = resolvePath(c.Paths.TemplatesDir)
+	c.VectorDB.PersistenceDir = resolvePath(c.VectorDB.PersistenceDir)
+	c.VectorDB.KeywordIndexDir = resolvePath(c.VectorDB.KeywordIndexDir)
+	c.Server.AsyncIngestQueueDir = resolvePath(c.Server.AsyncIngestQueueDir)
 }
 
 // validateDocbuilderBaseURL checks that the configured

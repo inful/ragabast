@@ -114,6 +114,19 @@ YAML to find the knob they need.
 | `DATA_DIR` | `data_dir` | `<cwd>/data` | Root for all on-disk data. |
 | `TEMPLATES_DIR` | `templates_dir` | `""` (→ embedded templates) | Override the HTML template set without rebuilding. |
 
+##### Tilde expansion on path fields
+
+Path fields (`paths.data_dir`, `paths.templates_dir`, `vectordb.persistence_dir`, `vectordb.keyword_index_dir`, `server.async_ingest_queue_dir`) all support a leading `~/` or `~` regardless of whether the value arrives via YAML or env var. The expansion happens in `internal/config/config.go` after the YAML+env merge so:
+
+```yaml
+paths:
+  data_dir: ~/ragabast/data       # expanded to $HOME/ragabast/data
+vectordb:
+  persistence_dir: ~/vectors    # expanded to $HOME/vectors
+```
+
+is equivalent to `DATA_DIR=$HOME/ragabast/data` / `VECTOR_DB_DIR=$HOME/vectors`. The rule is the same one already in place for the `--config` path (`ragabast --config ~/.ragabast.yml` works without shell tilde expansion); the change makes every other path field behave the same way. Absolute paths (`/var/lib/ragabast/data`) and relative paths (`data/sub`) pass through unchanged; empty values stay empty (the "use the default" signal).
+
 #### `ragabast` — presentation / linking / caching
 
 | Env var | YAML key | Default | Description |
