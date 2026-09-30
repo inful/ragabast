@@ -192,7 +192,9 @@ Every response, regardless of route, carries:
 - `X-Content-Type-Options: nosniff`
 - `Referrer-Policy: no-referrer`
 - `X-Frame-Options: DENY`
-- `Content-Security-Policy: default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`
+- `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`
+
+> Note: the CSP is strictly self-hosted. Bulma (CSS) and htmx (JS) ship inside the binary at `internal/web/static/` and are served from `/static/*`; no third-party CDN is reachable for page chrome. The historical build whitelisted `https://unpkg.com` and `https://cdn.jsdelivr.net` for those libraries — bundling them removed the requirement.
 - `Strict-Transport-Security: max-age=63072000; includeSubDomains`
 
 Every request body is capped at 10 MiB (Huma endpoints use Huma's own

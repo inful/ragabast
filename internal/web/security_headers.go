@@ -28,14 +28,18 @@ import (
 //     Belt-and-suspenders clickjacking protection even
 //     though the CSP also forbids framing via frame-ancestors.
 //   - Content-Security-Policy
-//     default-src 'self'; script-src 'self' https://unpkg.com;
-//     style-src 'self' https://cdn.jsdelivr.net;
+//     default-src 'self'; script-src 'self'; style-src 'self';
 //     img-src 'self' data:; frame-ancestors 'none';
 //     base-uri 'self'; form-action 'self'.
-//     The two third-party origins are exactly the CDN URLs
-//     the templates load Bulma (css) and htmx (js) from. Adding
-//     a new external origin means updating this CSP AND
-//     adding an SRI hash to the <link>/<script> tag.
+//     Strictly self-hosted: Bulma (CSS) and htmx (JS) ship
+//     inside the binary via go:embed and are served from
+//     /static/*. The historical build whitelisted
+//     https://unpkg.com (htmx) and https://cdn.jsdelivr.net
+//     (Bulma); bundling those assets lets the CSP drop
+//     those origins entirely, which is strictly more
+//     secure. Adding a new external origin means updating
+//     this CSP AND adding an SRI hash to the <link>/<script>
+//     tag in the template that loads it.
 //   - Strict-Transport-Security: max-age=63072000; includeSubDomains
 //     Sent on every response. Browsers only act on HSTS over
 //     HTTPS, so the header is a no-op when serving cleartext;
@@ -64,6 +68,11 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 // reference the exact policy string and any future contributor
 // can grep for it.
 //
+// The policy is strictly self-hosted: Bulma (CSS) and htmx
+// (JS) ship inside the binary via go:embed and are served
+// from /static/*. No external host needs to be reachable for
+// the page chrome to load.
+//
 // Adding a new external origin requires:
 //  1. Updating this constant to allow the origin in the
 //     relevant directive.
@@ -72,8 +81,8 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 //     loads it. Without SRI, a CDN compromise runs arbitrary
 //     JS in the operator's origin.
 const cspValue = "default-src 'self'; " +
-	"script-src 'self' https://unpkg.com; " +
-	"style-src 'self' https://cdn.jsdelivr.net; " +
+	"script-src 'self'; " +
+	"style-src 'self'; " +
 	"img-src 'self' data:; " +
 	"frame-ancestors 'none'; " +
 	"base-uri 'self'; " +

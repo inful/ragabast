@@ -14,6 +14,15 @@ FROM gcr.io/distroless/static-debian12:nonroot
 # linux/arm64/ragabast, etc.
 ARG TARGETARCH
 COPY linux/${TARGETARCH}/ragabast /usr/local/bin/ragabast
+# Bulma (MIT) and htmx (BSD-2-Clause) are embedded in the
+# binary via go:embed; their license texts must ship with
+# every redistribution to satisfy the upstream terms. BSD-2
+# specifically requires the copyright notice in "the
+# documentation and/or other materials provided with the
+# distribution" — for a Docker image the standard location
+# is /usr/share/doc/<package>/, which downstream scanners
+# (e.g. syft, grype) also pick up automatically.
+COPY THIRD_PARTY_LICENSES.md /usr/share/doc/ragabast/THIRD_PARTY_LICENSES.md
 
 USER nonroot:nonroot
 ENTRYPOINT ["/usr/local/bin/ragabast"]

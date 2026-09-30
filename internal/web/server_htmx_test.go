@@ -98,6 +98,8 @@ func TestHandleSearchSubmit_HTMX_ReturnsFragment(t *testing.T) {
 	require.NotContains(t, body, `<!DOCTYPE html>`,
 		"POST /search must not return a full HTML page; htmx swaps the response into #search-results")
 	require.NotContains(t, body, `<script src="https://unpkg.com/htmx.org`,
+		"the fragment must not load htmx from a third-party CDN — htmx is now embedded and the GET response already loaded it from /static/")
+	require.NotContains(t, body, `<script src="/static/htmx.min.js"`,
 		"the fragment must not load htmx a second time — that's already in the GET response")
 	require.NotContains(t, body, `<form method="post"`,
 		"the fragment must not contain a second form; htmx swaps into an existing one")

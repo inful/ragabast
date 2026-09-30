@@ -244,8 +244,8 @@ const chatFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
 	<title>{{ .Title }}</title>
-	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
-	<script src="https://unpkg.com/htmx.org@1.9.10"></script>
+	<link rel="stylesheet" href="/static/bulma.min.css">
+	<script src="/static/htmx.min.js"></script>
 	<style>
 		.chat-log { max-height: 60vh; overflow-y: auto; }
 		.chat-msg { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
@@ -297,7 +297,7 @@ const ingestFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <link rel="stylesheet" href="/static/bulma.min.css">
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
@@ -330,7 +330,7 @@ const ingestSuccessFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <link rel="stylesheet" href="/static/bulma.min.css">
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
@@ -357,7 +357,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <link rel="stylesheet" href="/static/bulma.min.css">
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}

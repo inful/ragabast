@@ -26,8 +26,6 @@ import (
 // stand-in. It accepts the redirect URI we hand it, then issues a
 // deterministic user identity that the test can read back through
 // the userInfo struct.
-//
-//nolint:unparam // wantRedirect is parameterized so future tests can drive multiple redirect targets
 func fakeGitHubServer(t *testing.T, wantRedirect string, user fakeUser) *httptest.Server {
 	t.Helper()
 

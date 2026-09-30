@@ -679,7 +679,7 @@ Every response carries the defense headers below:
 | `X-Content-Type-Options` | `nosniff` |
 | `Referrer-Policy` | `no-referrer` |
 | `X-Frame-Options` | `DENY` |
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
 | `Strict-Transport-Security` | `max-age=63072000; includeSubDomains` |
 
 Every request is also bounded:

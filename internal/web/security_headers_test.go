@@ -21,15 +21,22 @@ import (
 //   - X-Content-Type-Options: nosniff — blocks browser MIME sniffing
 //   - Referrer-Policy: no-referrer — never leaks the URL bar
 //   - X-Frame-Options: DENY — blocks clickjacking
-//   - Content-Security-Policy: default-src 'self'; script-src 'self'
-//     https://unpkg.com; style-src 'self' https://cdn.jsdelivr.net
+//   - Content-Security-Policy: default-src 'self'; script-src 'self';
+//     style-src 'self' — fully self-hosted; no third-party CDN
 //   - Strict-Transport-Security — sent when ListenAndServeTLS is
 //     in use; tested by the dedicated HSTS test
 //
-// The CSP allows only the third-party CDNs the chat and search
-// pages actually load Bulma + htmx from. Adding new third-party
-// origins means updating this middleware AND adding SRI hashes
-// to the <link>/<script> tags in the templates.
+// The CSP ships strictly self-hosted because Bulma (CSS) and
+// htmx (JS) are embedded in the binary via go:embed and served
+// from /static/*, so the browser never reaches an external
+// origin for chrome assets. The historical build whitelisted
+// https://unpkg.com (htmx) and https://cdn.jsdelivr.net
+// (Bulma); bundling those assets lets the CSP drop those
+// origins entirely, which is strictly more secure.
+//
+// Adding a new third-party origin means updating this
+// middleware AND adding SRI hashes to the <link>/<script> tag
+// in the template that loads it.
 func TestSecurityHeadersMiddleware(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
@@ -50,8 +57,14 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	require.Contains(t, csp, "default-src 'self'")
 	require.Contains(t, csp, "frame-ancestors 'none'")
 	require.Contains(t, csp, "base-uri 'self'")
-	require.Contains(t, csp, "https://unpkg.com")
-	require.Contains(t, csp, "https://cdn.jsdelivr.net")
+	// script-src and style-src must be 'self' only — Bulma
+	// and htmx ship embedded via go:embed. Any third-party
+	// origin in the CSP is a regression against the bundled
+	// asset contract.
+	require.NotContains(t, csp, "https://unpkg.com",
+		"CSP must not whitelist unpkg.com (htmx is now embedded)")
+	require.NotContains(t, csp, "cdn.jsdelivr.net",
+		"CSP must not whitelist cdn.jsdelivr.net (Bulma is now embedded)")
 }
 
 // TestSecurityHeaders_AppliedToAPIRoutes confirms the
