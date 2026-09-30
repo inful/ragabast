@@ -96,6 +96,7 @@ YAML to find the knob they need.
 |---|---|---|---|
 | `AUTH_SESSION_TTL` | `session_ttl` | `12h` | Max age of a session cookie. Sliding renewal on every authenticated request. `0` disables expiry (sessions live until restart). |
 | `AUTH_COOKIE_NAME` | `cookie_name` | `ragabast_session` | Session-cookie name. Set distinct names when running multiple ragabast instances behind the same host. |
+| `AUTH_DEFAULT_PROVIDER_NAME` | `default_provider_name` | `""` | Pin the auth surface to a single provider. When set, the chooser never renders, `/auth/login` auto-redirects to the named provider, and requests to other provider URLs return 404. Must match the `name:` field of an entry in `auth.providers`. Empty = historical chooser behavior. |
 | `AUTH_PROVIDERS_JSON` | `providers` | `[]` | JSON array of OAuth providers. See `plans/oauth.md` for the schema. |
 
 #### `processing` — chunking
@@ -330,6 +331,18 @@ auth:
   # request). Default 12h. Set to 0 to disable expiry.
   session_ttl: 12h
   cookie_name: ragabast_session    # default
+
+  # Optional: pin the auth surface to a single provider when
+  # multiple are configured. With this set, the chooser never
+  # renders, /auth/login auto-redirects to the named provider,
+  # and requests to other provider URLs return 404. Useful
+  # for multi-tenant deployments where each instance is pinned
+  # to one IdP, or when an operator wants to enforce "all
+  # sign-ins use this provider" without exposing the others.
+  # Must match the `name:` field of an entry in providers below.
+  # Empty (default) = historical chooser behavior.
+  default_provider_name: ""           # e.g. "company-gitlab"
+
   providers:
     - name: company-gitlab
       type: gitlab
@@ -356,6 +369,43 @@ The IdP must be configured with the callback URL
 `https://<your-ragabast>/auth/<name>/callback` and the matching scopes.
 See [`plans/oauth.md`](plans/oauth.md) for per-provider setup recipes
 (client registration, scopes, callback URLs).
+
+#### Pinning a single provider with `default_provider_name`
+
+When you set `auth.default_provider_name` to one of the
+configured provider names, ragabast treats that as the
+*only* provider. Concretely:
+
+- The login chooser never renders — `/auth/login` is a
+  straight 302 redirect to `/auth/<default>/login`.
+- `handleProviderLogin` and `handleProviderCallback` still
+  respond for the default's URL, so the flow works exactly
+  as before.
+- Requests to non-default provider URLs (`/auth/github/login`
+  when `default_provider_name: "company-gitlab"`) return
+  `404 Not Found` from the standard "unknown provider"
+  handler — the chooser-side route never reaches the
+  provider map.
+
+This is the right shape for:
+
+- **Multi-tenant deployments** where each ragabast instance
+  is pinned to one IdP — the operator configures all
+  providers in one YAML for source-of-truth reasons, then
+  pins per-instance via `default_provider_name`.
+- **Enforced single sign-in path** — no user can sneak
+  around the pinned IdP by typing `/auth/<other>/login`
+  directly; only the default is registered.
+
+Validation is strict: `default_provider_name` must match a
+configured provider's `name:` field exactly. Mismatches
+fail `Config.Validate()` at `ragabast serve` startup with
+an error that lists the available provider names, so a typo
+surfaces immediately rather than silently producing a
+"every auth route 404s" runtime state.
+
+Set via `auth.default_provider_name` (env
+`AUTH_DEFAULT_PROVIDER_NAME`).
 
 #### Behind a reverse proxy (Traefik / nginx / cloud L7 LB)
 

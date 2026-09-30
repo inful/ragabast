@@ -290,6 +290,22 @@ auth:
   # collide. Env: AUTH_COOKIE_NAME.
   cookie_name: ragabast_session
 
+  # Optional: pin the auth surface to a single provider
+  # when multiple are configured. Set this to the `name:`
+  # field of one entry in `providers:` below; the chooser
+  # never renders, /auth/login auto-redirects to the
+  # named provider, and requests to non-default provider
+  # URLs return 404. Useful for multi-tenant deployments
+  # where each instance is pinned to one IdP, or when an
+  # operator wants to enforce "all sign-ins use this
+  # provider" without exposing the others.
+  # Must match a configured `name:` exactly — mismatches
+  # fail Validate() at startup with a list of available
+  # providers. Empty (default) = historical chooser
+  # behavior.
+  # Env: AUTH_DEFAULT_PROVIDER_NAME.
+  default_provider_name: ""
+
   # Identity providers. Each entry enables one sign-in
   # button on /auth/login. Listed below is one example
   # of each supported type — uncomment what you need.

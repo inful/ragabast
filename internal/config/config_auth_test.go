@@ -20,6 +20,8 @@ func TestAuthConfig_DefaultsAreEmpty(t *testing.T) {
 	assert.Empty(t, cfg.Auth.Providers)
 	assert.Equal(t, time.Duration(0), cfg.Auth.SessionTTL)
 	assert.Empty(t, cfg.Auth.CookieName)
+	assert.Empty(t, cfg.Auth.DefaultProviderName,
+		"default_provider_name must default to empty so single-provider installs don't accidentally pin")
 }
 
 func TestOAuthProvider_ValidateRequiresName(t *testing.T) {
@@ -292,6 +294,86 @@ func TestConfig_ApplyEnvOverrides_AuthCookieName(t *testing.T) {
 	cfg.ApplyEnvOverrides()
 
 	assert.Equal(t, "custom_session", cfg.Auth.CookieName)
+}
+
+// TestConfig_ApplyEnvOverrides_AuthDefaultProviderName pins the
+// env-var wiring: AUTH_DEFAULT_PROVIDER_NAME populates
+// AuthConfig.DefaultProviderName. Without this override the
+// default stays empty, which is the historical behavior.
+func TestConfig_ApplyEnvOverrides_AuthDefaultProviderName(t *testing.T) {
+	t.Setenv("AUTH_DEFAULT_PROVIDER_NAME", "work-gitlab")
+
+	cfg := DefaultConfig()
+	cfg.ApplyEnvOverrides()
+
+	assert.Equal(t, "work-gitlab", cfg.Auth.DefaultProviderName)
+}
+
+// TestValidate_DefaultProviderNameMatchesConfiguredProvider
+// pins the happy path: setting default_provider_name to a
+// real provider name passes Validate. The server picks the
+// named provider up at startup via newOAuthHandlers.
+func TestValidate_DefaultProviderNameMatchesConfiguredProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Auth.Providers = []OAuthProvider{
+		{Name: "github", Type: "github", ClientID: "id", ClientSecret: "sec"},
+		{Name: "work-gitlab", Type: "gitlab", ClientID: "id2", ClientSecret: "sec2", BaseURL: "https://gitlab.work"},
+	}
+	cfg.Auth.DefaultProviderName = "work-gitlab"
+
+	assert.NoError(t, cfg.Validate())
+}
+
+// TestValidate_DefaultProviderNameDoesNotMatchConfiguredProvider
+// pins the failure mode: setting default_provider_name to a
+// typo (or a stale name from a removed provider) fails
+// Validate with an error that names the available providers
+// so the operator can fix it without grepping their config.
+func TestValidate_DefaultProviderNameDoesNotMatchConfiguredProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Auth.Providers = []OAuthProvider{
+		{Name: "github", Type: "github", ClientID: "id", ClientSecret: "sec"},
+		{Name: "work-gitlab", Type: "gitlab", ClientID: "id2", ClientSecret: "sec2", BaseURL: "https://gitlab.work"},
+	}
+	cfg.Auth.DefaultProviderName = "work-glitlab" // note the typo
+
+	require.Error(t, cfg.Validate())
+	errMsg := cfg.Validate().Error()
+	assert.Contains(t, errMsg, "work-glitlab",
+		"error must name the bad default so the operator sees what they typo'd")
+	assert.Contains(t, errMsg, "available",
+		"error must point at the available providers list")
+	assert.Contains(t, errMsg, "github",
+		"error must list at least one of the valid providers")
+}
+
+// TestValidate_DefaultProviderNameButNoProviders pins the
+// edge case: setting default without configuring any
+// providers fails with a clear message. Without this guard,
+// newOAuthHandlers would silently produce an empty providers
+// map and every auth route would 404.
+func TestValidate_DefaultProviderNameButNoProviders(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Auth.Providers = nil
+	cfg.Auth.DefaultProviderName = "anything"
+
+	require.Error(t, cfg.Validate())
+	assert.Contains(t, cfg.Validate().Error(), "no providers are configured")
+}
+
+// TestValidate_DefaultProviderNameEmptyIsOK pins the historical
+// behavior: empty default means "no pin, show the chooser if
+// multiple providers, auto-redirect if one". Multi-provider
+// installs with no default still pass Validate.
+func TestValidate_DefaultProviderNameEmptyIsOK(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Auth.Providers = []OAuthProvider{
+		{Name: "github", Type: "github", ClientID: "id", ClientSecret: "sec"},
+		{Name: "work-gitlab", Type: "gitlab", ClientID: "id2", ClientSecret: "sec2", BaseURL: "https://gitlab.work"},
+	}
+	cfg.Auth.DefaultProviderName = ""
+
+	assert.NoError(t, cfg.Validate())
 }
 
 // TestOAuthProvider_RedirectURL pins the redirect-URL derivation:

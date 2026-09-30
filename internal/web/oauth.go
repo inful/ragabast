@@ -187,12 +187,47 @@ type oauthHandlers struct {
 func newOAuthHandlers(cfg *config.Config, serverBase string, sessions *sessionStore) (*oauthHandlers, error) {
 	auth := &cfg.Auth
 
+	// If DefaultProviderName is set, restrict the auth surface
+	// to that one provider. The other entries in
+	// auth.Providers stay validated (so a typo in client_id
+	// still surfaces as a startup error) but they don't get
+	// registered as routes or in the providers map — meaning
+	// /auth/<other>/login returns 404, the chooser never renders,
+	// and /auth/login auto-redirects straight to the default.
+	//
+	// Validate() already enforces that DefaultProviderName
+	// matches one of the configured providers, so the lookup
+	// below cannot fail when called from NewServer. The
+	// guard is defense-in-depth for tests that bypass
+	// Validate().
+	providers := auth.Providers
+	if auth.DefaultProviderName != "" {
+		matched := make([]config.OAuthProvider, 0, 1)
+		for _, p := range auth.Providers {
+			if p.Name == auth.DefaultProviderName {
+				matched = append(matched, p)
+			}
+		}
+		if len(matched) == 0 {
+			// Validate() should already have caught this,
+			// but defense in depth: a future code path that
+			// constructs AuthConfig without running Validate
+			// would otherwise produce a silent "every auth
+			// route 404s" startup. Surface the error here.
+			return nil, fmt.Errorf(
+				"auth.default_provider_name %q does not match any configured provider",
+				auth.DefaultProviderName,
+			)
+		}
+		providers = matched
+	}
+
 	h := &oauthHandlers{
 		cfg:        auth,
 		serverBase: strings.TrimRight(serverBase, "/"),
 		cookieName: auth.CookieName,
 		sessions:   sessions,
-		providers:  make(map[string]*providerEntry, len(auth.Providers)),
+		providers:  make(map[string]*providerEntry, len(providers)),
 		flows:      newFlowStateStore(),
 	}
 
@@ -203,7 +238,7 @@ func newOAuthHandlers(cfg *config.Config, serverBase string, sessions *sessionSt
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	for _, p := range auth.Providers {
+	for _, p := range providers {
 		if err := p.Validate(); err != nil {
 			return nil, err
 		}

@@ -118,6 +118,30 @@ type AuthConfig struct {
 	// cookie-allowlist.
 	CookieName string `env:"AUTH_COOKIE_NAME" yaml:"cookie_name,omitempty"`
 
+	// DefaultProviderName, when set, restricts the auth
+	// surface to a single provider: the chooser page is
+	// never rendered, /auth/login auto-redirects to the
+	// default, and requests to non-default provider URLs
+	// 404. Useful for multi-tenant deployments where
+	// each instance is pinned to one IdP, or when an
+	// operator wants to enforce "all sign-ins use this
+	// provider" without exposing the others.
+	//
+	// Lives at the AuthConfig level (not on each provider)
+	// because it's a property of the deployment, not of
+	// the providers themselves — a single IdP can be
+	// configured on many instances, but only some of
+	// those instances may pin to it.
+	//
+	// Must match the `name:` field of one entry in
+	// Providers (case-sensitive). Empty = no default;
+	// multi-provider installs show the chooser as
+	// before. Validate() surfaces "default set but no
+	// matching provider" as a startup error so the
+	// misconfiguration doesn't silently fall through to
+	// the chooser.
+	DefaultProviderName string `env:"AUTH_DEFAULT_PROVIDER_NAME" yaml:"default_provider_name,omitempty"`
+
 	// Providers is the list of configured OAuth 2.0 /
 	// OIDC identity providers. The order in this slice
 	// is the order shown on the login page when more
@@ -1240,6 +1264,9 @@ func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv("AUTH_COOKIE_NAME"); v != "" {
 		c.Auth.CookieName = v
 	}
+	if v := os.Getenv("AUTH_DEFAULT_PROVIDER_NAME"); v != "" {
+		c.Auth.DefaultProviderName = v
+	}
 }
 
 // validateDocbuilderBaseURL checks that the configured
@@ -1462,11 +1489,17 @@ func (o *OllamaConfig) EffectiveEmbeddingAPIKey() string {
 
 // validateAuth runs the cross-provider validation: each
 // provider validates itself, then we check for duplicate
-// names and reserved-name collisions. Returned error is a
-// single combined message suitable for Validate()'s errs
-// list (joined with newlines).
+// names, reserved-name collisions, and — when
+// DefaultProviderName is set — that the default matches a
+// configured provider. Returned error is a single combined
+// message suitable for Validate()'s errs list (joined with
+// newlines).
 func (c *Config) validateAuth() error {
 	if len(c.Auth.Providers) == 0 {
+		if c.Auth.DefaultProviderName != "" {
+			return fmt.Errorf("auth.default_provider_name %q is set but no providers are configured", c.Auth.DefaultProviderName)
+		}
+
 		return nil
 	}
 	seen := make(map[string]bool, len(c.Auth.Providers))
@@ -1484,11 +1517,40 @@ func (c *Config) validateAuth() error {
 		}
 		seen[p.Name] = true
 	}
+
+	// Validate the default-provider pin AFTER the per-provider
+	// checks so we don't report a "default doesn't match" error
+	// for a config that has a more fundamental problem.
+	if c.Auth.DefaultProviderName != "" {
+		if !seen[c.Auth.DefaultProviderName] {
+			errs = append(errs, fmt.Sprintf(
+				"auth.default_provider_name %q does not match any configured provider (available: %s)",
+				c.Auth.DefaultProviderName,
+				availableProviderNames(c.Auth.Providers),
+			))
+		}
+	}
+
 	if len(errs) == 0 {
 		return nil
 	}
 
 	return fmt.Errorf("%s", strings.Join(errs, "; "))
+}
+
+// availableProviderNames returns a sorted, quoted list of
+// provider names. Used to make "default_provider_name points
+// at nothing" errors actionable — the operator sees the
+// actual valid options in the error message rather than
+// having to scroll back through their config to remember
+// what they named everything.
+func availableProviderNames(providers []OAuthProvider) string {
+	names := make([]string, 0, len(providers))
+	for _, p := range providers {
+		names = append(names, strconv.Quote(p.Name))
+	}
+
+	return strings.Join(names, ", ")
 }
 
 // Validate checks if the configuration is valid.

@@ -699,3 +699,106 @@ func oidcUserInfoFromRawTokenForTest() func(ctx context.Context, c *http.Client,
 		}, nil
 	}
 }
+
+// TestNewOAuthHandlers_DefaultProviderFiltersToOne pins the
+// v0.10.7 behavior: when DefaultProviderName is set, the
+// providers map is restricted to that one entry. The other
+// configured providers are validated at startup (so a typo
+// in client_id still surfaces) but never registered as routes
+// — meaning /auth/<other>/login returns 404 and the chooser
+// never renders.
+func TestNewOAuthHandlers_DefaultProviderFiltersToOne(t *testing.T) {
+	cfg := &config.Config{Auth: config.AuthConfig{
+		SessionTTL:          time.Hour,
+		CookieName:          "ragabast_session",
+		DefaultProviderName: "work-gitlab",
+		Providers: []config.OAuthProvider{
+			{Name: "github", Type: "github", ClientID: "id", ClientSecret: "sec"},
+			{Name: "work-gitlab", Type: "gitlab", ClientID: "id2", ClientSecret: "sec2", BaseURL: "https://gitlab.work"},
+			{Name: "keycloak", Type: "oidc", ClientID: "id3", ClientSecret: "sec3", DiscoveryURL: "https://kc.example.com"},
+		},
+	}}
+
+	h, err := newOAuthHandlers(cfg, "https://app.example.com", newSessionStore(cfg.Auth.SessionTTL))
+	require.NoError(t, err)
+	require.NotNil(t, h)
+	require.Len(t, h.providers, 1,
+		"providers map must contain only the default")
+	_, ok := h.providers["work-gitlab"]
+	assert.True(t, ok, "default provider must be registered")
+	_, ok = h.providers["github"]
+	assert.False(t, ok, "non-default providers must NOT be registered")
+	_, ok = h.providers["keycloak"]
+	assert.False(t, ok, "non-default providers must NOT be registered")
+}
+
+// TestNewOAuthHandlers_DefaultProviderNotConfigured pins the
+// failure mode: Validate should catch this at config-load
+// time, but newOAuthHandlers defends in depth — if a test
+// or a future code path constructs a config without calling
+// Validate first, the function still errors out rather than
+// silently producing an empty providers map.
+func TestNewOAuthHandlers_DefaultProviderNotConfigured(t *testing.T) {
+	cfg := &config.Config{Auth: config.AuthConfig{
+		SessionTTL:          time.Hour,
+		CookieName:          "ragabast_session",
+		DefaultProviderName: "nonexistent",
+		Providers: []config.OAuthProvider{
+			{Name: "github", Type: "github", ClientID: "id", ClientSecret: "sec"},
+		},
+	}}
+
+	_, err := newOAuthHandlers(cfg, "https://app.example.com", newSessionStore(cfg.Auth.SessionTTL))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "nonexistent",
+		"error must name the bad default so the operator can see what they typo'd")
+}
+
+// TestOAuthLogin_DefaultProviderSkipsChooser pins the
+// end-to-end behavior: with DefaultProviderName set, the
+// /auth/login endpoint auto-redirects to the default
+// provider (single-provider path) instead of rendering
+// the chooser. This is the behavior operators expect when
+// they pin to one IdP — the chooser never even renders.
+func TestOAuthLogin_DefaultProviderSkipsChooser(t *testing.T) {
+	user := fakeUser{ID: 42, Username: "alice", Name: "Alice", Email: "alice@example.com"}
+
+	srv := fakeGitHubServer(t, "https://app.example.com/auth/work-gitlab/callback", user)
+	defer srv.Close()
+
+	cfg := &config.Config{Auth: config.AuthConfig{
+		SessionTTL:          time.Hour,
+		CookieName:          "ragabast_session",
+		DefaultProviderName: "work-gitlab",
+		Providers: []config.OAuthProvider{
+			{Name: "github", Type: "github", ClientID: "id", ClientSecret: "sec"},
+			{Name: "work-gitlab", Type: "gitlab", ClientID: "id2", ClientSecret: "sec2", BaseURL: srv.URL},
+		},
+	}}
+
+	// Override the work-gitlab entry's Endpoint to point at
+	// the fake server so the test doesn't need a real
+	// gitlab at srv.URL.
+	h, err := newOAuthHandlers(cfg, "https://app.example.com", newSessionStore(cfg.Auth.SessionTTL))
+	require.NoError(t, err)
+	h.providers["work-gitlab"].oauth2Config.Endpoint = oauth2.Endpoint{
+		AuthURL:  srv.URL + "/login/oauth/authorize",
+		TokenURL: srv.URL + "/login/oauth/access_token",
+	}
+	h.providers["work-gitlab"].userInfoFn = gitlabUserInfo(srv.URL)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/login", nil)
+	w := httptest.NewRecorder()
+	h.handleLogin(w, req)
+
+	res := w.Result()
+	defer func() { _ = res.Body.Close() }()
+
+	require.Equal(t, http.StatusFound, res.StatusCode,
+		"with default set, /auth/login must auto-redirect (302) not render chooser (200)")
+
+	loc, err := res.Location()
+	require.NoError(t, err)
+	assert.Equal(t, "/auth/work-gitlab/login", loc.Path,
+		"redirect target must be the default provider, not the chooser or any non-default provider")
+}
