@@ -140,7 +140,8 @@ func TestSessionStore_ConcurrentPutGetIsSafe(t *testing.T) {
 func TestSetSessionCookie_AttachesHttpOnlyLaxCookie(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	setSessionCookie(w, "my-session", "abc123", false, time.Hour)
+	// Local-dev install: empty public URL → Secure=false.
+	setSessionCookie(w, "my-session", "abc123", "", time.Hour)
 
 	cookies := w.Result().Cookies()
 	require.Len(t, cookies, 1)
@@ -152,13 +153,67 @@ func TestSetSessionCookie_AttachesHttpOnlyLaxCookie(t *testing.T) {
 	assert.Equal(t, http.SameSiteLaxMode, c.SameSite)
 	assert.Equal(t, int(time.Hour.Seconds()), c.MaxAge)
 	// Secure is not asserted here — it depends on whether
-	// TLS is detected. Tested separately below.
+	// the configured public URL is https://. Tested
+	// separately below.
 }
 
 func TestSetSessionCookie_SecureFlagHonored(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	setSessionCookie(w, "my-session", "abc", true, time.Hour)
+	setSessionCookie(w, "my-session", "abc", "https://ragabast.example.com", time.Hour)
+
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.True(t, cookies[0].Secure)
+}
+
+func TestSetSessionCookie_SecureFlagOffForHTTPPublicURL(t *testing.T) {
+	w := httptest.NewRecorder()
+
+	// Public URL is http:// — typical for local-dev
+	// installs where the operator runs ragabast directly
+	// without a proxy. Secure=false so the browser
+	// actually persists the cookie over plain HTTP.
+	setSessionCookie(w, "my-session", "abc", "http://localhost:8080", time.Hour)
+
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.False(t, cookies[0].Secure)
+}
+
+func TestSetSessionCookie_SecureFlagOffWhenPublicURLEmpty(t *testing.T) {
+	// Defensive: empty string means "no public URL
+	// configured" → fall back to Secure=false (historical
+	// behavior for local-dev installs that never set
+	// server.public_url).
+	w := httptest.NewRecorder()
+
+	setSessionCookie(w, "my-session", "abc", "", time.Hour)
+
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.False(t, cookies[0].Secure)
+}
+
+func TestSetSessionCookie_SecureFlagHandlesTrailingSlash(t *testing.T) {
+	// Trailing slash is harmless — the scheme check only
+	// looks at the prefix.
+	w := httptest.NewRecorder()
+
+	setSessionCookie(w, "my-session", "abc", "https://ragabast.example.com/", time.Hour)
+
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.True(t, cookies[0].Secure)
+}
+
+func TestSetSessionCookie_SecureFlagIsCaseInsensitive(t *testing.T) {
+	// Mixed-case scheme is fine — RFC 3986 says schemes
+	// are case-insensitive, and operators occasionally
+	// write HTTPS:// in configs.
+	w := httptest.NewRecorder()
+
+	setSessionCookie(w, "my-session", "abc", "HTTPS://ragabast.example.com", time.Hour)
 
 	cookies := w.Result().Cookies()
 	require.Len(t, cookies, 1)
@@ -168,7 +223,7 @@ func TestSetSessionCookie_SecureFlagHonored(t *testing.T) {
 func TestClearSessionCookie_ZeroesValueAndMaxAge(t *testing.T) {
 	w := httptest.NewRecorder()
 
-	clearSessionCookie(w, "my-session", false)
+	clearSessionCookie(w, "my-session", "")
 
 	cookies := w.Result().Cookies()
 	require.Len(t, cookies, 1)
@@ -215,16 +270,27 @@ func TestUserFromSession_BuildsDisplayLabel(t *testing.T) {
 	assert.Equal(t, "alice (github)", userFromSession(s).DisplayLabel())
 }
 
-func TestSecureFromRequest(t *testing.T) {
-	t.Run("plain http is not secure", func(t *testing.T) {
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
-
-		assert.False(t, secureFromRequest(r))
+func TestSecureFromServerBase(t *testing.T) {
+	t.Run("https public URL is secure", func(t *testing.T) {
+		assert.True(t, secureFromServerBase("https://ragabast.example.com"))
 	})
-	t.Run("X-Forwarded-Proto: https is secure", func(t *testing.T) {
-		r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
-		r.Header.Set("X-Forwarded-Proto", "https")
-
-		assert.True(t, secureFromRequest(r))
+	t.Run("http public URL is not secure", func(t *testing.T) {
+		assert.False(t, secureFromServerBase("http://localhost:8080"))
+	})
+	t.Run("empty public URL falls back to insecure (local-dev default)", func(t *testing.T) {
+		assert.False(t, secureFromServerBase(""))
+	})
+	t.Run("HTTPS mixed-case is secure", func(t *testing.T) {
+		// RFC 3986: schemes are case-insensitive. The
+		// check is too.
+		assert.True(t, secureFromServerBase("HTTPS://ragabast.example.com"))
+	})
+	t.Run("trailing slash is harmless", func(t *testing.T) {
+		assert.True(t, secureFromServerBase("https://ragabast.example.com/"))
+	})
+	t.Run("whitespace is trimmed", func(t *testing.T) {
+		// Shell expansion or copy-paste sometimes leaves
+		// whitespace around the URL. The check tolerates it.
+		assert.True(t, secureFromServerBase("  https://ragabast.example.com  "))
 	})
 }

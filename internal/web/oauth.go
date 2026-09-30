@@ -470,7 +470,13 @@ func (h *oauthHandlers) handleProviderLogin(w http.ResponseWriter, r *http.Reque
 		MaxAge:   int(oauthFlowStateTTL.Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   secureFromRequest(r),
+		// Tie the Secure flag to server.public_url (the public
+		// scheme the IdP redirected back to), not r.TLS / the
+		// X-Forwarded-Proto header — the header is unreliable
+		// behind Traefik and produces inconsistent flags across
+		// the login + callback round-trip when the proxy
+		// forgets to forward it. See secureFromServerBase.
+		Secure: secureFromServerBase(h.serverBase),
 	})
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
@@ -496,7 +502,10 @@ func (h *oauthHandlers) handleProviderCallback(w http.ResponseWriter, r *http.Re
 		return
 	}
 	// Clear the state cookie regardless of outcome so a
-	// stale value cannot be replayed.
+	// stale value cannot be replayed. Same Secure logic
+	// as the login handler so the cookie attributes match
+	// on both sides (some browsers refuse to overwrite
+	// a cookie whose attributes don't match).
 	http.SetCookie(w, &http.Cookie{
 		Name:     oauthStateCookieName,
 		Value:    "",
@@ -504,7 +513,7 @@ func (h *oauthHandlers) handleProviderCallback(w http.ResponseWriter, r *http.Re
 		MaxAge:   -1,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   secureFromRequest(r),
+		Secure:   secureFromServerBase(h.serverBase),
 	})
 
 	flow := h.flows.Pop(state)
@@ -560,7 +569,7 @@ func (h *oauthHandlers) handleProviderCallback(w http.ResponseWriter, r *http.Re
 	}
 	h.sessions.Put(s)
 
-	setSessionCookie(w, h.cookieName, s.ID, secureFromRequest(r), h.cfg.SessionTTL)
+	setSessionCookie(w, h.cookieName, s.ID, h.serverBase, h.cfg.SessionTTL)
 
 	http.Redirect(w, r, flow.next, http.StatusFound)
 }
@@ -572,7 +581,7 @@ func (h *oauthHandlers) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(h.cookieName); err == nil && c.Value != "" {
 		h.sessions.Delete(c.Value)
 	}
-	clearSessionCookie(w, h.cookieName, secureFromRequest(r))
+	clearSessionCookie(w, h.cookieName, h.serverBase)
 	http.Redirect(w, r, "/auth/login", http.StatusFound)
 }
 

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -344,19 +345,23 @@ func UserFromContext(ctx context.Context) User {
 }
 
 // setSessionCookie writes the session-id cookie with
-// HttpOnly + SameSite=Lax. Secure is enabled when
-// the request is known to have arrived over TLS (the
-// handler decides via secureFromRequest); local-dev
-// installs over plain HTTP keep Secure=false so the
-// browser actually persists the cookie.
-func setSessionCookie(w http.ResponseWriter, name, value string, secure bool, ttl time.Duration) {
+// HttpOnly + SameSite=Lax. Secure is enabled when the
+// configured public origin (server.public_url) uses
+// https:// — the Secure flag must match the public
+// scheme, not the private backend scheme, so the
+// browser actually persists the cookie on the
+// user-visible URL. Local-dev installs that leave
+// server.public_url empty get Secure=false and the
+// browser keeps the cookie over plain HTTP. See
+// secureFromServerBase for the full reasoning.
+func setSessionCookie(w http.ResponseWriter, name, value, serverBase string, ttl time.Duration) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     "/",
 		MaxAge:   int(ttl.Seconds()),
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   secureFromServerBase(serverBase),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -364,14 +369,18 @@ func setSessionCookie(w http.ResponseWriter, name, value string, secure bool, tt
 // clearSessionCookie sets MaxAge=-1 so the browser drops
 // the cookie immediately. The value is set to "" so any
 // stale path / domain variants are also clobbered.
-func clearSessionCookie(w http.ResponseWriter, name string, secure bool) {
+// serverBase is used the same way as in setSessionCookie
+// so the deletion-clearing cookie matches the cookie it
+// overwrites (some browsers refuse to overwrite a
+// cookie whose attributes don't match).
+func clearSessionCookie(w http.ResponseWriter, name, serverBase string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    "",
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   secureFromServerBase(serverBase),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -389,27 +398,30 @@ func readSessionCookie(r *http.Request, name string) string {
 	return c.Value
 }
 
-// secureFromRequest reports whether the request arrived
-// over TLS, either directly (r.TLS != nil) or behind a
-// reverse proxy that set X-Forwarded-Proto: https. The
-// auth layer uses this to decide whether to set the
-// Secure flag on the session cookie.
+// secureFromServerBase reports whether the configured
+// public origin uses https://. This is the source of
+// truth for the Secure flag on auth-related cookies,
+// because the Secure flag must match the PUBLIC scheme
+// (what the browser sees in the URL bar and uses to
+// decide whether to send the cookie), not the private
+// backend scheme (what ragabast sees on the wire).
 //
-// Note: trusting X-Forwarded-Proto at face value is only
-// safe when the server is behind a proxy that strips
-// client-supplied values. The existing middleware chain
-// already uses chi's RealIP, which assumes a trusted
-// proxy; this helper piggy-backs on the same assumption.
-// For a direct-bind deployment without a proxy, r.TLS
-// is the authoritative signal and X-Forwarded-Proto is
-// ignored.
-func secureFromRequest(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
-	}
-	if r.Header.Get("X-Forwarded-Proto") == "https" {
-		return true
-	}
-
-	return false
+// Why not just secureFromRequest? Behind a reverse proxy
+// the proxy terminates TLS, so the connection to ragabast
+// is HTTP — r.TLS is nil. The X-Forwarded-Proto header
+// tells ragabast the public scheme, but a misconfigured
+// proxy can forget to forward it on some requests,
+// producing an inconsistent Secure flag across the
+// login + callback round-trip — exactly the "state cookie
+// missing or mismatched" failure mode operators hit when
+// running behind Traefik or similar proxies.
+//
+// serverBase is the operator-explicit server.public_url
+// (when set) or the derived http://<address>:<port>
+// fallback. When server.public_url is set, that's the
+// authority — the proxy's job is to honor it, not to
+// override it. When unset, the fallback matches the
+// historical insecure-default behavior.
+func secureFromServerBase(serverBase string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(serverBase)), "https://")
 }

@@ -391,6 +391,11 @@ trimmed to avoid `<URL>//auth/...`). When unset, ragabast
 falls back to `http://<address>:<port>` — the historical
 behavior for single-host / localhost installs.
 
+The scheme of `public_url` also drives the `Secure` flag on
+the OAuth state cookie and the session cookie — see
+[Cookie Secure flag](#cookie-secure-flag) below for the
+reason this matters behind Traefik.
+
 Browser UX:
 
 - `GET /auth/login` — chooser page (auto-redirects to the single
@@ -439,6 +444,37 @@ indefinitely; an idle user is logged out after one TTL.
 The session cookie name defaults to `ragabast_session`; override
 with `auth.cookie_name` (env `AUTH_COOKIE_NAME`) when running
 multiple ragabast instances behind the same host.
+
+#### Cookie Secure flag
+
+ragabast sets the `Secure` flag on the OAuth state cookie
+(`ragabast_oauth_state`) and the session cookie based on
+the **public-facing scheme**, not the request's TLS state.
+
+Source of truth: `server.public_url` (env `SERVER_PUBLIC_URL`).
+If `public_url` starts with `https://`, both cookies get
+`Secure=true`. If it's `http://` (or empty, the local-dev
+default), both cookies get `Secure=false`.
+
+Why not just inspect `r.TLS` / `X-Forwarded-Proto`? Behind
+a reverse proxy the connection to ragabast is HTTP, so
+`r.TLS` is nil and we depend on `X-Forwarded-Proto: https`
+to learn "the public scheme is HTTPS". A misconfigured
+proxy that forgets to forward that header on one request
+produces an inconsistent Secure flag across the login +
+callback round-trip — exactly the "state cookie missing
+or mismatched" failure mode operators hit when running
+behind Traefik / nginx / cloud L7 LBs.
+
+`server.public_url` is operator-set, so it's stable across
+the round-trip — a single value drives the cookie attribute
+on both the login response and the callback handler's
+cookie-clear. Local-dev installs that never set
+`public_url` get the historical insecure default (browser
+actually persists the cookie over plain HTTP).
+
+The 403 path is unchanged: a tampered or missing state
+cookie still returns `Forbidden` exactly as before.
 
 ### CORS (C-2)
 
