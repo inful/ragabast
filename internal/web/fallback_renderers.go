@@ -430,13 +430,17 @@ const documentsFallbackBody = `<!DOCTYPE html>
     <h1 class="title">Ingested Documents</h1>
     {{ if .Documents }}
     <table class="table is-fullwidth is-striped">
-        <thead><tr><th>Title</th><th>ID</th><th>Tags</th><th>Category</th><th>Chunks</th><th></th></tr></thead>
+        <thead><tr><th scope="col">Title</th><th scope="col">ID</th><th scope="col">Tags</th><th scope="col">Category</th><th scope="col">Chunks</th><th scope="col"></th></tr></thead>
         <tbody>
         {{ range .Documents }}
             <tr>
                 <td>{{ .DisplayLabel }}</td>
                 <td><code>{{ .ID }}</code></td>
-                <td>{{ .Tags }}</td>
+                <td>
+                    {{- range .Tags }}
+                    <span class="tag is-info">{{ . }}</span>
+                    {{- end }}
+                </td>
                 <td>{{ .Category }}</td>
                 <td>{{ .Chunks }}</td>
                 <td>
@@ -453,7 +457,9 @@ const documentsFallbackBody = `<!DOCTYPE html>
         </tbody>
     </table>
     {{ else }}
-    <p>No documents ingested yet.</p>
+    <div class="notification is-light">
+        No documents ingested yet. Use the <a href="/ingest">Ingest</a> page to add some.
+    </div>
     {{ end }}
 
     {{ if .Total }}
