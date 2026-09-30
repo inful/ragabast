@@ -5,7 +5,7 @@ binary (via `go:embed` in `internal/web/static.go`). The
 versions below are the exact files committed to this repo;
 they are not fetched at build time.
 
-## Bulma v0.9.4 — MIT
+## Bulma v1.0.4 — MIT
 
 Source: https://github.com/jgthms/bulma
 

@@ -26,6 +26,12 @@ import (
 // first page load, (b) forces the CSP to whitelist that
 // origin, and (c) trusts the CDN to keep serving the same
 // bytes. Embedding the file removes all three concerns.
+//
+// We pinned to Bulma 0.9.4 for years; the upgrade to 1.0.4
+// keeps the same MIT-licensed embed contract but adds the
+// v1-era CSS-variable system and the `prefers-color-scheme:dark`
+// automatic dark theme (chat-dark.css still exists for the
+// manual-toggle path).
 func TestStaticHandler_ServesBulmaCSS(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
@@ -43,11 +49,13 @@ func TestStaticHandler_ServesBulmaCSS(t *testing.T) {
 
 	body := w.Body.Bytes()
 	require.NotEmpty(t, body, "bulma.min.css body must not be empty")
-	// Bulma 0.9.4 stamps a license header at the top of the
+	// Bulma stamps a license header at the top of the
 	// minified bundle. A missing or wrong-version payload
 	// would fail this sanity check, surfacing the regression
-	// immediately.
-	require.Contains(t, string(body), "bulma.io v0.9.4",
+	// immediately. The version stamp changed in 1.0
+	// (`bulma.io v0.9.4` → `bulma.io v1.0.4`) — keep this
+	// aligned with the embedded file.
+	require.Contains(t, string(body), "bulma.io v1.0.4",
 		"served CSS must be the actual Bulma library (missing version stamp)")
 }
 
@@ -170,7 +178,7 @@ func TestStaticHandler_RejectsPathTraversal(t *testing.T) {
 
 // TestStaticHandler_SetsCacheControl pins the cache header
 // shipped on every successful static response. The embedded
-// assets are version-pinned (bulma 0.9.4, htmx 1.9.10) and
+// assets are version-pinned (bulma 1.0.4, htmx 1.9.10) and
 // cannot change without rebuilding the binary, so a long
 // max-age with `immutable` is safe — browsers will not
 // revalidate on every page load.
@@ -260,14 +268,14 @@ func TestStaticHandler_StaticAssetsInBinaryVerify(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	// Bulma 0.9.4 selectors we know exist in the build. Each
+	// Bulma 1.0.4 selectors we know exist in the build. Each
 	// is unique enough that a truncated or wrong-version file
 	// will fail the assertion. Together they form a fingerprint
 	// that survives minification (which only strips whitespace
 	// and renames local identifiers).
 	for _, selector := range []string{".button", ".input", ".navbar"} {
 		require.Contains(t, body, selector,
-			"served CSS must contain the %s selector (Bulma 0.9.4)", selector)
+			"served CSS must contain the %s selector (Bulma 1.0.4)", selector)
 	}
 }
 

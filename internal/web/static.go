@@ -46,18 +46,28 @@ var staticFS embed.FS
 // reference it.
 //
 // The current set is:
-//   - bulma.min.css  — Bulma v0.9.4 (MIT). Loaded by every page.
+//   - bulma.min.css  — Bulma v1.0.4 (MIT). Loaded by every page.
+//     Upgraded from 0.9.4 in the v1 migration: CSS variables,
+//     `prefers-color-scheme:dark` automatic theme, no more Sass
+//     dependency (the bundled CSS is what we ship — we don't
+//     customize Sass variables at build time).
 //   - htmx.min.js    — htmx v1.9.10 (BSD-2-Clause). Loaded by
 //     the chat landing page and search.
 //   - chat.css      — page-specific styles for the chat page.
 //     Extracted from a former inline <style>
 //     block so the strict CSP (no
 //     'unsafe-inline') applies.
-//   - chat-dark.css — issue #94: dark-mode override for the
-//     chat UI. Loaded on every page that renders
-//     the navbar so the toggle button (which
-//     lives in the navbar) works regardless of
-//     which page the operator is on.
+//   - chat-dark.css — dark-mode override (issue #94). Loaded
+//     on every page that renders the navbar so
+//     the toggle button (which lives in the
+//     navbar) works regardless of which page
+//     the operator is on. With Bulma 1.x the
+//     `prefers-color-scheme:dark` media query
+//     already styles dark automatically; this
+//     file is the manual-override path that
+//     activates when the operator clicks the
+//     toggle (chat.js flips [data-theme=dark]
+//     on <html>).
 //   - chat.js       — wires the chat form's loading-state UX
 //     via htmx event listeners. Replaces the
 //     former hx-on::* attributes, which would
