@@ -26,8 +26,19 @@ func (p *DocbuilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	doc.RawContent = rawContent
 	doc.FilePath = filePath
 
-	// Extract frontmatter and content
-	frontmatter, content, err := p.extractFrontmatter(rawContent)
+	// Normalize CRLF to LF for parsing. Windows editors, chat
+	// clients, and browser textareas (which preserve the user's
+	// paste including CR) all hand us text with \r\n; the
+	// frontmatter delimiters and the chunker's line-splitting
+	// both expect LF. Without this, CRLF pastes either fail
+	// frontmatter extraction entirely (silent empty-UID bug)
+	// or produce chunks with a trailing \r on every line.
+	// RawContent keeps the original bytes so logs and re-ingest
+	// paths see exactly what the operator uploaded.
+	normalized := bytes.ReplaceAll(rawContent, []byte("\r\n"), []byte("\n"))
+
+	// Extract frontmatter and the markdown body that follows it.
+	frontmatter, body, err := p.extractFrontmatter(normalized)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract frontmatter: %w", err)
 	}
@@ -37,8 +48,8 @@ func (p *DocbuilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
 
-	// Set content
-	doc.Content = strings.TrimSpace(string(content))
+	// Set content from the body (frontmatter already stripped).
+	doc.Content = strings.TrimSpace(string(body))
 
 	// Compute fingerprint when not explicitly provided.
 	// Docbuilder convention: "fingerprint: auto-generated-if-empty" means the system should compute it.

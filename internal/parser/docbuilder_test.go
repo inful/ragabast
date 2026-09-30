@@ -43,3 +43,42 @@ func TestParseDocument_AllowsMissingURLs(t *testing.T) {
 	require.Equal(t, "sample", doc.ID)
 	require.Empty(t, doc.URLs)
 }
+
+// TestParseDocument_CRLFFrontmatter pins the headline fix for
+// issue #82: docbuilder content pasted from Windows or any
+// CRLF-emitting source (chat clients, browser textareas that
+// preserve the user's paste) must produce the same parsed
+// document as LF content. The browser submit path sends
+// `---\r\nuid:...\r\n---\r\n`; before this fix the parser failed
+// to recognize the opening delimiter and treated the whole
+// input as markdown, leaving doc.UID empty and triggering the
+// 500 "document UID is required" error on the web ingest path.
+func TestParseDocument_CRLFFrontmatter(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\r\nuid: crlf-doc\r\nfingerprint: crlf-doc-v1\r\n---\r\n\r\n# Hello\r\n\r\nbody\r\n")
+
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "crlf-doc", doc.UID)
+	require.Equal(t, "crlf-doc", doc.ID)
+	require.Equal(t, "crlf-doc-v1", doc.Fingerprint)
+	require.Equal(t, "Hello", doc.Title,
+		"H1 must extract correctly when the body uses CRLF line endings")
+}
+
+// TestParseDocument_CRLFPreservesRawContent ensures the fix
+// normalizes CRLF only for parsing, not for the stored RawContent
+// field. RawContent is what gets re-ingested later and what
+// operators see in logs/diagnostics; rewriting it would hide the
+// original bytes.
+func TestParseDocument_CRLFPreservesRawContent(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\r\nuid: raw-cr-preserved\r\n---\r\nbody\r\n")
+
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, raw, doc.RawContent,
+		"RawContent must be the original bytes, not the normalized form")
+}

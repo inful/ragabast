@@ -53,3 +53,25 @@ func TestSplitDocbuilderFrontmatter_EmptyInput(t *testing.T) {
 	_, _, ok = SplitDocbuilderFrontmatter([]byte("   \n"))
 	require.False(t, ok)
 }
+
+// TestSplitDocbuilderFrontmatter_CRLFDelimiters pins the fix for
+// issue #82: the lenient splitter must accept CRLF line endings
+// in the `---` delimiters so content pasted from Windows editors
+// or chat clients (which often emit CRLF) parses identically to LF.
+// Without the fix, the closing `---\r\n` is never matched and the
+// helper silently reports ok=false, which leaves the ingest path
+// looking like the frontmatter was never there.
+//
+// The returned bytes are LF — the helper normalizes CRLF to LF
+// at the top so the rest of the splitter stays LF-only.
+func TestSplitDocbuilderFrontmatter_CRLFDelimiters(t *testing.T) {
+	raw := []byte("---\r\nfingerprint: abc\r\nuid: doc-1\r\n---\r\n# Hello\r\nbody\r\n")
+
+	fm, md, ok := SplitDocbuilderFrontmatter(raw)
+
+	require.True(t, ok, "CRLF delimiters must be recognized just like LF")
+	require.Equal(t, "fingerprint: abc\nuid: doc-1", string(fm),
+		"frontmatter body normalizes to LF")
+	require.Equal(t, "# Hello\nbody", string(md),
+		"markdown body normalizes to LF")
+}

@@ -12,8 +12,15 @@ import "bytes"
 // DocbuilderParser.ParseDocument; this helper is for callers
 // that want to treat un-frontmattered content as "no existing
 // fields to merge" rather than reject it.
+//
+// CRLF line endings (`\r\n` in the delimiters) are accepted as
+// well as LF — pasted content from Windows or chat clients
+// often arrives that way, and rejecting it silently loses the
+// frontmatter. We normalize once at the top so the rest of the
+// splitter stays LF-only.
 func SplitDocbuilderFrontmatter(raw []byte) (frontmatter, markdown []byte, ok bool) {
 	content := bytes.TrimSpace(raw)
+	content = bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n"))
 	if !bytes.HasPrefix(content, []byte("---\n")) {
 		return nil, content, false
 	}

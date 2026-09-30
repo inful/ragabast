@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/parser"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,5 +33,33 @@ func TestChunkIDsAreDeterministic(t *testing.T) {
 		require.Equal(t, chunks1[i].HeaderPath, chunks2[i].HeaderPath)
 		require.Equal(t, chunks1[i].StartLine, chunks2[i].StartLine)
 		require.Equal(t, chunks1[i].EndLine, chunks2[i].EndLine)
+	}
+}
+
+// TestChunker_AcceptsCRLFLineEndings pins the chunker side of
+// the fix for issue #82. The parser normalizes CRLF to LF before
+// chunking, so the chunks we emit never carry a trailing `\r` on
+// any line. The test drives the full ingest path (parser +
+// chunker) and asserts the chunk content is clean LF end-to-end.
+func TestChunker_AcceptsCRLFLineEndings(t *testing.T) {
+	doc := models.NewDocument()
+	doc.UID = "uid-crlf"
+	doc.Fingerprint = "fp-crlf"
+	doc.RawContent = []byte("---\r\nuid: uid-crlf\r\nfingerprint: fp-crlf\r\n---\r\n# Title\r\n\r\nFirst paragraph.\r\n\r\n## Section\r\nbody.\r\n")
+
+	p := parser.NewDocbuilderParser()
+	parsed, err := p.ParseDocument(doc.RawContent, "test.md")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	c := NewChunker(10_000, 1, 0)
+	chunks, err := c.ChunkWithHierarchy(parsed)
+	require.NoError(t, err)
+	require.NotEmpty(t, chunks)
+
+	for _, chunk := range chunks {
+		require.NotContains(t, chunk.Content, "\r",
+			"chunks must be LF-only after CRLF normalization (chunk ID %q)", chunk.ID)
 	}
 }
