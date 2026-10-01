@@ -69,7 +69,7 @@ func TestHandleChatMessage_SourcesPanelOpenByDefault(t *testing.T) {
 // attached to the assistant's reply box, not floating between
 // the reply and the input form. We assert structural containment
 // — the <details> element lives inside the same <div
-// class="box has-background-light"> that wraps the assistant
+// class="box"> that wraps the assistant
 // reply, not as a sibling. A future template edit that lifts
 // the disclosure back out surfaces the regression immediately.
 func TestHandleChatMessage_SourcesPanelInsideAssistantReply(t *testing.T) {
@@ -100,7 +100,7 @@ func TestHandleChatMessage_SourcesPanelInsideAssistantReply(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	assistantBoxOpen := strings.Index(body, `<div class="box has-background-light">`)
+	assistantBoxOpen := strings.Index(body, `<div class="box">`)
 	require.GreaterOrEqual(t, assistantBoxOpen, 0, "assistant box must be present")
 
 	assistantContentIdx := strings.Index(body, "Assistant")
