@@ -867,12 +867,19 @@ func DefaultConfig() *Config {
 			EmbeddingDimension: 768, // nomic-embed-text-v1.5 dimension
 		},
 		Server: ServerConfig{
-			Address:                    "0.0.0.0",
-			Port:                       8080,
-			EnableCORS:                 true,
-			MaxIngestDocumentBytes:     1 << 20, // 1 MiB
-			ReadTimeout:                15 * time.Second,
-			WriteTimeout:               15 * time.Second,
+			Address:                "0.0.0.0",
+			Port:                   8080,
+			EnableCORS:             true,
+			MaxIngestDocumentBytes: 1 << 20, // 1 MiB
+			ReadTimeout:            15 * time.Second,
+			// WriteTimeout must be at least the slowest LLM
+			// timeout plus a buffer; see Config.Validate. The
+			// historical 15s default silently truncated chat
+			// responses when the LLM took longer than 15s
+			// (issue: second chat message did not render).
+			// 60s comfortably covers the default 30s LLM
+			// timeout and gives headroom for chat streaming.
+			WriteTimeout:               60 * time.Second,
 			AsyncIngestCompletedJobTTL: 168 * time.Hour, // 7 days
 			AsyncIngestFailedJobTTL:    720 * time.Hour, // 30 days
 			AsyncIngestCleanupInterval: 1 * time.Hour,
@@ -1760,6 +1767,45 @@ func (c *Config) Validate() error {
 	}
 	if c.Processing.MinChunkSize > c.Processing.MaxChunkSize {
 		errs = append(errs, "processing.min_chunk_size cannot be greater than max_chunk_size")
+	}
+
+	// Validate that WriteTimeout can fit the slowest LLM call
+	// the operator has configured. A chat response streams the
+	// LLM completion through the HTTP body, so a WriteTimeout
+	// shorter than the LLM timeout causes the server to close
+	// the connection mid-response — the operator sees the first
+	// message render and the second message silently fail to
+	// swap. We pin WriteTimeout >= max(Ollama.Timeout,
+	// EmbeddingGemma.Timeout) plus a small buffer for the
+	// surrounding template + htmx swap work.
+	//
+	// This was a v0.11.0 regression that surfaced as "second
+	// chat message does nothing": the previous defaults left
+	// the per-call timeout unbounded but server.WriteTimeout
+	// capped responses at 15s, so a slow LLM silently
+	// truncated the response. Validate catches the
+	// misconfiguration at startup instead of in production.
+	if c.Server.WriteTimeout > 0 {
+		// Compute the longest per-call timeout the operator
+		// has configured across both providers.
+		var maxLLMTimeout time.Duration
+		if c.Ollama.Timeout > maxLLMTimeout {
+			maxLLMTimeout = c.Ollama.Timeout
+		}
+		if c.EmbeddingGemma.Timeout > maxLLMTimeout {
+			maxLLMTimeout = c.EmbeddingGemma.Timeout
+		}
+		// 5s buffer covers the chat template render and
+		// htmx-swap-friendly framing after the LLM call
+		// returns.
+		const writeBuffer = 5 * time.Second
+		required := maxLLMTimeout + writeBuffer
+		if c.Server.WriteTimeout < required {
+			errs = append(errs, fmt.Sprintf(
+				"server.write_timeout (%s) is shorter than the longest LLM timeout (%s) plus a 5s buffer; raise it to at least %s so chat responses don't get truncated mid-stream",
+				c.Server.WriteTimeout, maxLLMTimeout, required,
+			))
+		}
 	}
 
 	// Validate Paths config.

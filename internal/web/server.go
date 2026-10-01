@@ -55,10 +55,26 @@ type Server struct {
 // client. The full error chain is preserved in the server log so operators
 // can diagnose without exposing internal details (model names, server URLs,
 // stack traces) to the user.
+//
+// r may be nil: a few render paths (notably the post-template-execution
+// error fallback in renderTemplate) don't have a request in scope. Treat
+// the request URL as best-effort — the operation label and the underlying
+// error are what operators actually need to diagnose.
+//
+// err may be nil for callers that just want to write a 500 without a
+// reason. The function is a no-op in that case — without an underlying
+// error there is nothing to log, and writing an unexplained 500 would
+// confuse more than it helps. All callers currently pass a non-nil err;
+// the nil branch is defense in depth.
 func internalError(w http.ResponseWriter, r *http.Request, op string, err error) {
-	if err != nil {
-		log.Printf("server: %s %s: %v", op, r.URL.Path, err)
+	if err == nil {
+		return
 	}
+	path := "<no-request>"
+	if r != nil && r.URL != nil {
+		path = r.URL.Path
+	}
+	log.Printf("server: %s %s: %v", op, path, err)
 	http.Error(w, "Internal server error", http.StatusInternalServerError)
 }
 
