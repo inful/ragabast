@@ -3,6 +3,7 @@ package web
 import (
 	"html/template"
 	"net/http"
+	"time"
 )
 
 // fallbackTemplates holds pre-parsed html/template instances
@@ -151,7 +152,15 @@ type documentsFallbackRow struct {
 	Tags         []string
 	Category     string
 	Chunks       int
-	CsrfToken    string
+	// IngestedAt is the parent document's creation
+	// time. The zero value means the upstream path
+	// didn't set it (a document ingested before this
+	// field was tracked, or a fixture in a test); the
+	// template substitutes a placeholder for that case
+	// rather than render Go's zero-value literal
+	// "0001-01-01".
+	IngestedAt time.Time
+	CsrfToken  string
 }
 
 // newFallbackTemplates parses every fallback template body.
@@ -430,7 +439,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
     <h1 class="title">Ingested Documents</h1>
     {{ if .Documents }}
     <table class="table is-fullwidth is-striped">
-        <thead><tr><th scope="col">Title</th><th scope="col">ID</th><th scope="col">Tags</th><th scope="col">Category</th><th scope="col">Chunks</th><th scope="col"></th></tr></thead>
+        <thead><tr><th scope="col">Title</th><th scope="col">ID</th><th scope="col">Tags</th><th scope="col">Category</th><th scope="col">Chunks</th><th scope="col">Ingested</th><th scope="col"></th></tr></thead>
         <tbody>
         {{ range .Documents }}
             <tr>
@@ -443,6 +452,13 @@ const documentsFallbackBody = `<!DOCTYPE html>
                 </td>
                 <td>{{ .Category }}</td>
                 <td>{{ .Chunks }}</td>
+                <td>
+                    {{- if .IngestedAt.IsZero }}
+                    <span class="has-text-grey">unknown</span>
+                    {{- else }}
+                    <time datetime="{{ .IngestedAt.Format "2006-01-02T15:04:05Z07:00" }}">{{ .IngestedAt.Format "2006-01-02 15:04 UTC" }}</time>
+                    {{- end }}
+                </td>
                 <td>
                     <form method="post" action="/documents/{{ .ID }}/delete" style="display:inline">
                         <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">

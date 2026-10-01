@@ -338,6 +338,7 @@ func docsRowsFromMap(data any) []documentsFallbackRow {
 			Tags:         item.Tags,
 			Category:     firstOrEmpty(item.Categories),
 			Chunks:       item.ChunkCount,
+			IngestedAt:   item.CreatedAt,
 			CsrfToken:    csrf,
 		})
 	}
