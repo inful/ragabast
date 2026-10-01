@@ -61,38 +61,22 @@ var staticFS embed.FS
 //     block so the strict CSP (no
 //     'unsafe-inline') applies.
 //
-//   - chat-dark.css — manual dark-mode override (issue #94).
-//     Loaded on every page that renders
-//     the navbar so the toggle button
-//     (which lives in the navbar) works
-//     regardless of which page the operator
-//     is on.
-//
-//     With Bulma 1.0.4 the bundled CSS already
-//     ships an automatic
-//     `@media (prefers-color-scheme: dark)`
-//     block that drives dark mode from the OS
-//     preference. This file is the manual
-//     override path: when the operator clicks
-//     the toggle, chat.js flips
-//     `data-theme="dark"` on <html> and this
-//     file's CSS-variable overrides take effect.
-//     The override targets Bulma's variables
-//     (--bulma-scheme-main, --bulma-text, ...)
-//     not per-component selectors, so the
-//     change propagates to every component
-//     without duplicate rules.
-//
 //   - chat.js       — wires the chat form's loading-state UX
 //     via htmx event listeners. Replaces the
 //     former hx-on::* attributes, which would
 //     fail under the strict CSP because htmx
 //     processes them with eval()/Function().
-//     Also wires the dark-mode toggle.
 //
 //   - login.css     — page-specific styles for the OAuth login
 //     chooser. Extracted from a former inline
 //     <style> block in templates/login.html.
+//
+// Bulma 1.x ships an automatic `@media (prefers-color-scheme:
+// dark)` block in bulma.min.css, so OS-driven dark mode works
+// with no extra CSS. The earlier manual override file
+// (chat-dark.css) and the navbar theme-toggle button were
+// removed — the override palette diverged from Bulma's
+// designed dark scheme and was hard to maintain.
 var staticAssets = map[string]staticAsset{
 	"bulma.min.css": {
 		contentType: "text/css; charset=utf-8",
@@ -101,9 +85,6 @@ var staticAssets = map[string]staticAsset{
 		contentType: "application/javascript; charset=utf-8",
 	},
 	"chat.css": {
-		contentType: "text/css; charset=utf-8",
-	},
-	"chat-dark.css": {
 		contentType: "text/css; charset=utf-8",
 	},
 	"chat.js": {

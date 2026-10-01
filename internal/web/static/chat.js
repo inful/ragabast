@@ -51,11 +51,6 @@
       // No chat form on this page — nothing to wire. The
       // login page and the loading templates do not carry a
       // #chat-form, so reaching this branch is normal.
-
-      // Issue #94: theme toggle is independent of the chat
-      // form, so wire it even when the form isn't present
-      // (e.g. on the login page or the loading templates).
-      wireThemeToggle();
       return;
     }
 
@@ -151,75 +146,5 @@
       // the button stays hidden until the first reply.
       updateJumpVisibility();
     }
-
-    wireThemeToggle();
   });
-
-  // wireThemeToggle installs the dark-mode toggle handler
-  // (issue #94). The button (#theme-toggle, rendered in the
-  // navbar by chatFallbackBody) flips <html data-theme>
-  // between "dark" and the default (light). The choice
-  // persists in localStorage so reloads keep the operator's
-  // preference. First-visit users get the system preference
-  // via prefers-color-scheme.
-  function wireThemeToggle() {
-    var btn = document.getElementById('theme-toggle');
-    if (!btn) {
-      return; // no toggle on this page
-    }
-
-    var STORAGE_KEY = 'ragabast-theme';
-    var root = document.documentElement;
-
-    function currentTheme() {
-      return root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-    }
-
-    function applyTheme(theme) {
-      if (theme === 'dark') {
-        root.setAttribute('data-theme', 'dark');
-      } else {
-        root.removeAttribute('data-theme');
-      }
-      // Mirror the new state on the toggle button so the
-      // label always advertises the *action* a click will
-      // take, not the *current* state. A button labelled
-      // "Dark mode" while the page is already dark reads as
-      // ambiguous — "Dark mode" should mean "switch TO
-      // dark mode" and "Light mode" should mean "switch
-      // TO light mode".
-      btn.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
-    }
-
-    // Initial state: stored preference > system preference.
-    try {
-      var stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored === 'dark' || stored === 'light') {
-        applyTheme(stored);
-      } else if (window.matchMedia &&
-          window.matchMedia('(prefers-color-scheme: dark)').matches) {
-        applyTheme('dark');
-      } else {
-        // No stored choice and no OS dark preference —
-        // still need to seed the label so the static
-        // "Dark mode" markup from the navbar reflects the
-        // actual light state we just resolved to.
-        applyTheme(currentTheme());
-      }
-    } catch (e) {
-      // localStorage can throw in private-mode browsers;
-      // fall back to the default light theme silently.
-      applyTheme(currentTheme());
-    }
-
-    btn.addEventListener('click', function () {
-      var next = currentTheme() === 'dark' ? 'light' : 'dark';
-      applyTheme(next);
-      try {
-        window.localStorage.setItem(STORAGE_KEY, next);
-      } catch (e) {
-        // ignore quota / privacy-mode errors
-      }
-    });
-  }
 })();

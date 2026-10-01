@@ -236,7 +236,6 @@ const pageHeaderFallbackBody = `
       <a class="navbar-item" href="/ingest">Ingest</a>
     </div>
     <div class="navbar-end">
-      <button id="theme-toggle" class="button is-small is-light" type="button" aria-label="Toggle dark mode">Dark mode</button>
       {{- if .AuthEnabled }}
       {{- if .SignedIn }}
       <span class="navbar-item has-text-grey">{{ .DisplayName }}</span>
@@ -303,7 +302,6 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<meta name="htmx-config" content='{"allowEval":false}'>
 	<link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
 	<link rel="stylesheet" href="{{ asset "chat.css" }}">
-	<link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
 	<script src="{{ asset "htmx.min.js" }}" defer></script>
 	<script src="{{ asset "chat.js" }}" defer></script>
 </head>
@@ -351,7 +349,6 @@ const ingestFallbackBody = `<!DOCTYPE html>
     <title>{{ .Title }}</title>
     <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
     <link rel="stylesheet" href="{{ asset "chat.css" }}">
-    <link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
     <script src="{{ asset "chat.js" }}" defer></script>
 </head>
 <body class="container mt-4">
@@ -391,7 +388,6 @@ const ingestSuccessFallbackBody = `<!DOCTYPE html>
     <title>{{ .Title }}</title>
     <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
     <link rel="stylesheet" href="{{ asset "chat.css" }}">
-    <link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
     <script src="{{ asset "chat.js" }}" defer></script>
 </head>
 <body class="container mt-4">
@@ -428,7 +424,6 @@ const documentsFallbackBody = `<!DOCTYPE html>
     <title>{{ .Title }}</title>
     <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
     <link rel="stylesheet" href="{{ asset "chat.css" }}">
-    <link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
     <script src="{{ asset "htmx.min.js" }}" defer></script>
     <script src="{{ asset "chat.js" }}" defer></script>
 </head>

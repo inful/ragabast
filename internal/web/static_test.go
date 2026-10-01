@@ -30,8 +30,7 @@ import (
 // We pinned to Bulma 0.9.4 for years; the upgrade to 1.0.4
 // keeps the same MIT-licensed embed contract but adds the
 // v1-era CSS-variable system and the `prefers-color-scheme:dark`
-// automatic dark theme (chat-dark.css still exists for the
-// manual-toggle path).
+// automatic dark theme.
 func TestStaticHandler_ServesBulmaCSS(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
@@ -711,7 +710,6 @@ func TestLoginTemplate_NoInlineStyle(t *testing.T) {
 func TestStaticAssets_AllowListIsExact(t *testing.T) {
 	expected := []string{
 		"bulma.min.css",
-		"chat-dark.css",
 		"chat.css",
 		"chat.js",
 		"htmx.min.js",

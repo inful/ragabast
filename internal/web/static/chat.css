@@ -137,7 +137,3 @@ pre.chat-msg {
   margin-block: 1.25rem;
   margin-inline: 0;
 }
-
-[data-theme="dark"] .chat-turn-divider {
-  border-top-color: hsl(0 0% 22%);
-}
