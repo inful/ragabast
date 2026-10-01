@@ -177,11 +177,14 @@ func TestStaticHandler_RejectsPathTraversal(t *testing.T) {
 }
 
 // TestStaticHandler_SetsCacheControl pins the cache header
-// shipped on every successful static response. The embedded
-// assets are version-pinned (bulma 1.0.4, htmx 1.9.10) and
-// cannot change without rebuilding the binary, so a long
-// max-age with `immutable` is safe — browsers will not
-// revalidate on every page load.
+// shipped on every successful static response. Templates
+// render versioned URLs (?v=<sha>, see asset_version.go),
+// so the URL itself is the cache key — long max-age on the
+// versioned URL means the bytes are cached for the lifetime
+// of the binary without any roundtrip. We deliberately do
+// NOT include `immutable` so direct (non-versioned) fetches
+// — legacy bookmarks, service-worker fetches, curl
+// invocations — still revalidate via the ETag below.
 //
 // Without this header, a browser that has the assets in
 // memory still issues a conditional GET on every page view,
@@ -204,10 +207,11 @@ func TestStaticHandler_SetsCacheControl(t *testing.T) {
 	// One year is the conventional value for version-pinned,
 	// content-addressed assets. We don't pin the exact number
 	// because a sane future bump (e.g. two years) shouldn't
-	// break the test, but we do require `immutable` so the
-	// browser skips revalidation entirely.
-	require.Contains(t, cc, "immutable",
-		"Cache-Control must include 'immutable' (got %q)", cc)
+	// break the test. We do NOT require `immutable` — see
+	// the test below (TestStaticHandler_CacheControlDropsImmutable)
+	// for the rationale and the alternative-cost argument.
+	require.NotContains(t, cc, "immutable",
+		"Cache-Control must NOT include 'immutable' — the ?v=<sha> URL is the cache key, and immutable would block revalidation for direct non-versioned requests (TestStaticHandler_CacheControlDropsImmutable)")
 }
 
 // TestStaticHandler_ETagHonoredOnIfNoneMatch pins the
@@ -359,7 +363,7 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 
 			// The embedded template MUST reference /static/, not
 			// the old CDN URL.
-			require.Contains(t, body, `href="/static/bulma.min.css"`,
+			require.Contains(t, body, `href="/static/bulma.min.css`,
 				"%s must load Bulma from the embedded /static/bulma.min.css", p.path)
 			require.NotContains(t, body, "cdn.jsdelivr.net",
 				"%s must not reference cdn.jsdelivr.net", p.path)
@@ -368,7 +372,7 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 			// /static/. The ingest and documents pages don't
 			// currently use htmx, so we only assert for /search.
 			if p.path == "/search" {
-				require.Contains(t, body, `src="/static/htmx.min.js"`,
+				require.Contains(t, body, `src="/static/htmx.min.js`,
 					"%s must load htmx from the embedded /static/htmx.min.js", p.path)
 				require.NotContains(t, body, "unpkg.com",
 					"%s must not reference unpkg.com", p.path)
@@ -390,9 +394,9 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
 
-		require.Contains(t, body, `href="/static/bulma.min.css"`,
+		require.Contains(t, body, `href="/static/bulma.min.css`,
 			"chat fallback must load Bulma from /static/bulma.min.css")
-		require.Contains(t, body, `src="/static/htmx.min.js"`,
+		require.Contains(t, body, `src="/static/htmx.min.js`,
 			"chat fallback must load htmx from /static/htmx.min.js")
 		require.NotContains(t, body, "cdn.jsdelivr.net",
 			"chat fallback must not reference cdn.jsdelivr.net")
@@ -413,7 +417,7 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
 
-		require.Contains(t, body, `href="/static/bulma.min.css"`,
+		require.Contains(t, body, `href="/static/bulma.min.css`,
 			"ingest fallback must load Bulma from /static/bulma.min.css")
 		require.NotContains(t, body, "cdn.jsdelivr.net",
 			"ingest fallback must not reference cdn.jsdelivr.net")
@@ -429,7 +433,7 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
 
-		require.Contains(t, body, `href="/static/bulma.min.css"`,
+		require.Contains(t, body, `href="/static/bulma.min.css`,
 			"documents fallback must load Bulma from /static/bulma.min.css")
 		require.NotContains(t, body, "cdn.jsdelivr.net",
 			"documents fallback must not reference cdn.jsdelivr.net")
@@ -446,7 +450,7 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 // holding the chat-log / chat-msg / htmx-indicator classes
 // because there was no /static/chat.css. That block is now
 // in /static/chat.css and the template references it via
-// <link rel="stylesheet" href="/static/chat.css">.
+// <link rel="stylesheet" href="/static/chat.css>.
 func TestChatFallback_NoInlineStyle(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
@@ -465,7 +469,7 @@ func TestChatFallback_NoInlineStyle(t *testing.T) {
 		"chat fallback must not contain an inline <style> block (CSP blocks it)")
 
 	// Must reference the external stylesheet instead.
-	require.Contains(t, body, `href="/static/chat.css"`,
+	require.Contains(t, body, `href="/static/chat.css`,
 		"chat fallback must load chat-specific styles from /static/chat.css")
 }
 
@@ -509,7 +513,7 @@ func TestChatFallback_HtmxConfigDisablesEval(t *testing.T) {
 // The replacement lives in /static/chat.js which wires the
 // same UX via htmx:beforeRequest / htmx:afterRequest /
 // htmx:responseError event listeners. That file loads via
-// <script src="/static/chat.js" defer>, so the strict CSP
+// <script src="/static/chat.js defer>, so the strict CSP
 // (script-src 'self', no 'unsafe-inline', no 'unsafe-eval')
 // lets it through.
 func TestChatFallback_NoHxOnAttributes(t *testing.T) {
@@ -526,7 +530,7 @@ func TestChatFallback_NoHxOnAttributes(t *testing.T) {
 
 	require.NotContains(t, body, "hx-on",
 		"chat fallback must not use hx-on::* attributes (would silently fail with allowEval=false)")
-	require.Contains(t, body, `src="/static/chat.js"`,
+	require.Contains(t, body, `src="/static/chat.js`,
 		"chat fallback must load /static/chat.js to wire htmx event listeners")
 }
 
@@ -553,9 +557,9 @@ func TestChatFallback_LoadsExternalChatJS(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	require.Contains(t, body, `<script src="/static/chat.js"`,
+	require.Contains(t, body, `<script src="/static/chat.js`,
 		"chat fallback must load /static/chat.js as an external script (CSP blocks inline <script>)")
-	require.Contains(t, body, `src="/static/htmx.min.js"`,
+	require.Contains(t, body, `src="/static/htmx.min.js`,
 		"chat fallback must load htmx from /static/htmx.min.js")
 
 	// Every <script> tag must have a src= attribute. The
@@ -689,7 +693,11 @@ func TestLoginTemplate_NoInlineStyle(t *testing.T) {
 
 	require.NotRegexp(t, `(?i)<style\b`, body,
 		"login template must not contain an inline <style> block (CSP blocks it)")
-	require.Contains(t, body, `href="/static/login.css"`,
+	// The static URL is now versioned via {{ asset "login.css" }}.
+	// The test pins that the page references the asset at all;
+	// the cache-busting query string is exercised by the asset
+	// version tests in asset_version_test.go.
+	require.Contains(t, body, `href="/static/login.css`,
 		"login template must load login-specific styles from /static/login.css")
 }
 

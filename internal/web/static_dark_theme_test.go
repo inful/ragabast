@@ -159,7 +159,7 @@ func TestChatDarkTheme_NoMissingRendersAfterSwap(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, w.Code)
 			body := w.Body.String()
-			assert.Contains(t, body, `href="/static/chat-dark.css"`,
+			assert.Contains(t, body, `href="/static/chat-dark.css`,
 				"%s (fallback) must still load chat-dark.css so the toggle keeps working", path)
 		})
 	}
@@ -174,7 +174,7 @@ func TestChatDarkTheme_NoMissingRendersAfterSwap(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
-		assert.Contains(t, body, `href="/static/chat-dark.css"`,
+		assert.Contains(t, body, `href="/static/chat-dark.css`,
 			"/search (embedded template) must still load chat-dark.css")
 	})
 }
@@ -188,8 +188,8 @@ func TestChatDarkTheme_TemplatesReferenceBulma1Path(t *testing.T) {
 	require.NoError(t, err, "login template must be readable")
 	require.NotEmpty(t, tmpl)
 
-	assert.Contains(t, string(tmpl), `href="/static/chat-dark.css"`,
-		"login.html must continue to load chat-dark.css so the toggle button on the login page works")
+	assert.Contains(t, string(tmpl), `href="{{ asset "chat-dark.css"`,
+		"login.html must reference chat-dark.css via the asset FuncMap so the toggle button on the login page works — see asset_version.go for the cache-busting contract")
 }
 
 // TestChatDarkTheme_RemovesRawDarkColors is a guardrail

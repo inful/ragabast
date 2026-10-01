@@ -25,22 +25,47 @@ import (
 // handler can render it without paying template.Parse
 // cost on every GET /auth/login.
 //
-// ParseFS parses the file under its base name ("login.html"),
-// which is what Execute runs by default — we don't wrap in
-// template.New(...) because that creates an empty "login"
-// sibling that Execute would pick over "login.html" instead.
-//
-// The init() block below registers the shared `header`
-// template block (issue #85 follow-on) so the {{ template
-// "header" }} call inside login.html resolves to the navbar
-// partial. NewServer does the same for the rest of the
-// embedded templates/ set.
-var loginTpl = template.Must(template.ParseFS(templatesFS, "templates/login.html"))
+// The var is initialized to nil; the actual parse happens
+// in init() below because the parser needs the `asset`
+// template function to be registered first — and that
+// function reads from a map populated via sync.Once in
+// asset_version.go, which can be called from any init()
+// function but cannot be a top-level var initializer (the
+// order of top-level var initializers within a package is
+// not guaranteed across files, and the FuncMap needs to
+// exist before the template body is parsed so the parser
+// resolves `{{ asset "..." }}` against it).
+var loginTpl *template.Template
 
-func init() { //nolint:gochecknoinits // registers the header block on loginTpl; see comment above
-	if _, err := loginTpl.Parse(pageHeaderFallbackBody); err != nil {
-		panic("oauth: failed to register header block on loginTpl: " + err.Error())
-	}
+func init() { //nolint:gochecknoinits // parses loginTpl with header + asset FuncMap; see comment above
+	// Ensure the assetVersions package map is populated
+	// before we parse, so the parser can resolve `asset`
+	// calls. ensureAssetVersions is idempotent; this is a
+	// no-op if NewServer already ran.
+	ensureAssetVersions()
+
+	// ParseFS associates the parsed file with its base
+	// name ("login.html") and parses the body into a
+	// sub-template with that name. We name the receiver
+	// "login.html" so Execute runs that sub-template by
+	// name match — without the name, Execute would look
+	// for a template named "" which doesn't exist.
+	//
+	// The FuncMap must be registered before ParseFS runs
+	// because ParseFS validates function references at
+	// parse time, not Execute time. Without the asset
+	// FuncMap, the parser fails on the first {{ asset ... }}
+	// in login.html.
+	parsed := template.Must(template.New("login.html").Funcs(template.FuncMap{
+		"asset": AssetURL,
+	}).ParseFS(templatesFS, "templates/login.html"))
+
+	// Register the shared `header` template block (issue
+	// #85 follow-on) so the {{ template "header" }} call
+	// inside login.html resolves to the navbar partial.
+	parsed = template.Must(parsed.Parse(pageHeaderFallbackBody))
+
+	loginTpl = parsed
 }
 
 // oauthStateCookieName is the short-lived cookie that

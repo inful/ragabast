@@ -172,26 +172,28 @@ type documentsFallbackRow struct {
 // not refactor to fmt.Fprintf.
 //
 // The header partial is shared across all four pages so the
-// sign-in / sign-out UX stays consistent without duplicating
-// the navbar HTML four times. Each per-page template is
+// sign-in / sign-out UX stays consistent without duplicating the
+// navbar HTML four times. Each per-page template is
 // built by composing pageHeaderFallbackBody (the named block
 // "header") with the page-specific body string at parse time.
-func newFallbackTemplates() *fallbackTemplates {
-	return &fallbackTemplates{
-		chat:          mustParseWithHeader("chat.html", chatFallbackBody),
-		ingest:        mustParseWithHeader("ingest.html", ingestFallbackBody),
-		ingestSuccess: mustParseWithHeader("ingest_success.html", ingestSuccessFallbackBody),
-		documents:     mustParseWithHeader("documents.html", documentsFallbackBody),
-	}
-}
-
-// mustParseWithHeader builds one fallback template by combining
-// the shared header partial with the page-specific body. The
-// result is a single *template.Template that exposes the named
-// block "header" so per-page bodies can include it via
-// {{ template "header" .Header }}.
-func mustParseWithHeader(name, body string) *template.Template {
-	t := template.Must(template.New(name).Parse(pageHeaderFallbackBody))
+//
+// parseFallback is the FuncMap-bearing parser that
+// NewServer uses for every fallback template. The asset
+// FuncMap closure captures s.assetURL from the surrounding
+// Server, so this helper lives in fallback_renderers.go
+// (where the per-page body strings live) and is called from
+// server.go after s.assetVersions is populated.
+//
+// Why the FuncMap is a parameter rather than a closure:
+//
+//	The asset-busting query string (`{{ asset "..." }}`) is
+//	embedded in the rendered templates, so the `asset`
+//	function must be in scope at Parse time — not after, as
+//	Funcs-after-Parse does for a pre-parsed template. The
+//	FuncMap is a parameter so the helper stays pure and the
+//	Server passes its assetURL closure once at construction.
+func parseFallback(name, body string, funcs template.FuncMap) *template.Template {
+	t := template.Must(template.New(name).Funcs(funcs).Parse(pageHeaderFallbackBody))
 	return template.Must(t.Parse(body))
 }
 
@@ -299,11 +301,11 @@ const chatFallbackBody = `<!DOCTYPE html>
 <head>
 	<title>{{ .Title }}</title>
 	<meta name="htmx-config" content='{"allowEval":false}'>
-	<link rel="stylesheet" href="/static/bulma.min.css">
-	<link rel="stylesheet" href="/static/chat.css">
-	<link rel="stylesheet" href="/static/chat-dark.css">
-	<script src="/static/htmx.min.js" defer></script>
-	<script src="/static/chat.js" defer></script>
+	<link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
+	<link rel="stylesheet" href="{{ asset "chat.css" }}">
+	<link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
+	<script src="{{ asset "htmx.min.js" }}" defer></script>
+	<script src="{{ asset "chat.js" }}" defer></script>
 </head>
 <body class="container mt-4">
 	{{ template "header" .Header }}
@@ -347,10 +349,10 @@ const ingestFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="/static/bulma.min.css">
-    <link rel="stylesheet" href="/static/chat.css">
-    <link rel="stylesheet" href="/static/chat-dark.css">
-    <script src="/static/chat.js" defer></script>
+    <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
+    <script src="{{ asset "chat.js" }}" defer></script>
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
@@ -387,10 +389,10 @@ const ingestSuccessFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="/static/bulma.min.css">
-    <link rel="stylesheet" href="/static/chat.css">
-    <link rel="stylesheet" href="/static/chat-dark.css">
-    <script src="/static/chat.js" defer></script>
+    <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
+    <script src="{{ asset "chat.js" }}" defer></script>
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}
@@ -424,11 +426,11 @@ const documentsFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="/static/bulma.min.css">
-    <link rel="stylesheet" href="/static/chat.css">
-    <link rel="stylesheet" href="/static/chat-dark.css">
-    <script src="/static/htmx.min.js" defer></script>
-    <script src="/static/chat.js" defer></script>
+    <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
+    <script src="{{ asset "htmx.min.js" }}" defer></script>
+    <script src="{{ asset "chat.js" }}" defer></script>
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}

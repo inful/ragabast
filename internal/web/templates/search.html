@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="/static/bulma.min.css">
-    <link rel="stylesheet" href="/static/chat.css">
-    <link rel="stylesheet" href="/static/chat-dark.css">
-    <script src="/static/htmx.min.js"></script>
-    <script src="/static/chat.js" defer></script>
+    <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat.css" }}">
+    <link rel="stylesheet" href="{{ asset "chat-dark.css" }}">
+    <script src="{{ asset "htmx.min.js" }}"></script>
+    <script src="{{ asset "chat.js" }}" defer></script>
 </head>
 <body class="container mt-4">
     {{ template "header" .Header }}

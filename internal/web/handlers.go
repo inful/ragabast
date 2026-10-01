@@ -883,7 +883,15 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 
 	w.Header().Set("Content-Type", asset.contentType)
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	// Cache-Control: long max-age for the within-binary-version
+	// optimization; no `immutable` so direct (non-versioned)
+	// requests — legacy bookmarks, service-worker fetches,
+	// curl invocations — still revalidate via the ETag below.
+	// Templates render versioned URLs (?v=<sha>, see
+	// asset_version.go) so the versioned URL is the cache key;
+	// within a single binary version the long max-age means
+	// every page load reuses the bytes without a roundtrip.
+	w.Header().Set("Cache-Control", "public, max-age=31536000")
 	w.Header().Set("ETag", etag)
 	// Content-Length so the browser can skip the
 	// transfer-encoding dance on a cache miss. Set

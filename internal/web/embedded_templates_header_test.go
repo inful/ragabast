@@ -53,7 +53,15 @@ func TestLoginPage_AlwaysOnNavbar(t *testing.T) {
 // ParseFS + Parse(pageHeaderFallbackBody) sequence to assert
 // the lookup works end-to-end.
 func TestPageHeaderBlock_Defined(t *testing.T) {
-	tmpl, err := template.New("base").ParseFS(templatesFS, "templates/*.html")
+	// Use the same ParseFS + Funcs path that NewServer does —
+	// the embedded templates carry `{{ asset "..." }}` calls
+	// (see asset_version.go for the cache-busting contract)
+	// which require the asset FuncMap to be present at parse
+	// time. Without it the parser fails on the first asset
+	// reference.
+	tmpl, err := template.New("base").Funcs(template.FuncMap{
+		"asset": AssetURL,
+	}).ParseFS(templatesFS, "templates/*.html")
 	require.NoError(t, err, "parsing embedded templates")
 	// Register the header block the same way NewServer does.
 	_, err = tmpl.Parse(pageHeaderFallbackBody)

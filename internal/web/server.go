@@ -49,6 +49,19 @@ type Server struct {
 	// session-cookie value.
 	oauthHandlers *oauthHandlers
 	sessions      *sessionStore
+	// assetVersions holds filename → hex-sha256 for every
+	// static asset the server serves. Populated once at
+	// construction by buildAssetVersions and exposed to
+	// templates via the `asset` func (see asset_version.go)
+	// so every <link href> / <script src> in the rendered
+	// HTML carries a "?v=<sha>" query string. That query
+	// string is the cache-busting key: a binary upgrade
+	// produces a different SHA for any changed file, the
+	// URL changes, and the browser refetches despite
+	// Cache-Control: immutable + max-age=1y on the static
+	// handler. The handler ignores query strings, so the
+	// served bytes are unchanged.
+	assetVersions map[string]string
 }
 
 // internalError logs the underlying error and returns a generic 500 to the
@@ -230,6 +243,53 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	default:
 		templates, err = template.ParseFS(templatesFS, "templates/*.html")
 	}
+	// If the templates carried `{{ asset "..." }}` calls
+	// (every embedded template does; see the cache-busting
+	// contract in asset_version.go), the parser needs the
+	// `asset` function in its FuncMap before ParseFS runs.
+	// Without it, html/template fails the parse on the missing
+	// function and the operator gets a page that renders
+	// only the navbar.
+	//
+	// The trick: re-parse via template.New("base").Funcs(...).
+	// ParseFS(...) which bakes the FuncMap into the receiver
+	// template at parse time. The `asset` helper reads from
+	// the package-level assetVersionsMap (populated by init()
+	// in asset_version.go). We do this in both branches
+	// (operator-supplied and embedded) so the FuncMap applies
+	// regardless of source.
+	//
+	// The receiver name "base" matters: ParseFS associates
+	// each file with its base name, and Execute runs the
+	// template whose name matches the receiver's name. We
+	// want Execute to land on the search template (the first
+	// page a typical operator hits) — but in practice the
+	// per-page render path goes through ExecuteTemplate on
+	// each named sub-template, so the receiver name is just
+	// the fallback. "base" is fine.
+	{
+		var source string
+		if cfg.Paths.TemplatesDir != "" {
+			source = cfg.Paths.TemplatesDir
+		} else {
+			source = "embedded (templates/)"
+		}
+		withFuncs, parseErr := template.New("base").Funcs(template.FuncMap{
+			"asset": AssetURL,
+		}).ParseFS(templatesFS, "templates/*.html")
+		if parseErr != nil {
+			log.Printf("web: failed to re-parse %s with asset FuncMap: %v", source, parseErr)
+			// Keep the original parse — it may have partial
+			// state that's still better than nothing, and the
+			// operator's templates will fall back to bare
+			// "base" only if the original parse failed too.
+			if templates == nil {
+				templates = template.New("base")
+			}
+		} else {
+			templates = withFuncs
+		}
+	}
 	// Register the shared `header` template block (issue #85
 	// follow-on) so embedded page templates can invoke it via
 	// {{ template "header" .Header }}. Without this the embedded
@@ -244,7 +304,16 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 			log.Printf("web: failed to register header block on embedded templates: %v", parseErr)
 		}
 	}
-	if err != nil {
+	// The original ParseGlob / ParseFS path may have failed
+	// with a "function 'asset' not defined" error — that
+	// happens because the embedded templates use {{ asset ... }}
+	// calls but ParseFS doesn't carry our FuncMap. The
+	// re-parse above (with the FuncMap baked in) succeeds
+	// in that case, so by this point templates is non-nil
+	// and the bare "base" fallback is only reached if the
+	// re-parse ALSO failed — a true operator error that
+	// deserves the loud log.
+	if err != nil && templates == nil {
 		log.Printf("web: failed to load templates: %v", err)
 		templates = template.New("base")
 	}
@@ -307,15 +376,38 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	}
 
 	s := &Server{
-		config:        cfg,
-		service:       svc,
-		router:        router,
-		templates:     templates,
-		fallback:      newFallbackTemplates(),
+		config:    cfg,
+		service:   svc,
+		router:    router,
+		templates: templates,
+		// Fallback templates are populated below, after
+		// assetVersions — they need the `asset` template
+		// function registered, which means we can't parse
+		// them in this struct literal (the FuncMap closure
+		// needs s.assetURL which lives on *Server).
+		fallback:      &fallbackTemplates{},
 		ingestQueue:   ingestQueue,
 		oauthHandlers: oauthHandlers,
 		sessions:      sessions,
+		assetVersions: buildAssetVersions(),
 	}
+
+	// Register the `asset` template function so every page
+	// can write `{{ asset "bulma.min.css" }}` and get back
+	// "/static/bulma.min.css?v=<sha>". The FuncMap is applied
+	// to both the embedded-template branch and the fallback
+	// Go-string templates so a single helper covers every
+	// page-rendering path.
+	funcs := template.FuncMap{
+		"asset": s.assetURL,
+	}
+	if templates != nil {
+		s.templates = templates.Funcs(funcs)
+	}
+	s.fallback.chat = parseFallback("chat.html", chatFallbackBody, funcs)
+	s.fallback.ingest = parseFallback("ingest.html", ingestFallbackBody, funcs)
+	s.fallback.ingestSuccess = parseFallback("ingest_success.html", ingestSuccessFallbackBody, funcs)
+	s.fallback.documents = parseFallback("documents.html", documentsFallbackBody, funcs)
 
 	s.registerRoutes()
 
