@@ -80,6 +80,47 @@ func TestChatDarkTheme_ToggleStillWiresDataTheme(t *testing.T) {
 		"chat.js must persist the toggle in localStorage so the choice survives reloads")
 }
 
+// TestChatDarkTheme_ToggleLabelFlips pins the operator-
+// facing half of the toggle: the navbar button text must
+// reflect the *action* a click will take, not the
+// *current* state. Without this the button always reads
+// "Dark mode" — even when the page is already dark —
+// which reads as ambiguous ("does it mean switch to dark,
+// or am I in dark mode now?").
+//
+// Contract:
+//
+//   - chat.js sets btn.textContent to 'Light mode' when
+//     the theme flips to dark, and 'Dark mode' when it
+//     flips back to light
+//   - the same label flip runs on initial load so a
+//     first-visit user who lands in dark mode (via OS
+//     preference) sees "Light mode" — not "Dark mode" —
+//     on the toggle
+//
+// We assert both halves. A test on the rendered HTML
+// alone can't catch this — the navbar markup ships with a
+// static "Dark mode" label, so the only thing pinning the
+// contract is that chat.js mutates it.
+func TestChatDarkTheme_ToggleLabelFlips(t *testing.T) {
+	js := readStaticAsset(t, "/static/chat.js")
+
+	// The label must be set inside applyTheme so every
+	// state change (initial load, click, OS-preference
+	// first visit) rewrites it.
+	assert.Contains(t, js, "'Light mode'",
+		"chat.js must write the 'Light mode' label to the toggle button when the theme flips to dark")
+	assert.Contains(t, js, "'Dark mode'",
+		"chat.js must write the 'Dark mode' label back when the theme flips to light")
+
+	// The label must be set via the button element, not
+	// appended to surrounding markup. textContent is the
+	// standard way to replace the entire button label
+	// without leaving the old text behind.
+	assert.Contains(t, js, "btn.textContent",
+		"chat.js must use btn.textContent (not innerHTML / innerText) to replace the toggle button label")
+}
+
 // TestChatDarkTheme_OSPreferenceHonoredByDefault pins the
 // first-visit behavior: when the operator hasn't toggled,
 // Bulma 1.x's prefers-color-scheme media query drives the

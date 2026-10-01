@@ -181,6 +181,14 @@
       } else {
         root.removeAttribute('data-theme');
       }
+      // Mirror the new state on the toggle button so the
+      // label always advertises the *action* a click will
+      // take, not the *current* state. A button labelled
+      // "Dark mode" while the page is already dark reads as
+      // ambiguous — "Dark mode" should mean "switch TO
+      // dark mode" and "Light mode" should mean "switch
+      // TO light mode".
+      btn.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
     }
 
     // Initial state: stored preference > system preference.
@@ -191,10 +199,17 @@
       } else if (window.matchMedia &&
           window.matchMedia('(prefers-color-scheme: dark)').matches) {
         applyTheme('dark');
+      } else {
+        // No stored choice and no OS dark preference —
+        // still need to seed the label so the static
+        // "Dark mode" markup from the navbar reflects the
+        // actual light state we just resolved to.
+        applyTheme(currentTheme());
       }
     } catch (e) {
       // localStorage can throw in private-mode browsers;
       // fall back to the default light theme silently.
+      applyTheme(currentTheme());
     }
 
     btn.addEventListener('click', function () {

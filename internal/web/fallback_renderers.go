@@ -323,7 +323,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 		</div>
 		<div class="field is-grouped">
 			<div class="control">
-				<button id="chat-send" class="button is-warning" type="submit">Send</button>
+				<button id="chat-send" class="button is-primary" type="submit">Send</button>
 			</div>
 			<div class="control htmx-indicator" id="chat-indicator">
 				<span class="tag is-light">Thinking…</span>
