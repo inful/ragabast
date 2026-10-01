@@ -317,10 +317,6 @@ const chatFallbackBody = `<!DOCTYPE html>
 		<button id="jump-to-latest" class="button is-small jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
 	</div>
 
-	<div class="box">
-		<a id="chat-export" class="button is-small is-light" href="/api/chat/export?session_id={{ .SessionID }}">Export transcript (.md)</a>
-	</div>
-
 	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input">
 		<input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
 		<input type="hidden" name="session_id" value="{{ .SessionID }}">

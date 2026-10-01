@@ -25,9 +25,6 @@ import (
 //
 //  1. Models read markdown natively — no parsing step.
 //  2. The agent can cite by chunk title without parsing.
-//  3. Future: when source citations land in the chat
-//     transcript export (issue #76), this format
-//     matches.
 func (s *Server) searchHandler(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query := req.GetString("query", "")
 	if query == "" {

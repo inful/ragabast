@@ -971,20 +971,7 @@ into subsequent LLM calls.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/chat/export?session_id=<id>` | Stream the chat transcript as a markdown download (`text/markdown`, `Content-Disposition: attachment; filename="ragabast-chat-<id8>-<unix>.md"`). 404 when the session has no messages. |
 | `POST` | `/chat/clear` | Drop the server-side history AND the browser cookie so the next chat starts fresh. The "private mode" toggle. |
-
-The transcript format:
-
-```markdown
-## User
-
-What is ragabast?
-
-## Assistant
-
-A markdown chunker and RAG server.
-```
 
 Sessions are in-memory only by default — restart drops them. The
 chat session store does not persist to disk; see issue #77

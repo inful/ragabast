@@ -26,7 +26,6 @@ type serviceAPI interface {
 	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
 	QueryCacheStats() service.QueryCacheStats
 	ChatSessionHistory(sessionID string) []service.ChatMessage
-	ExportChatTranscript(sessionID string) string
 	AppendChatTurn(ctx context.Context, sessionID string, exchange ...service.ChatMessage) error
 	ClearChatSession(sessionID string)
 	GetDocument(ctx context.Context, documentID string) (*models.Document, error)
