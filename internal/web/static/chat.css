@@ -133,7 +133,7 @@ pre.chat-msg {
  * spacing. */
 .chat-turn-divider {
   border: 0;
-  border-top: 1px solid hsl(0 0% 86%);
+  border-top: 1px solid var(--bulma-border-weak);
   margin-block: 1.25rem;
   margin-inline: 0;
 }

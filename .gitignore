@@ -63,3 +63,8 @@ mise.toml
 # only data/vectors/ is consumed at runtime (and that path is
 # git-ignored above).
 data/documents/
+
+# UI review screenshots captured during the post-PR review
+# passes. Always regenerated locally; never meant to live in
+# the repo's history.
+.review-screenshots/

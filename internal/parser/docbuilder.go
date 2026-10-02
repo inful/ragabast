@@ -61,9 +61,6 @@ func (p *DocbuilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	// Use the docbuilder UID as the stable identifier; fingerprint is strictly content-based.
 	doc.ID = doc.UID
 
-	// Extract title from first H1 header
-	doc.Title = p.extractTitle(doc.Content)
-
 	// Validate required fields
 	if err := doc.Validate(); err != nil {
 		return nil, fmt.Errorf("document validation failed: %w", err)
@@ -146,6 +143,15 @@ func (p *DocbuilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 		}
 	}
 
+	// Extract title. Strict precedence: the frontmatter `title:`
+	// field is THE title. There is no H1 fallback — a document
+	// without a frontmatter `title:` has an empty doc.Title,
+	// which the presentation layer (DisplayLabel) renders via
+	// its filename → document_id fallback chain.
+	if title, ok := frontmatter["title"].(string); ok {
+		doc.Title = strings.TrimSpace(title)
+	}
+
 	// Extract created_at
 	if created, ok := frontmatter["created_at"].(string); ok {
 		if t, err := time.Parse(time.RFC3339, created); err == nil {
@@ -166,18 +172,6 @@ func (p *DocbuilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 // generateFingerprint creates a stable content fingerprint.
 func (p *DocbuilderParser) generateFingerprint(content string) string {
 	return mdfp.CalculateFingerprint(content)
-}
-
-// extractTitle finds the first H1 header in the markdown content.
-func (p *DocbuilderParser) extractTitle(content string) string {
-	lines := strings.SplitSeq(content, "\n")
-	for line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "# ") {
-			return strings.TrimSpace(trimmed[2:])
-		}
-	}
-	return ""
 }
 
 // ExtractHeaders extracts all H1 and H2 headers with their positions.

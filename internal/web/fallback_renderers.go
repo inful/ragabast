@@ -224,7 +224,7 @@ func parseFallback(name, body string, funcs template.FuncMap) *template.Template
 // single-user open-access install (AuthEnabled=false).
 const pageHeaderFallbackBody = `
 {{ define "header" -}}
-<nav class="navbar is-light" role="navigation" aria-label="main navigation">
+<nav class="navbar" role="navigation" aria-label="main navigation">
   <div class="navbar-brand">
     <a class="navbar-item" href="/">ragabast</a>
   </div>
@@ -242,7 +242,7 @@ const pageHeaderFallbackBody = `
       <div class="navbar-item">
         <form method="post" action="/auth/logout">
           <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
-          <button class="button is-small is-light" type="submit">Sign out</button>
+          <button class="button is-small" type="submit">Sign out</button>
         </form>
       </div>
       {{- else if .ShowSignIn }}
@@ -331,7 +331,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 				<button id="chat-send" class="button is-primary" type="submit">Send</button>
 			</div>
 			<div class="control htmx-indicator" id="chat-indicator">
-				<span class="tag is-light">Thinking…</span>
+				<span class="tag">Thinking…</span>
 			</div>
 		</div>
 	</form>
@@ -401,7 +401,7 @@ const ingestSuccessFallbackBody = `<!DOCTYPE html>
     <div class="buttons">
         <a href="/ingest" class="button is-primary">Ingest Another</a>
         <a href="/search" class="button is-info">Search</a>
-        <a href="/" class="button is-light">Home</a>
+        <a href="/" class="button">Home</a>
     </div>
 </body>
 </html>`
@@ -466,7 +466,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
         </tbody>
     </table>
     {{ else }}
-    <div class="notification is-light">
+    <div class="notification">
         No documents ingested yet. Use the <a href="/ingest">Ingest</a> page to add some.
     </div>
     {{ end }}

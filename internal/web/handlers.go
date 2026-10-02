@@ -566,7 +566,7 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 		// empty submits client-side in real browsers.
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprint(w, `<div class="notification is-warning is-light">Query is required.</div>`)
+		_, _ = fmt.Fprint(w, `<div class="notification is-warning">Query is required.</div>`)
 		return
 	}
 

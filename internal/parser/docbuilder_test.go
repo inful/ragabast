@@ -53,10 +53,16 @@ func TestParseDocument_AllowsMissingURLs(t *testing.T) {
 // to recognize the opening delimiter and treated the whole
 // input as markdown, leaving doc.UID empty and triggering the
 // 500 "document UID is required" error on the web ingest path.
+//
+// The test also covers CRLF in the frontmatter `title:` field
+// — strict frontmatter title precedence (see
+// TestParseDocument_ExtractsTitleFromFrontmatter) means a
+// CRLF past of the title line must still produce the parsed
+// title without a trailing \r.
 func TestParseDocument_CRLFFrontmatter(t *testing.T) {
 	p := NewDocbuilderParser()
 
-	raw := []byte("---\r\nuid: crlf-doc\r\nfingerprint: crlf-doc-v1\r\n---\r\n\r\n# Hello\r\n\r\nbody\r\n")
+	raw := []byte("---\r\nuid: crlf-doc\r\nfingerprint: crlf-doc-v1\r\ntitle: Hello\r\n---\r\n\r\n# Body H1\r\n\r\nbody\r\n")
 
 	doc, err := p.ParseDocument(raw, "test.md")
 	require.NoError(t, err)
@@ -64,7 +70,73 @@ func TestParseDocument_CRLFFrontmatter(t *testing.T) {
 	require.Equal(t, "crlf-doc", doc.ID)
 	require.Equal(t, "crlf-doc-v1", doc.Fingerprint)
 	require.Equal(t, "Hello", doc.Title,
-		"H1 must extract correctly when the body uses CRLF line endings")
+		"frontmatter title must extract correctly when the frontmatter uses CRLF line endings")
+}
+
+// TestParseDocument_ExtractsTitleFromFrontmatter pins the
+// happy path for the strict frontmatter-title contract: a
+// frontmatter `title:` field is parsed and stored on
+// doc.Title. This is the primary source of truth for the
+// document's display label.
+func TestParseDocument_ExtractsTitleFromFrontmatter(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\nuid: adr-001\ntitle: ADR 001 -- Use Postgres\n---\n\n# Anything\n\nbody\n")
+
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "ADR 001 -- Use Postgres", doc.Title,
+		"frontmatter title must be parsed and stored on doc.Title")
+}
+
+// TestParseDocument_TitleFromFrontmatterIgnoresH1 pins the
+// strict precedence rule: when both a frontmatter `title:`
+// AND a `# H1` are present, the frontmatter value wins and
+// the H1 is silently ignored. A contributor cannot "fix" an
+// empty frontmatter title by adding a body H1 — the body
+// H1 is no longer consulted for title extraction.
+func TestParseDocument_TitleFromFrontmatterIgnoresH1(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\nuid: adr-002\ntitle: From Frontmatter\n---\n\n# From H1\n\nbody\n")
+
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "From Frontmatter", doc.Title,
+		"frontmatter title must win over the body H1; H1 is no longer consulted for title extraction")
+}
+
+// TestParseDocument_NoTitleInFrontmatterEmptyTitle pins the
+// regression: when no `title:` is in the frontmatter, the
+// document title is empty — even if a `# H1` is present in
+// the body. The old H1-fallback path is gone. An empty
+// doc.Title flows through DisplayLabel's filename and ID
+// fallbacks at the presentation layer.
+func TestParseDocument_NoTitleInFrontmatterEmptyTitle(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\nuid: adr-003\n---\n\n# Should Be Ignored\n\nbody\n")
+
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Empty(t, doc.Title,
+		"without a frontmatter title, doc.Title must be empty; the H1 fallback was removed")
+}
+
+// TestParseDocument_FrontmatterTitleWhitespaceTrimmed pins
+// that whitespace around the frontmatter title is trimmed,
+// matching how every other frontmatter string field behaves
+// (UID, fingerprint). A title like "  Foo  " is stored as
+// "Foo".
+func TestParseDocument_FrontmatterTitleWhitespaceTrimmed(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\nuid: adr-004\ntitle:   Padded Title   \n---\n\nbody\n")
+
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "Padded Title", doc.Title,
+		"frontmatter title must be trimmed of leading and trailing whitespace")
 }
 
 // TestParseDocument_CRLFPreservesRawContent ensures the fix

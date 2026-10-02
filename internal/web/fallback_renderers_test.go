@@ -21,8 +21,8 @@ import (
 // Docker image today, where only chat_message.html,
 // search.html, and search_results.html ship in the embed.
 //
-// The XSS threat: doc.Title (extracted from the first H1
-// header in markdown) and doc.Tags (taken verbatim from the
+// The XSS threat: doc.Title (set from the frontmatter `title:`
+// field in markdown) and doc.Tags (taken verbatim from the
 // `tags:` YAML frontmatter array) are attacker-controllable.
 // A document with `tags: ["<img src=x onerror=alert(1)>"]`
 // must NOT execute JS when the operator visits /documents.
