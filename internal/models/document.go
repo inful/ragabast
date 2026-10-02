@@ -47,6 +47,28 @@ type Document struct {
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
 	FilePath  string    `bson:"file_path" json:"file_path"`
+
+	// Draft mirrors the frontmatter `draft:` flag from Hugo.
+	// When true, the document is filtered out of the embeddings
+	// at parse time (see parser.IsUnpublished) so the database
+	// never holds a document Hugo would not have published.
+	Draft bool `bson:"draft" json:"draft"`
+
+	// Date mirrors Hugo's frontmatter `date:` field. The parser
+	// populates this from RFC 3339; unparseable inputs leave it
+	// at the zero value. Used only by IsUnpublished — not part of
+	// the search surface.
+	Date time.Time `bson:"date" json:"date"`
+
+	// PublishDate mirrors Hugo's frontmatter `publishDate:`
+	// field (with `pubdate` and `published` aliases honored by
+	// the parser). Used only by IsUnpublished.
+	PublishDate time.Time `bson:"publish_date" json:"publish_date"`
+
+	// ExpiryDate mirrors Hugo's frontmatter `expiryDate:` field
+	// (with `unpublishdate` alias honored by the parser). Used
+	// only by IsUnpublished.
+	ExpiryDate time.Time `bson:"expiry_date" json:"expiry_date"`
 }
 
 // NewDocument creates a new document with default values.

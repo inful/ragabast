@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/ragabast/internal/chunker"
 	"github.com/ragabast/internal/config"
@@ -40,6 +41,12 @@ type Service struct {
 	cache        *querycache.Cache[[]models.SearchResult]
 	chatSessions *ChatSessionStore
 	embedModel   string // captured at construction so the cache key stays stable
+
+	// now is the reference clock for Hugo "don't publish"
+	// preflight checks (issue #97). Defaults to time.Now in
+	// production; tests swap it for a fixed value via
+	// setServiceNow.
+	now func() time.Time
 }
 
 // buildDocbuilderURL returns the synthetic permalink for a
@@ -146,5 +153,14 @@ func NewService(cfg *config.Config) (*Service, error) {
 		cache:        querycache.New[[]models.SearchResult](cacheSize, cacheTTL),
 		chatSessions: NewChatSessionStore(ChatSessionStoreConfig{MaxTurns: cfg.Ragabast.ChatSessionMaxTurns}),
 		embedModel:   cfg.Ollama.EmbeddingModel,
+		now:          time.Now,
 	}, nil
+}
+
+// SetNow replaces the service's clock for tests that need a
+// deterministic reference time (issue #97 — the unpublished
+// preflight is anchored to "now"). Production callers never call
+// this; the constructor sets time.Now as the default.
+func (s *Service) SetNow(now func() time.Time) {
+	s.now = now
 }
