@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 // TestEnvelopeToDocbuilderMarkdown_HappyPath pins the headline
@@ -51,7 +52,11 @@ func TestEnvelopeToDocbuilderMarkdown_HappyPath(t *testing.T) {
 		"output must begin with the docbuilder frontmatter delimiter")
 
 	// Required fields present in the frontmatter.
-	assert.Contains(t, md, "uid: gitlab:group/bar:42",
+	// The uid is YAML-quoted because it has a ":" — sanitizeForYAML
+	// guards the frontmatter block. The contract here is "the UID
+	// value appears in the rendered frontmatter"; the exact textual
+	// form (quoted or unquoted) is an internal detail.
+	assert.Contains(t, md, "gitlab:group/bar:42",
 		"the UID must encode path_with_namespace and iid so it's globally unique across GitLab sources")
 	assert.Contains(t, md, "Auth: SAML timeout",
 		"the title must be present in the frontmatter (verbatim or YAML-quoted — the colon triggers quoting, that's expected)")
@@ -235,6 +240,65 @@ func TestEnvelopeToDocbuilderMarkdown_MissingPath_Errors(t *testing.T) {
 	require.Error(t, err, "missing path_with_namespace must fail validation")
 	assert.Contains(t, err.Error(), "path_with_namespace",
 		"the error must name the missing field so the operator can correct the sender")
+}
+
+// TestEnvelopeToDocbuilderMarkdown_UIDWithMetachars_ProducesValidYAML
+// pins the frontmatter-quoting contract for the UID field.
+//
+// The uid is "gitlab:{path}:{iid}". When {path} contains a `: `
+// sequence the unquoted YAML form "uid: gitlab:foo: bar:42" parses
+// as a multi-key mapping ("uid": "gitlab:foo:", "bar": "42"), which
+// is wrong and would surface as a 400 from the parser. Every other
+// string field in the frontmatter is sanitized through
+// sanitizeForYAML — the uid must be too, so a sender-supplied path
+// containing `:`, `#`, or a newline can't corrupt the YAML block.
+//
+// GitLab itself doesn't allow `: ` in project slugs, but the handler
+// is a public HTTP endpoint: a sender behind it could push any string.
+// This is a defense-in-depth check, not a workaround for GitLab's
+// rules.
+func TestEnvelopeToDocbuilderMarkdown_UIDWithMetachars_ProducesValidYAML(t *testing.T) {
+	env := IssueEnvelope{
+		Issue: IssuePayload{
+			IID:       42,
+			Title:     "Has YAML metachars",
+			CreatedAt: "2026-01-15T10:00:00.000Z",
+			WebURL:    "https://gitlab.example.com/group/project/issues/42",
+			Labels:    []string{"bug", "needs-triage"},
+		},
+		// Path with colon-space and hash, both of which would
+		// corrupt an unquoted scalar in YAML 1.2.
+		PathWithNamespace: "group/foo: bar#baz",
+	}
+	md, _, err := EnvelopeToDocbuilderMarkdown(env)
+	require.NoError(t, err)
+
+	// Round-trip the rendered markdown through yaml.v3 the same
+	// way the parser does. The frontmatter must parse cleanly
+	// into the expected shape — one uid key with the literal
+	// colon-and-hash-bearing value, no spurious "bar" or "baz"
+	// keys leaked out of the unquoted scalar.
+	parts := strings.SplitN(md, "\n", 3)
+	require.Len(t, parts, 3, "rendered markdown must have frontmatter + body")
+	require.Equal(t, "---", parts[0])
+
+	var parsed map[string]any
+	dec := yaml.NewDecoder(strings.NewReader(parts[1]))
+	require.NoError(t, dec.Decode(&parsed),
+		"frontmatter must be valid YAML even with metachars in path_with_namespace")
+
+	uidVal, ok := parsed["uid"].(string)
+	require.True(t, ok, "uid must round-trip as a string, not as a mapping")
+	assert.Equal(t, "gitlab:group/foo: bar#baz:42", uidVal,
+		"uid must preserve the metachars verbatim (YAML quoting handles the parsing)")
+
+	// Belt-and-suspenders: a naive yaml.Unmarshal that treats
+	// ": bar#baz" as a mapping key would split the uid into the
+	// value "gitlab:group/foo:" plus two stray top-level keys.
+	// Assert neither leakage happened.
+	_, hasBar := parsed["bar"]
+	assert.False(t, hasBar,
+		"no stray top-level key leaked from the uid scalar")
 }
 
 // TestEnvelopeToDocbuilderMarkdown_StripsCarriageReturns pins the

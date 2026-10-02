@@ -207,7 +207,14 @@ func EnvelopeToDocbuilderMarkdown(env IssueEnvelope) (string, int, error) {
 // the existing ones. (Frontmatter field order does not affect
 // YAML semantics, but it does affect diff readability.)
 func writeFrontmatter(b *strings.Builder, env IssueEnvelope, uid string) {
-	b.WriteString("uid: " + uid + "\n")
+	// The uid is "gitlab:{path}:{iid}" — a sender-supplied
+	// path_with_namespace containing `: `, `#`, or a newline
+	// would otherwise corrupt the frontmatter (yaml would parse
+	// ": bar" as a new mapping key, splitting the uid across two
+	// top-level keys). sanitizeForYAML quotes such values; we apply
+	// it to every string that lands in frontmatter, the uid
+	// included, so a crafted sender can't break the YAML block.
+	b.WriteString("uid: " + sanitizeForYAML(uid) + "\n")
 	b.WriteString("title: " + sanitizeForYAML(env.Issue.Title) + "\n")
 
 	// Tags. We always emit the two discovery-affordance tags

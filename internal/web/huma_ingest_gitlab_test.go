@@ -63,7 +63,12 @@ func TestHumaAPI_IngestGitLabIssue_AcceptsValidEnvelope(t *testing.T) {
 
 	// The service received docbuilder markdown, not the JSON envelope.
 	require.Equal(t, 1, svc.ingestCalls, "IngestDocument must be invoked exactly once per request")
-	assert.Contains(t, svc.lastIngestContent, "uid: gitlab:group/bar:42",
+	// The uid is YAML-quoted because it has a ":" — sanitizeForYAML
+	// guards the frontmatter block against crafted paths. The
+	// contract here is "the GitLab UID appears in the rendered
+	// frontmatter"; the exact textual form (quoted or unquoted) is
+	// the internal/gitlab package's call.
+	assert.Contains(t, svc.lastIngestContent, `gitlab:group/bar:42`,
 		"the docbuilder markdown that reaches IngestDocument must carry the GitLab UID")
 	assert.Contains(t, svc.lastIngestContent, "Auth: SAML timeout",
 		"the title must round-trip to the markdown body")
