@@ -297,6 +297,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 			<div class="control">
 				<textarea id="chat-input" class="textarea" name="message" rows="2" placeholder="Ask a question..." required></textarea>
 			</div>
+			<p class="help">Press Ctrl+Enter (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
 		</div>
 		<div class="field is-grouped">
 			<div class="control">
