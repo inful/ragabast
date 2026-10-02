@@ -100,3 +100,71 @@ func TestChunk_MetadataRoundTrip(t *testing.T) {
 	require.Equal(t, "alice", chunk.Metadata["author_username"])
 	require.Len(t, chunk.Metadata, 2)
 }
+
+// TestSourceKind_SourceIcon_ReturnsNonEmptyForKnownKinds pins
+// that each known SourceKind has a non-empty icon marker. The
+// citation panel and search-results template consume this so a
+// future contributor who adds a new kind without giving it an
+// icon surfaces as a failing test, not a silent "no icon" in
+// the rendered UI.
+func TestSourceKind_SourceIcon_ReturnsNonEmptyForKnownKinds(t *testing.T) {
+	cases := []SourceKind{
+		SourceDocbuilder,
+		SourceGitLab,
+	}
+	for _, k := range cases {
+		t.Run(string(k), func(t *testing.T) {
+			icon := k.SourceIcon()
+			require.NotEmpty(t, string(icon),
+				"%q must produce a non-empty icon marker", k)
+		})
+	}
+}
+
+// TestSourceKind_SourceIcon_UnknownReturnsEmpty pins the no-op
+// rule for SourceUnknown. Pre-SourceKind chunks deserialize to
+// the zero value (SourceUnknown); the chat sources panel must
+// not show a misleading "GitLab" or "Doc" badge for these. The
+// empty marker renders as nothing in the template (the {{ if }}
+// guard skips it), so legacy chunks stay byte-identical in the
+// rendered output.
+func TestSourceKind_SourceIcon_UnknownReturnsEmpty(t *testing.T) {
+	require.Empty(t, string(SourceUnknown.SourceIcon()),
+		"SourceUnknown must produce an empty icon — pre-SourceKind chunks must not show a kind badge")
+}
+
+// TestSourceKind_SourceIcon_ContainsKindMarker pins that each
+// icon includes a recognizable token for its kind. The exact
+// HTML is allowed to evolve (CSS classes, glyphs, etc.) but the
+// kind name must appear somewhere — a11y / debugging use this to
+// distinguish sources without parsing the rest of the rendered
+// HTML. Anchoring on a substring means a future contributor can
+// swap Unicode glyphs for SVG icons without breaking the test,
+// as long as the kind name stays visible.
+func TestSourceKind_SourceIcon_ContainsKindMarker(t *testing.T) {
+	cases := []struct {
+		kind   SourceKind
+		marker string
+	}{
+		{SourceDocbuilder, "docbuilder"},
+		{SourceGitLab, "gitlab"},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			require.Contains(t, string(tc.kind.SourceIcon()), tc.marker,
+				"%q icon must contain %q somewhere (a11y / debugging anchor)", tc.kind, tc.marker)
+		})
+	}
+}
+
+// TestSourceKind_SourceIcon_IsDeterministic pins that the helper
+// is pure: same input -> same output. A future contributor who
+// accidentally wires in a random nonce (e.g. for cache-busting)
+// would surface here.
+func TestSourceKind_SourceIcon_IsDeterministic(t *testing.T) {
+	first := SourceGitLab.SourceIcon()
+	for range 3 {
+		require.Equal(t, string(first), string(SourceGitLab.SourceIcon()),
+			"SourceIcon must be deterministic across calls")
+	}
+}
