@@ -57,6 +57,44 @@
     var sendBtn = document.getElementById('chat-send');
     var input = document.getElementById('chat-input');
 
+    // Keyboard submit shortcut: Ctrl+Enter (Windows / Linux)
+    // and Cmd+Enter (macOS) submit the chat form. Plain Enter
+    // is intentionally left alone — the textarea default of
+    // inserting a newline is the right behavior for multi-line
+    // prompts, and the Send button remains the universal
+    // fallback for operators who don't know the shortcut.
+    //
+    // We key on KeyboardEvent.key === "Enter" rather than the
+    // legacy keyCode === 13 to avoid the deprecated API, and
+    // we explicitly preventDefault on a matched shortcut so
+    // the browser doesn't insert a stray newline before the
+    // form submit fires.
+    //
+    // The submit goes through form.requestSubmit() so the
+    // browser fires a cancelable submit event; htmx is wired
+    // to intercept form submissions via its hx-post, which
+    // means the existing htmx:beforeRequest / htmx:afterRequest
+    // listeners above still run — the loading-state CSS, the
+    // textarea reset, and the focus-restore all keep working
+    // for keyboard-driven submits exactly the way they do for
+    // mouse clicks.
+    if (input) {
+      input.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          if (form.requestSubmit) {
+            form.requestSubmit();
+          } else {
+            // Defense in depth: very old browsers without
+            // requestSubmit fall back to .submit(). The form
+            // still has hx-post so htmx intercepts the
+            // submission; the loading-state UX still works.
+            form.submit();
+          }
+        }
+      });
+    }
+
     // Before the request goes out: flag the send button as
     // loading so the user gets visual feedback. The
     // .htmx-request / .htmx-indicator CSS in /static/chat.css
