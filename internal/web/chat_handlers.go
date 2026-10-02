@@ -8,6 +8,7 @@ import (
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/vector"
 )
 
 // defaultChatTopK is the number of retrieved chunks the chat form uses when
@@ -34,6 +35,46 @@ func chatTopK(r *http.Request) int {
 		return maxChatTopK
 	}
 	return v
+}
+
+// parseSourceKindsForm reads the chat form's optional
+// `source_kinds` field (a comma-separated list of kinds) and
+// returns the recognized entries. Empty input or input that
+// contains no recognized kinds returns nil, which the caller
+// interprets as "no filter / all sources".
+//
+// Why drop unknown kinds rather than error: a future SourceKind
+// (e.g. "redmine") arriving via the form before this handler
+// knows about it would otherwise 400 the chat. Silently dropping
+// keeps the chat endpoint available and means the worst case for
+// a new kind is "operator doesn't get the new kind in the filter
+// until we ship code" — a one-deploy delay, not an outage.
+//
+// The wire values are the SourceKind constants verbatim
+// ("docbuilder", "gitlab"); matching is case-sensitive to keep
+// the contract simple.
+func parseSourceKindsForm(r *http.Request) []models.SourceKind {
+	raw := strings.TrimSpace(r.FormValue("source_kinds"))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]models.SourceKind, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		k := models.SourceKind(p)
+		if !k.IsValid() {
+			continue
+		}
+		out = append(out, k)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +135,15 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 
 	answer, info, err := s.service.QueryDebugWithOptions(r.Context(), msg, chatTopK(r), service.LLMOptions{
 		History: history,
+		// Per-question source-kind filter (Stage 2.1 will
+		// add the chat form UI; today a curl operator can
+		// pass source_kinds=gitlab,docbuilder to scope the
+		// retrieval). Empty result means "no filter / all
+		// sources" — matches the post-filter's empty-means-
+		// no-op semantics.
+		Filters: vector.SearchFilters{
+			SourceKinds: parseSourceKindsForm(r),
+		},
 	})
 	if err != nil {
 		internalError(w, r, "query", err)

@@ -30,6 +30,13 @@ type QueryDebugInfo struct {
 type LLMOptions struct {
 	Temperature *float64
 	History     []ChatMessage
+	// Filters narrow the retrieval that builds the LLM's
+	// context. Empty (zero-value SearchFilters) means "no
+	// filter / all sources", matching the post-filter
+	// semantics in the vector layer. The chat handler uses
+	// this to scope a query to a subset of source kinds
+	// (e.g. only GitLab issues).
+	Filters SearchFilters
 }
 
 // Search performs a semantic search, optionally narrowed by
@@ -168,10 +175,16 @@ func (s *Service) Query(ctx context.Context, query string, limit int) (string, e
 //
 // See the note on Service.Query about the deprecation timeline.
 func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts LLMOptions) (string, *QueryDebugInfo, error) {
-	results, err := s.vectorOps.Search(ctx, query, limit, nil)
+	results, err := s.vectorOps.Search(ctx, query, limit, opts.Filters.ToWhere())
 	if err != nil {
 		return "", nil, fmt.Errorf("search failed: %w", err)
 	}
+	// Post-filter by source kind. Mirrors the post-filter in
+	// Search and HybridSearch: the chromem-go Where filter is
+	// equality-only, so per-kind scoping happens here against
+	// the kind populated on each chunk at read time (see
+	// inferSourceKind in the vector package).
+	results = applySourceKindFilters(results, opts.Filters)
 
 	// Populate DocbuilderURL on every result so the chat handler's
 	// InlineSourceLinks post-processor can convert the LLM's
