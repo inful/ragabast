@@ -61,6 +61,13 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters S
 	// happen here against the document-level dates that
 	// VectorDB.Search populates from chunk metadata.
 	results = applyDateFilters(results, filters)
+	// Post-filter by source kind. The chat handler can scope a
+	// retrieval to one or more source kinds (e.g. "only GitLab
+	// issues") via SearchFilters.SourceKinds; this is the
+	// cheapest place to drop out-of-scope results because the
+	// top-K is small by the time we get here. See
+	// applySourceKindFilters.
+	results = applySourceKindFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
 	return results, nil
 }
@@ -102,6 +109,9 @@ func (s *Service) HybridSearch(
 	// mode (keyword, semantic, hybrid) so operators don't
 	// have to think about which endpoint honors it.
 	results = applyDateFilters(results, filters)
+	// Post-filter by source kind. Same code path as Search;
+	// applies regardless of mode.
+	results = applySourceKindFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
 	return results, nil
 }

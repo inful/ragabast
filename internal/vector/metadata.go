@@ -57,6 +57,13 @@ func chunkToMetadata(chunkID string, chunk *models.Chunk) map[string]string {
 		// empty DocumentFilePath as "no path known".
 		meta["document_file_path"] = chunk.DocumentFilePath
 	}
+	if chunk.SourceKind != "" {
+		// Persist SourceKind only when non-empty so pre-SourceKind
+		// chunks serialize unchanged. The search path uses
+		// inferSourceKind (vector package) to fill in the empty
+		// case at read time from the UID prefix.
+		meta["source_kind"] = string(chunk.SourceKind)
+	}
 	return meta
 }
 
@@ -97,6 +104,12 @@ func metadataToChunk(meta map[string]string, content string) *models.Chunk {
 		DocumentCreatedAt:  parseRFC3339(meta["document_created_at"]),
 		DocumentUpdatedAt:  parseRFC3339(meta["document_updated_at"]),
 		DocumentFilePath:   meta["document_file_path"],
+		// SourceKind: use what was stored; legacy chunks without
+		// a "source_kind" entry get a UID-prefix backfill so
+		// downstream callers (citation dispatch, post-filter,
+		// chunkToSearchResult) see a populated kind without
+		// each one re-deriving it.
+		SourceKind: inferSourceKind(meta["source_kind"], meta["uid"]),
 	}
 }
 

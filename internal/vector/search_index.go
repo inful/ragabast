@@ -38,6 +38,8 @@ import (
 	"github.com/blevesearch/bleve/v2/mapping"
 	"github.com/blevesearch/bleve/v2/registry"
 	"github.com/blevesearch/bleve/v2/search/query"
+
+	"github.com/ragabast/internal/models"
 )
 
 // SearchFilters narrows a Search by document-level attributes.
@@ -65,6 +67,15 @@ type SearchFilters struct {
 	CreatedBefore *time.Time
 	UpdatedAfter  *time.Time
 	UpdatedBefore *time.Time
+	// SourceKinds narrows the result set to the listed kinds.
+	// Empty (= nil or zero-length slice) means "all sources"
+	// and the post-filter is a no-op. Applied at the service layer
+	// (applySourceKindFilters) — bleve keyword search doesn't
+	// see it. The post-filter approach matches the date-filter
+	// pattern: cheap, drops out-of-scope results from the top-K
+	// before they reach the caller. SourceKind on every chunk is
+	// populated at read time; see its docstring for the rule.
+	SourceKinds []models.SourceKind
 }
 
 // SearchHit is one ranked result from a SearchIndex.Search.

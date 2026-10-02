@@ -333,6 +333,11 @@ func chunkToSearchResult(chunk *models.Chunk, score float32) models.SearchResult
 		Fingerprint:        chunk.Fingerprint,
 		UID:                chunk.UID,
 		DocumentFilePath:   chunk.DocumentFilePath,
+		// SourceKind mirrors the parent chunk's SourceKind;
+		// metadataToChunk has already done the UID-prefix
+		// backfill (if needed) for legacy chunks without a
+		// persisted source_kind entry.
+		SourceKind: chunk.SourceKind,
 	}
 }
 
