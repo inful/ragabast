@@ -14,7 +14,7 @@ import (
 )
 
 // TestFallbackHeader_AlwaysOnNavWithoutAuth pins the fix for
-// issue #85: a basic top nav (Chat | Search | Documents | Ingest)
+// issue #85: a basic top nav (Chat | Search | Documents)
 // renders on every page regardless of OAuth configuration.
 // Operators running ragabast locally without configuring auth can
 // navigate between pages without typing URLs or clicking the
@@ -22,6 +22,10 @@ import (
 // Sign in / Sign out) only render when OAuth is also
 // configured — that conditional is exercised by the SignInLink
 // and SignOutButton tests below.
+//
+// PR 2 removed the HTML /ingest form, so the nav no longer
+// surfaces an Ingest link. Ingest is reachable via the Huma
+// HTTP API (/api/ingest, /api/ingest/raw, /api/ingest/file).
 func TestFallbackHeader_AlwaysOnNavWithoutAuth(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeHumaService{})
@@ -33,25 +37,30 @@ func TestFallbackHeader_AlwaysOnNavWithoutAuth(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
-	assert.Contains(t, body, "<nav", "a basic nav must render even without OAuth so /search, /documents, /ingest are discoverable")
+	assert.Contains(t, body, "<nav", "a basic nav must render even without OAuth so /search, /documents are discoverable")
 	assert.Contains(t, body, `href="/"`, "nav must link back to the chat landing page")
 	assert.Contains(t, body, `href="/search"`, "nav must link to /search")
 	assert.Contains(t, body, `href="/documents"`, "nav must link to /documents")
-	assert.Contains(t, body, `href="/ingest"`, "nav must link to /ingest")
+	assert.NotContains(t, body, `href="/ingest"`, "nav must not link to /ingest — the form is gone")
 	assert.NotContains(t, body, "Sign in", "no sign-in link should render when OAuth is not configured")
 	assert.NotContains(t, body, "Sign out", "no sign-out button should render when OAuth is not configured")
 }
 
 // TestFallbackHeader_NavLinksPresentOnEveryPage pins the
 // discovery contract: the always-on nav appears on every
-// fallback page (chat, ingest, documents) so the operator can
+// fallback page (chat, documents) so the operator can
 // move between sections without typing URLs.
+//
+// PR 2 removed the HTML /ingest form, so /ingest is no
+// longer a fallback-renderer page — only embedded-template
+// pages (search) and the remaining fallback pages (chat,
+// documents) carry the nav.
 func TestFallbackHeader_NavLinksPresentOnEveryPage(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeHumaService{})
 	s.templates = nil
 
-	for _, path := range []string{"/", "/ingest", "/documents"} {
+	for _, path := range []string{"/", "/documents"} {
 		t.Run(path, func(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 			w := httptest.NewRecorder()
@@ -59,9 +68,11 @@ func TestFallbackHeader_NavLinksPresentOnEveryPage(t *testing.T) {
 
 			require.Equal(t, http.StatusOK, w.Code)
 			body := w.Body.String()
-			for _, link := range []string{`href="/"`, `href="/search"`, `href="/documents"`, `href="/ingest"`} {
+			for _, link := range []string{`href="/"`, `href="/search"`, `href="/documents"`} {
 				assert.Contains(t, body, link, "%s must surface the always-on nav link %q", path, link)
 			}
+			assert.NotContains(t, body, `href="/ingest"`,
+				"%s must not surface an /ingest link — the form is gone", path)
 		})
 	}
 }
@@ -72,6 +83,10 @@ func TestFallbackHeader_NavLinksPresentOnEveryPage(t *testing.T) {
 // the request has no session cookie. The link threads the
 // current URL into ?next= so the chooser page can land the
 // user back where they came from after auth.
+//
+// The probe page is /documents (a remaining public-GET page
+// in the fallback renderer). /ingest no longer renders —
+// PR 2 removed the form.
 func TestFallbackHeader_SignInLinkWhenOAuthConfiguredAndNotSignedIn(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Auth.Providers = []config.OAuthProvider{
@@ -80,7 +95,7 @@ func TestFallbackHeader_SignInLinkWhenOAuthConfiguredAndNotSignedIn(t *testing.T
 	s := NewServer(cfg, &fakeHumaService{})
 	s.templates = nil
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ingest", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/documents", nil)
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 
@@ -89,7 +104,7 @@ func TestFallbackHeader_SignInLinkWhenOAuthConfiguredAndNotSignedIn(t *testing.T
 	assert.Contains(t, body, "<nav", "nav bar should render when OAuth is configured")
 	assert.Contains(t, body, "Sign in", "sign-in link should appear when not signed in")
 	assert.NotContains(t, body, "Sign out", "sign-out button must not appear when not signed in")
-	assert.Contains(t, body, "/auth/login?next=%2Fingest", "next= must thread the current URL")
+	assert.Contains(t, body, "/auth/login?next=%2Fdocuments", "next= must thread the current URL")
 }
 
 // TestFallbackHeader_SignOutButtonWhenSignedIn confirms the

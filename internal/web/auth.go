@@ -198,7 +198,7 @@ func withOptionalSession(r *http.Request, sessions *sessionStore, cookieName str
 // in code, not implicit in middleware ordering.
 //
 // Public:
-//   - GET /, GET /chat, GET /search, GET /ingest, GET /documents
+//   - GET /, GET /chat, GET /search, GET /documents
 //     (form pages — browsers do not send Authorization on GETs)
 //   - GET /static/* (CSS/JS/images)
 //   - GET /auth/login, /auth/<provider>/login,
@@ -214,7 +214,7 @@ func isPublicRoute(method, path string) bool {
 	switch method {
 	case http.MethodGet:
 		switch path {
-		case "/", "/chat", "/search", "/ingest", "/documents":
+		case "/", "/chat", "/search", "/documents":
 			return true
 		case "/auth/login", "/auth/me":
 			return true

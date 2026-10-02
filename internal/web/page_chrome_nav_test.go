@@ -20,16 +20,18 @@ import (
 // .review-screenshots/2026-09-30-ragabast-ui-review.
 //
 // This test exercises the FALLBACK renderer (s.templates = nil)
-// for /ingest and /documents, both of which historically
-// emitted a "Back" anchor below the H1. The /search page is
-// rendered only from an embedded template, so it has its own
-// test below.
+// for /documents, which historically emitted a "Back" anchor
+// below the H1. The /search page is rendered only from an
+// embedded template, so it has its own test below.
+//
+// PR 2 removed the HTML /ingest form, so /ingest is no
+// longer a fallback-renderer page.
 func TestPageChrome_NoRedundantNavOnFallbackPages(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeHumaService{})
 	s.templates = nil
 
-	pages := []string{"/ingest", "/documents"}
+	pages := []string{"/documents"}
 
 	for _, path := range pages {
 		t.Run(path, func(t *testing.T) {

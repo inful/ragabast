@@ -139,10 +139,9 @@ func TestSecurityHeaders_AppliedToAPIRoutes(t *testing.T) {
 // The default cap (maxRequestBodyBytes) is 10 MiB; we POST
 // 12 MiB to keep the test fast while remaining well past the
 // limit. The Huma-mounted /api/ingest endpoint enforces its
-// own cap (10 MiB by default) and the form-mounted
-// /ingest endpoint enforces the new middleware's cap — the
-// test exercises both routes to confirm the defense is wired
-// in both code paths.
+// own cap (10 MiB by default). PR 2 removed the form-mounted
+// /ingest endpoint, so the "form endpoint" subtest was
+// dropped with the route.
 func TestMaxBytesReader_RejectsOversizedBody(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
@@ -156,22 +155,6 @@ func TestMaxBytesReader_RejectsOversizedBody(t *testing.T) {
 		s.router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code,
 			"oversized POST must be rejected with 413 before any handler runs")
-	})
-
-	t.Run("form endpoint", func(t *testing.T) {
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/ingest", bytes.NewReader(oversized))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		w := httptest.NewRecorder()
-		s.router.ServeHTTP(w, req)
-		// Go's http.MaxBytesReader returns http.MaxBytesError
-		// from r.ParseForm(); the form handler currently treats
-		// that as a 400. We assert only that the body is
-		// rejected, not on the exact status — the important
-		// thing is the handler does not run with the oversized
-		// body.
-		require.True(t,
-			w.Code == http.StatusRequestEntityTooLarge || w.Code == http.StatusBadRequest,
-			"oversized form POST must be rejected (got %d)", w.Code)
 	})
 }
 
