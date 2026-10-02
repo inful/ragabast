@@ -272,3 +272,44 @@ func TestChatForm_FirstGETAllChecked(t *testing.T) {
 	require.True(t, isChecked(body, "gitlab"))
 	require.True(t, isChecked(body, "docbuilder"))
 }
+
+// TestChatForm_FirstGETSessionIDInHiddenField is a regression
+// pin for the SessionID extraction in serveBasicHTML. The
+// chat form must carry the session id in its hidden field
+// so POSTs can round-trip back to the same session. Without
+// this, every chat POST uses an empty session_id, the session
+// store no-ops, and the sticky-default / history features
+// silently break. Catches a real production bug surfaced via
+// Chrome DevTools end-to-end testing on 2026-10-02.
+//
+// Specifically, this guards against a serveBasicHTML omission
+// where the fallback data struct was missing a SessionID field
+// — without an explicit extraction in the handler, the
+// rendered form's hidden session_id field is empty.
+func TestChatForm_FirstGETSessionIDInHiddenField(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Paths.TemplatesDir = "" // force the serveBasicHTML fallback path
+	fake := &fakeService{}
+	s := NewServer(cfg, fake)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	s.router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	// The cookie sets the session id; the form must carry the
+	// same value so the POST round-trips back. Use the cookie
+	// value as the expected — that pins the contract without
+	// coupling to the UUID format.
+	var cookieID string
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "ragabast_chat_session" {
+			cookieID = c.Value
+		}
+	}
+	require.NotEmpty(t, cookieID, "GET must set the chat_session cookie")
+	require.Contains(t, body,
+		`name="session_id" value="`+cookieID+`"`,
+		"the form's hidden session_id must match the ragabast_chat_session cookie value")
+}

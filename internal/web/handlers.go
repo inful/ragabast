@@ -68,6 +68,7 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 		s.renderFallback(w, "chat.html", chatFallbackData{
 			Title:         titleFromMap(data, "RAGabast - Chat"),
 			CsrfToken:     stringFromMap(data, "CsrfToken"),
+			SessionID:     stringFromMap(data, "SessionID"),
 			Header:        header,
 			SourceKinds:   knownSourceKinds(),
 			SelectedKinds: selected,
