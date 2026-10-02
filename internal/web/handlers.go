@@ -143,21 +143,6 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 	}
 }
 
-// headerFromMap extracts the optional pageHeaderData the
-// handler stashed under the "Header" key. Missing or
-// wrong-typed → empty struct (the template renders nothing
-// when AuthEnabled is false, which is the historical
-// single-user open-access behavior).
-func headerFromMap(data any) pageHeaderData {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return pageHeaderData{}
-	}
-	h, _ := m["Header"].(pageHeaderData)
-
-	return h
-}
-
 // pageHeaderFromContext builds the per-request pageHeaderData
 // the navbar template consumes. Every page handler calls this
 // (typically via s.pageHeaderFromContext) so the header
@@ -219,97 +204,6 @@ func safeNextPath(p string) string {
 	}
 
 	return p
-}
-
-func titleFromMap(data any, fallback string) string {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return fallback
-	}
-	if t, ok := m["Title"].(string); ok && t != "" {
-		return t
-	}
-	return fallback
-}
-
-// stringFromMap is the generic-string accessor used by fields
-// whose absence should silently render as empty rather than panic.
-func stringFromMap(data any, key string) string {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return ""
-	}
-	if s, ok := m[key].(string); ok {
-		return s
-	}
-	return ""
-}
-
-// intFromMap is the int accessor. Returns 0 on type mismatch;
-// the {{ .Chunks }} substitution prints 0 in that case which
-// matches the existing fmt.Fprintf behavior.
-func intFromMap(data any, key string) int {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return 0
-	}
-	switch v := m[key].(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	default:
-		return 0
-	}
-}
-
-// docsRowsFromMap adapts the []models.DocumentInfo slice that
-// handleDocumentsPage passes through into the strongly-typed
-// documentsFallbackRow slice that the fallback template expects.
-// DisplayLabel is computed here (via models.DocumentInfo.DisplayLabel)
-// so the template stays presentation-only; the same fallback chain
-// powers chat sources and search results. The CSRF token is read
-// once and threaded into every row so each delete form embeds it
-// without the template doing a context lookup per row.
-//
-// Every field that flows into the page is HTML-escaped by
-// html/template at render time; this helper only changes types.
-func docsRowsFromMap(data any) []documentsFallbackRow {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return nil
-	}
-	raw, ok := m["Documents"].([]models.DocumentInfo)
-	if !ok {
-		return nil
-	}
-	csrf := stringFromMap(data, "CsrfToken")
-	out := make([]documentsFallbackRow, 0, len(raw))
-	for _, item := range raw {
-		out = append(out, documentsFallbackRow{
-			DisplayLabel: item.DisplayLabel(),
-			Title:        item.Title,
-			ID:           item.ID,
-			Tags:         item.Tags,
-			Category:     firstOrEmpty(item.Categories),
-			Chunks:       item.ChunkCount,
-			IngestedAt:   item.CreatedAt,
-			CsrfToken:    csrf,
-		})
-	}
-	return out
-}
-
-// firstOrEmpty returns the first element of a slice or "" if the
-// slice is empty. Used for the Category column which historically
-// showed only the first category in the table.
-func firstOrEmpty(s []string) string {
-	if len(s) == 0 {
-		return ""
-	}
-	return s[0]
 }
 
 func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
