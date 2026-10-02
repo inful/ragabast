@@ -30,6 +30,11 @@ func registerHumaOperations(router http.Handler, api huma.API, svc serviceAPI, l
 	registerQueryOperation(api, svc)
 	registerSearchOperation(api, svc)
 	registerIngestOperations(api, svc, limiter, maxIngestDocumentBytes)
+	// ingestGitLabIssue accepts a GitLab issue envelope and
+	// pushes the result through the same Service.IngestDocument
+	// pipeline as /api/ingest/raw. Same rate limit, same
+	// per-document size cap. Issue #98: "Ingest GitLab issues".
+	registerIngestGitLabIssueOperation(api, svc, limiter, maxIngestDocumentBytes)
 	registerDocumentsOperations(api, svc)
 	registerLinkSuggestionsOperation(api, svc)
 	registerFrontmatterOperation(api, svc)
