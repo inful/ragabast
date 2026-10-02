@@ -323,3 +323,84 @@ func TestNormalizeHistory_EmptyInputReturnsNil(t *testing.T) {
 	require.Nil(t, normalizeHistory(nil))
 	require.Nil(t, normalizeHistory([]ChatMessage{}))
 }
+
+// TestBuildQueryContext_PrefixesSourceKindWhenSet pins the
+// light cross-source reasoning behavior: when a chunk's
+// SearchResult carries a non-empty SourceKind, the LLM context
+// entry starts with a `[source:<kind>]` line so the model can
+// attribute the chunk to its origin ("this is from a closed
+// GitLab issue", "this is from a doc"). Without the prefix the
+// LLM would still see the content but couldn't distinguish
+// cross-source claims — e.g. it couldn't tell the operator
+// "this is from the docs" vs "this is from a GitLab ticket".
+//
+// The prefix is emitted only when SourceKind is non-empty so
+// pre-SourceKind corpora (SourceUnknown) keep the historical
+// unprefixed shape, avoiding a token-budget regression for
+// existing operators.
+func TestBuildQueryContext_PrefixesSourceKindWhenSet(t *testing.T) {
+	cases := []struct {
+		name       string
+		sourceKind models.SourceKind
+		wantPrefix string
+	}{
+		{name: "gitlab", sourceKind: models.SourceGitLab, wantPrefix: "[source:gitlab]"},
+		{name: "docbuilder", sourceKind: models.SourceDocbuilder, wantPrefix: "[source:docbuilder]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			results := []models.SearchResult{{
+				DocumentTitle: "Doc",
+				Content:       "body",
+				SourceKind:    tc.sourceKind,
+			}}
+			items := buildQueryContextItems(context.Background(), results, stubFetcher{})
+			require.Len(t, items, 1)
+			require.True(t, strings.HasPrefix(items[0], tc.wantPrefix),
+				"context entry must start with %q when SourceKind=%q, got: %q",
+				tc.wantPrefix, tc.sourceKind, items[0])
+		})
+	}
+}
+
+// TestBuildQueryContext_OmitsSourceKindWhenUnknown pins the
+// "no prefix for legacy chunks" rule: a chunk with SourceUnknown
+// (the zero value, what pre-SourceKind corpora deserialize to)
+// must NOT produce a stray `[source:]` line in the prompt. The
+// historical prompt shape is preserved for backwards
+// compatibility — operators on existing corpora don't see a
+// token-budget regression.
+func TestBuildQueryContext_OmitsSourceKindWhenUnknown(t *testing.T) {
+	results := []models.SearchResult{{
+		DocumentTitle: "Legacy Doc",
+		Content:       "body",
+		// SourceKind omitted → SourceUnknown
+	}}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
+	require.Len(t, items, 1)
+	require.NotContains(t, items[0], "[source:",
+		"context entry must NOT carry a [source:*] prefix for legacy SourceUnknown chunks")
+	// Sanity: the prompt must still be well-formed.
+	require.Contains(t, items[0], "TITLE: Legacy Doc")
+	require.Contains(t, items[0], "CONTENT:")
+}
+
+// TestBuildQueryContext_PrefixComesBeforeTitle pins the
+// ordering: the source-kind prefix (when emitted) is the first
+// line, BEFORE TITLE. The LLM reads top-to-bottom; "where is
+// this from?" is the higher-order question, so the kind line
+// has to lead. A future contributor reformatting the prompt
+// builder must not demote the prefix below TITLE.
+func TestBuildQueryContext_PrefixComesBeforeTitle(t *testing.T) {
+	results := []models.SearchResult{{
+		DocumentTitle: "Doc",
+		Content:       "body",
+		SourceKind:    models.SourceGitLab,
+	}}
+	items := buildQueryContextItems(context.Background(), results, stubFetcher{})
+	require.Len(t, items, 1)
+	prefixIdx := strings.Index(items[0], "[source:gitlab]")
+	titleIdx := strings.Index(items[0], "TITLE:")
+	require.Greater(t, titleIdx, prefixIdx,
+		"[source:gitlab] must precede TITLE so the LLM sees the kind line first")
+}
