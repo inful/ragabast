@@ -9,9 +9,9 @@ import (
 // TestSanitizeForChatHTML_StripsDangerousPayloads pins the
 // behavior of the defense-in-depth sanitizer pass that runs
 // immediately before the LLM reply is wrapped as template.HTML
-// in the chat page (see internal/web/handlers.go
-// handleChatMessage and internal/web/markdown.go
-// sanitizeForChatHTML).
+// in the chat page (see handleChatMessage in
+// internal/web/chat_handlers.go and sanitizeForChatHTML in
+// internal/web/markdown.go).
 //
 // Every payload here is one a future markdown renderer,
 // InlineSourceLinks implementation, or bluemonday bypass could
