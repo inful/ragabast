@@ -199,3 +199,138 @@ func newServiceForChatTests(t *testing.T) *Service {
 	}
 	return svc
 }
+
+// TestChatSessionStore_GetSourceKinds_EmptyForUnknownSession
+// pins the boundary contract for the new SourceKinds field:
+// a session_id the store has never seen must return nil
+// (not an empty slice — that distinction matters for the
+// chat handler, which uses nil as "no default to pre-fill").
+func TestChatSessionStore_GetSourceKinds_EmptyForUnknownSession(t *testing.T) {
+	t.Parallel()
+
+	store := NewChatSessionStore(ChatSessionConfig{MaxTurns: 10})
+	got := store.GetSourceKinds("never-seen")
+	require.Nil(t, got,
+		"unknown session must return nil for source_kinds — distinguishes 'no default' from 'empty selection'")
+}
+
+// TestChatSessionStore_SetSourceKinds_RoundTrip pins the basic
+// contract: setting then getting returns the same slice (in
+// order). The slice stored is a defensive copy so a caller that
+// mutates its local slice doesn't poison the store.
+func TestChatSessionStore_SetSourceKinds_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	store := NewChatSessionStore(ChatSessionConfig{MaxTurns: 10})
+	store.SetSourceKinds("s1", []string{"gitlab", "docbuilder"})
+
+	got := store.GetSourceKinds("s1")
+	require.Equal(t, []string{"gitlab", "docbuilder"}, got,
+		"set then get must round-trip the same slice in order")
+}
+
+// TestChatSessionStore_SetSourceKinds_ReturnsDefensiveCopy pins
+// that the returned slice is independent of the caller's
+// subsequent mutation. Without this, a chat handler that
+// renders the slice into a template (or appends to it locally)
+// could silently corrupt the store's view.
+func TestChatSessionStore_SetSourceKinds_ReturnsDefensiveCopy(t *testing.T) {
+	t.Parallel()
+
+	store := NewChatSessionStore(ChatSessionConfig{MaxTurns: 10})
+	original := []string{"gitlab"}
+	store.SetSourceKinds("s1", original)
+	original[0] = "mutated"
+
+	got := store.GetSourceKinds("s1")
+	require.Equal(t, []string{"gitlab"}, got,
+		"mutating the caller's slice after Set must not change the store's view")
+}
+
+// TestChatSessionStore_SourceKindsIndependentOfHistory pins that
+// the source_kinds default and the conversation history are
+// stored as separate concerns. Setting one must not affect the
+// other — a follow-up question with a cleared selection still
+// has its history preserved.
+func TestChatSessionStore_SourceKindsIndependentOfHistory(t *testing.T) {
+	t.Parallel()
+
+	store := NewChatSessionStore(ChatSessionConfig{MaxTurns: 10})
+	store.Append("s1", []ChatMessage{{Role: "user", Content: "q"}})
+	store.SetSourceKinds("s1", []string{"gitlab"})
+
+	require.Len(t, store.Get("s1"), 1,
+		"history must survive a source_kinds set on the same session")
+	require.Equal(t, []string{"gitlab"}, store.GetSourceKinds("s1"),
+		"source_kinds must survive a history append on the same session")
+}
+
+// TestChatSessionStore_Clear_AlsoClearsSourceKinds pins that
+// the "private mode" / clear-session UI affordance wipes both
+// the conversation history AND the source-kind default. After
+// clear, the form must pre-fill with "no default" — otherwise
+// the operator would see a fresh chat that's mysteriously
+// scoped to gitlab issues.
+func TestChatSessionStore_Clear_AlsoClearsSourceKinds(t *testing.T) {
+	t.Parallel()
+
+	store := NewChatSessionStore(ChatSessionConfig{MaxTurns: 10})
+	store.Append("s1", []ChatMessage{{Role: "user", Content: "q"}})
+	store.SetSourceKinds("s1", []string{"gitlab"})
+
+	store.Clear("s1")
+
+	require.Empty(t, store.Get("s1"), "Clear must drop history")
+	require.Nil(t, store.GetSourceKinds("s1"),
+		"Clear must drop the source_kinds default — fresh chat starts with no scope")
+}
+
+// TestService_ChatSession_SetSourceKindsViaService pins the
+// service-layer wrapper. The chat handler goes through the
+// Service (not the store directly) so the wrapper is what
+// commits 3+ will exercise.
+func TestService_ChatSession_SetSourceKindsViaService(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		chatSessions: NewChatSessionStore(ChatSessionConfig{MaxTurns: 10}),
+	}
+	svc.SetChatSessionSourceKinds("s1", []string{"docbuilder"})
+
+	require.Equal(t, []string{"docbuilder"}, svc.ChatSessionSourceKinds("s1"))
+}
+
+// TestService_ChatSession_NilStoreIsNoop pins the defensive
+// contract: a Service constructed without a session store
+// (older callers, test fakes) must not nil-panic on a
+// SetChatSessionSourceKinds call. Mirrors the existing
+// AppendChatTurn / ChatSessionHistory nil-safe pattern.
+func TestService_ChatSession_NilStoreIsNoop(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{} // no chatSessions
+	require.NotPanics(t, func() {
+		svc.SetChatSessionSourceKinds("s1", []string{"gitlab"})
+	})
+	require.Nil(t, svc.ChatSessionSourceKinds("s1"),
+		"nil store must return nil for source_kinds")
+}
+
+// TestService_ChatSession_SetSourceKindsEmptyStringNoop pins the
+// "sticky default" rule: setting an empty slice (or one with
+// only empty strings) must NOT clear the existing default. The
+// chat handler only calls SetSourceKinds on a non-empty form
+// submission; this test pins that contract at the store layer.
+func TestService_ChatSession_SetSourceKindsEmptyStringNoop(t *testing.T) {
+	t.Parallel()
+
+	svc := &Service{
+		chatSessions: NewChatSessionStore(ChatSessionConfig{MaxTurns: 10}),
+	}
+	svc.SetChatSessionSourceKinds("s1", []string{"gitlab"})
+	// Operator clears the form — empty submission.
+	svc.SetChatSessionSourceKinds("s1", []string{})
+
+	require.Equal(t, []string{"gitlab"}, svc.ChatSessionSourceKinds("s1"),
+		"empty Set must NOT clear the existing default — sticky-default contract")
+}

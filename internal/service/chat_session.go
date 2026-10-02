@@ -31,13 +31,22 @@ type ChatSessionStoreConfig struct {
 // order — oldest first, newest last — matching the order
 // the LLM consumes.
 //
+// sourceKinds is the per-session "sticky default" for the
+// chat form's source-kind multi-select. The chat handler
+// pre-fills the form with this on every GET; on POST it
+// writes back the current submission only when non-empty
+// (an empty form submission must NOT clear the stored
+// default — that's the sticky-default UX contract; see
+// .planning/multi-source.md Stage 2.4).
+//
 // lastAccess is wired for a future IdleTTL GC pass; not
 // read today but set on every Get/Append so the value
 // is always current when the GC lands. The unused-field
 // lint allows it on purpose.
 type chatSession struct {
-	history    []ChatMessage
-	lastAccess time.Time //nolint:unused // wired for future IdleTTL GC
+	history     []ChatMessage
+	sourceKinds []string
+	lastAccess  time.Time //nolint:unused // wired for future IdleTTL GC
 }
 
 // ChatSessionStore is an in-memory map of session_id →
@@ -124,6 +133,56 @@ func (s *ChatSessionStore) Clear(sessionID string) {
 	delete(s.sessions, sessionID)
 }
 
+// GetSourceKinds returns a defensive copy of the session's
+// source-kind default. Nil for unknown sessions — the chat
+// handler distinguishes "no default" (nil) from "explicit
+// empty selection" (empty slice) when deciding whether to
+// pre-fill the form.
+func (s *ChatSessionStore) GetSourceKinds(sessionID string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, ok := s.sessions[sessionID]
+	if !ok || len(sess.sourceKinds) == 0 {
+		return nil
+	}
+	sess.lastAccess = time.Now()
+	out := make([]string, len(sess.sourceKinds))
+	copy(out, sess.sourceKinds)
+	return out
+}
+
+// SetSourceKinds records the chat form's source-kind
+// submission as the session's sticky default. The slice
+// stored is a defensive copy so caller mutations don't
+// leak back into the store. The "sticky default" semantics
+// (an empty submission does NOT clear the default) live
+// at the chat-handler layer — this method always replaces
+// with what it's given, and the handler chooses not to
+// call it when the form is empty.
+func (s *ChatSessionStore) SetSourceKinds(sessionID string, kinds []string) {
+	if sessionID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sess, ok := s.sessions[sessionID]
+	if !ok {
+		sess = &chatSession{}
+		s.sessions[sessionID] = sess
+	}
+	sess.lastAccess = time.Now()
+	if len(kinds) == 0 {
+		// Empty slice -> no change. Matches the chat
+		// handler's contract: clearing the form must NOT
+		// clear the stored default.
+		return
+	}
+	sess.sourceKinds = make([]string, len(kinds))
+	copy(sess.sourceKinds, kinds)
+}
+
 // trim enforces MaxTurns by dropping the oldest messages
 // until the session fits. Called under the lock.
 func (s *ChatSessionStore) trim(sess *chatSession) {
@@ -177,4 +236,27 @@ func (s *Service) ClearChatSession(sessionID string) {
 		return
 	}
 	s.chatSessions.Clear(sessionID)
+}
+
+// ChatSessionSourceKinds returns the session's sticky source-kind
+// default. Nil when no session store is wired (older callers,
+// test fakes) or when the session has never set one. The chat
+// handler reads this on GET to pre-fill the form.
+func (s *Service) ChatSessionSourceKinds(sessionID string) []string {
+	if sessionID == "" || s.chatSessions == nil {
+		return nil
+	}
+	return s.chatSessions.GetSourceKinds(sessionID)
+}
+
+// SetChatSessionSourceKinds records the chat form's source-kind
+// submission as the session's sticky default. No-op when the
+// session has no store wired; the chat handler also avoids
+// calling this for empty submissions so the default survives
+// a "clear the form" action.
+func (s *Service) SetChatSessionSourceKinds(sessionID string, kinds []string) {
+	if sessionID == "" || s.chatSessions == nil {
+		return
+	}
+	s.chatSessions.SetSourceKinds(sessionID, kinds)
 }
