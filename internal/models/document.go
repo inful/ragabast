@@ -69,6 +69,12 @@ type Document struct {
 	// (with `unpublishdate` alias honored by the parser). Used
 	// only by IsUnpublished.
 	ExpiryDate time.Time `bson:"expiry_date" json:"expiry_date"`
+
+	// SourceKind identifies where the document came from
+	// (docbuilder, GitLab, etc.). Defaults to SourceUnknown for
+	// documents ingested before the field was added; downstream
+	// code treats that as SourceDocbuilder per the spec.
+	SourceKind SourceKind `bson:"source_kind,omitempty" json:"source_kind,omitempty"`
 }
 
 // NewDocument creates a new document with default values.
