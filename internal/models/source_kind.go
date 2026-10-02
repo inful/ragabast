@@ -115,3 +115,31 @@ func (s SourceKind) DisplayName() string {
 		return ""
 	}
 }
+
+// InlineSourceIcon returns a short Unicode glyph suitable for
+// embedding inside the markdown link text produced by
+// InlineSourceLinks. Markdown (CommonMark) treats inline HTML
+// tags inside link text as literal characters, so a <span>-
+// based icon can't survive the markdown rendering pass without
+// a custom AST node. A Unicode glyph passes through cleanly.
+//
+// Why a per-kind glyph at all: the inline `[src:N]` link in the
+// answer body is what an operator scans to see "the LLM drew
+// from X". A leading emoji disambiguates the citation's origin
+// at a glance without requiring a separate metadata block.
+//
+// SourceUnknown returns "" so pre-SourceKind chunks don't show
+// a misleading glyph. The caller is responsible for trimming
+// the leading space when the glyph is empty.
+func (s SourceKind) InlineSourceIcon() string {
+	switch s {
+	case SourceGitLab:
+		return "🦊"
+	case SourceDocbuilder:
+		return "📄"
+	case SourceUnknown:
+		return ""
+	default:
+		return ""
+	}
+}

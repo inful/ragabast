@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ragabast/internal/models"
@@ -267,9 +268,9 @@ func TestInlineSourceLinks_GitLabCitationLandsOnGitLabURL(t *testing.T) {
 	}
 	got := InlineSourceLinks("See [src:0] for details.", sources)
 	require.Equal(t,
-		"See [Issue 42](https://gitlab.example.com/group/bar/-/issues/42) for details.",
+		"See [🦊 Issue 42](https://gitlab.example.com/group/bar/-/issues/42) for details.",
 		got,
-		"GitLab citations must land on the original GitLab URL, not the docbuilder permalink")
+		"GitLab citations must land on the original GitLab URL with the GitLab glyph, not the docbuilder permalink")
 }
 
 // TestInlineSourceLinks_MixedSourceKindsDispatchCorrectly pins
@@ -294,7 +295,52 @@ func TestInlineSourceLinks_MixedSourceKindsDispatchCorrectly(t *testing.T) {
 	}
 	got := InlineSourceLinks("Issue: [src:0]. Decision: [src:1].", sources)
 	require.Equal(t,
-		"Issue: [Issue 42](https://gitlab.example.com/group/bar/-/issues/42). Decision: [ADR 001](https://docs.example.com/_uid/adr-001/).",
+		"Issue: [🦊 Issue 42](https://gitlab.example.com/group/bar/-/issues/42). Decision: [📄 ADR 001](https://docs.example.com/_uid/adr-001/).",
 		got,
-		"mixed-source replies must dispatch each kind correctly")
+		"mixed-source replies must dispatch each kind correctly with the per-kind glyph")
+}
+
+// TestInlineSourceLinks_PrependsPerKindGlyph pins that the inline
+// [src:N] link text carries a Unicode glyph identifying the source
+// kind — the marker that survives the strict-CommonMark pipeline
+// (inline HTML in link text would be escaped). The spec calls for
+// "small icons" on every citation; Unicode is the only practical
+// inline form, and the per-kind dispatch (markdown-side) doesn't
+// duplicate the URL-side dispatch (commit 3).
+func TestInlineSourceLinks_PrependsPerKindGlyph(t *testing.T) {
+	cases := []struct {
+		name string
+		kind models.SourceKind
+		want string // expected leading character(s) of the link text
+	}{
+		{name: "gitlab → fox emoji", kind: models.SourceGitLab, want: "🦊"},
+		{name: "docbuilder → page emoji", kind: models.SourceDocbuilder, want: "📄"},
+		{name: "sourceunknown → no glyph", kind: models.SourceUnknown, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sources := []models.SearchResult{{
+				DocumentTitle: "Doc",
+				DocumentID:    "d1",
+				SourceKind:    tc.kind,
+				DocumentURLs:  []string{"https://example.com"},
+			}}
+			got := InlineSourceLinks("see [src:0].", sources)
+			// The link text is between '[' and ']' in '[...](url)'.
+			openIdx := strings.Index(got, "[")
+			closeIdx := strings.Index(got, "]")
+			require.NotEqual(t, -1, openIdx, "output must contain a markdown link: %q", got)
+			require.NotEqual(t, -1, closeIdx, "output must contain a markdown link: %q", got)
+			linkText := got[openIdx+1 : closeIdx]
+			if tc.want == "" {
+				require.NotContains(t, linkText, "🦊",
+					"SourceUnknown must NOT carry a github glyph")
+				require.NotContains(t, linkText, "📄",
+					"SourceUnknown must NOT carry a docbuilder glyph")
+			} else {
+				require.True(t, strings.HasPrefix(linkText, tc.want+" "),
+					"%s link text must start with %q (got %q)", tc.kind, tc.want, linkText)
+			}
+		})
+	}
 }

@@ -61,6 +61,16 @@ func InlineSourceLinks(answer string, sources []models.SearchResult) string {
 		}
 		text := sourceLinkText(sources[idx])
 		url := SourceLinkURL(sources[idx])
+		// Per-kind glyph leading the link text. Markdown
+		// (CommonMark) strips inline HTML inside link text, so
+		// this is a Unicode emoji rather than a <span> icon. For
+		// SourceUnknown (zero value) the glyph is empty and the
+		// rendered link is byte-identical to the pre-icon
+		// behavior — backwards compat for legacy corpora.
+		glyph := sources[idx].SourceKind.InlineSourceIcon()
+		if glyph != "" {
+			text = glyph + " " + text
+		}
 		if url == "" {
 			// No URL anywhere — emit bare title text so the
 			// reference is still visible to the user. An empty
