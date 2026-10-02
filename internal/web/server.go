@@ -22,8 +22,10 @@ import (
 	"github.com/ragabast/internal/web/jobs"
 )
 
-// Server represents the web server. HTTP handlers and template
-// rendering live in handlers.go; this file only owns the type,
+// Server represents the web server. HTTP handlers live in
+// feature-specific files (chat_handlers.go, documents_handlers.go,
+// search_handlers.go, static.go); template rendering and shared
+// page helpers live in handlers.go. This file only owns the type,
 // the constructor, lifecycle, and the route table.
 type Server struct {
 	config    *config.Config

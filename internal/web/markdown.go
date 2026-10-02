@@ -49,7 +49,7 @@ func renderChatMarkdownToSafeHTML(md string) (string, error) {
 // sanitizeForChatHTML runs a final bluemonday UGCPolicy pass
 // over the markdown-rendered HTML before it is wrapped as
 // template.HTML in the chat page (see handleChatMessage in
-// handlers.go).
+// chat_handlers.go).
 //
 // Why this exists: the chat page wraps {{ .AnswerHTML }} as
 // template.HTML so html/template does not double-escape the
