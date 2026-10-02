@@ -798,6 +798,33 @@ header with `rel="next"` / `rel="prev"` URLs when applicable — same
 shape GitHub's REST API uses, so curl pipelines can follow pages
 without parsing JSON.
 
+### External sources (sender is the fetcher)
+
+Ragabast is a **pure receiver** of ingestion requests — it does not
+fetch from external systems on its own. Sources like GitLab issues
+are pushed by an external sender that runs `curl` against the
+remote API and POSTs the result to a dedicated ragabast endpoint.
+
+| Source | Endpoint | Recipe |
+|---|---|---|
+| GitLab issues | `POST /api/ingest/gitlab/issue` | [`docs/gitlab-issues.md`](docs/gitlab-issues.md) |
+
+The endpoint accepts a verbatim GitLab issue JSON envelope
+(optionally with inline notes) and translates internally into the
+docbuilder frontmatter that the existing pipeline ingests. Every
+ingested GitLab issue carries `tags: ["gitlab-issue",
+"gitlab:<slug>", ...labels]` so a future "filter chat by source
+kind" PR has a hook without further schema work.
+
+```
+GET /api/documents?limit=25&offset=0
+```
+
+Response shape includes the items, the total count, and a `Link`
+header with `rel="next"` / `rel="prev"` URLs when applicable — same
+shape GitHub's REST API uses, so curl pipelines can follow pages
+without parsing JSON.
+
 ```
 Link: <.../api/documents?limit=25&offset=25>; rel="next", <.../api/documents?limit=25&offset=0>; rel="prev"
 ```
