@@ -60,7 +60,7 @@ func InlineSourceLinks(answer string, sources []models.SearchResult) string {
 			return match
 		}
 		text := sourceLinkText(sources[idx])
-		url := sourceLinkURL(sources[idx])
+		url := SourceLinkURL(sources[idx])
 		if url == "" {
 			// No URL anywhere — emit bare title text so the
 			// reference is still visible to the user. An empty
@@ -83,8 +83,9 @@ func sourceLinkText(s models.SearchResult) string {
 	return s.DisplayLabel()
 }
 
-// sourceLinkURL returns the URL to link to for a cited source.
-// The choice is per-source-kind:
+// SourceLinkURL returns the URL to link to for a cited source
+// or "direct link" in the sources panel. The choice is
+// per-source-kind:
 //
 //   - SourceGitLab: DocumentURLs[0] (the original GitLab web_url),
 //     falling back to DocbuilderURL when the operator didn't
@@ -107,7 +108,11 @@ func sourceLinkText(s models.SearchResult) string {
 // inferSourceKind in internal/vector); pre-SourceKind corpora
 // reach this function with SourceUnknown and follow the
 // docbuilder branch, so existing citations keep working.
-func sourceLinkURL(s models.SearchResult) string {
+//
+// Exported (capital S) so the chat handler can pre-populate
+// SearchResult.CitationURL for the sources-panel template,
+// keeping the per-kind dispatch logic out of the template.
+func SourceLinkURL(s models.SearchResult) string {
 	switch s.SourceKind {
 	case models.SourceGitLab:
 		if len(s.DocumentURLs) > 0 {

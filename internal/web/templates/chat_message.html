@@ -58,8 +58,8 @@
                 {{ range .Sources }}
                 <li>
                     {{ .DisplayLabel }}
-                    ({{ if .DocbuilderURL }}
-                        <a href="{{ .DocbuilderURL }}" target="_blank" rel="noopener">direct link</a>
+                    ({{ if .CitationURL }}
+                        <a href="{{ .CitationURL }}" target="_blank" rel="noopener">direct link</a>
                     {{ else }}
                         <code>{{ .DocumentID }}</code>
                     {{ end }})

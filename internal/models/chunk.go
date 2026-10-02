@@ -181,4 +181,15 @@ type SearchResult struct {
 	// on the kind. JSON-only (populated at query time from
 	// the chunk metadata, not persisted separately).
 	SourceKind SourceKind `json:"source_kind,omitempty"`
+
+	// CitationURL is the per-source-kind URL the operator
+	// should land on when they click a citation. Computed by
+	// the service layer using the same per-kind dispatch as
+	// InlineSourceLinks (DocumentURLs[0] for SourceGitLab,
+	// DocbuilderURL -> DocumentURLs[0] for SourceDocbuilder).
+	// Templates consume this instead of branching on
+	// DocbuilderURL vs DocumentURLs themselves, so the
+	// dispatch logic stays testable in Go rather than the
+	// template. JSON-only — not persisted on the chunk.
+	CitationURL string `json:"citation_url,omitempty"`
 }

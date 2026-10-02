@@ -306,6 +306,7 @@ type fakeService struct {
 	lastSearchMode    service.SearchMode
 	queryAnswer       string
 	queryDebug        *service.QueryDebugInfo
+	lastQueryOpts     service.LLMOptions
 	history           []service.ChatMessage
 	appendedTurns     []appendedTurn
 	clearedSessions   []string
@@ -424,12 +425,26 @@ func (f *fakeService) SuggestFrontmatter(context.Context, string, map[string]any
 	return service.FrontmatterSuggestion{}, nil
 }
 
-func (f *fakeService) QueryDebugWithOptions(_ context.Context, _ string, _ int, _ service.LLMOptions) (string, *service.QueryDebugInfo, error) {
+func (f *fakeService) QueryDebugWithOptions(_ context.Context, _ string, _ int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
+	f.lastQueryOpts = opts
 	if f.queryErr != nil {
 		return "", nil, f.queryErr
 	}
 	if f.queryDebug == nil {
 		f.queryDebug = &service.QueryDebugInfo{Results: []models.SearchResult{}}
+	}
+	// Mirror the real service's enrichWithCitationURLs: each
+	// SearchResult that comes out of the query needs a populated
+	// CitationURL so the chat sources-panel template can render
+	// the per-kind URL choice. The real service populates this
+	// alongside DocbuilderURL; the fake doesn't know about
+	// ragabast.docbuilder_base_url, so it skips the DocbuilderURL
+	// side and lets callers pre-populate it on the result if
+	// they want to test that path.
+	for i := range f.queryDebug.Results {
+		if f.queryDebug.Results[i].CitationURL == "" {
+			f.queryDebug.Results[i].CitationURL = service.SourceLinkURL(f.queryDebug.Results[i])
+		}
 	}
 	return f.queryAnswer, f.queryDebug, nil
 }

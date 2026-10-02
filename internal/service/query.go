@@ -76,6 +76,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters S
 	// applySourceKindFilters.
 	results = applySourceKindFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
+	s.enrichWithCitationURLs(results)
 	return results, nil
 }
 
@@ -120,6 +121,7 @@ func (s *Service) HybridSearch(
 	// applies regardless of mode.
 	results = applySourceKindFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
+	s.enrichWithCitationURLs(results)
 	return results, nil
 }
 
@@ -133,6 +135,27 @@ func (s *Service) enrichWithDocbuilderURLs(results []models.SearchResult) {
 	}
 	for i := range results {
 		results[i].DocbuilderURL = s.buildDocbuilderURL(results[i].UID)
+	}
+}
+
+// enrichWithCitationURLs populates the CitationURL field on
+// every result using the per-source-kind dispatch
+// (SourceLinkURL). The chat sources-panel template and the
+// search-results page both consume CitationURL instead of
+// branching on DocbuilderURL vs DocumentURLs themselves —
+// keeping the dispatch logic in Go (service layer) and out of
+// the templates, where it would be untestable. Idempotent:
+// safe to call alongside enrichWithDocbuilderURLs.
+//
+// Differs from enrichWithDocbuilderURLs in that it does NOT
+// short-circuit on the absence of ragabast.docbuilder_base_url:
+// the dispatch can still produce a URL from DocumentURLs
+// alone (the gitlab case), so a result with no DocbuilderURL
+// still gets a populated CitationURL when DocumentURLs is
+// non-empty.
+func (s *Service) enrichWithCitationURLs(results []models.SearchResult) {
+	for i := range results {
+		results[i].CitationURL = SourceLinkURL(results[i])
 	}
 }
 
@@ -196,6 +219,12 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	// vectorOps.Search directly so it has to do the enrichment
 	// itself.
 	s.enrichWithDocbuilderURLs(results)
+	// Populate CitationURL with the per-source-kind URL choice
+	// (DocumentURLs[0] for gitlab, DocbuilderURL for docbuilder).
+	// The chat sources panel and the search-results page both
+	// consume this so the dispatch logic stays out of the
+	// templates.
+	s.enrichWithCitationURLs(results)
 
 	if len(results) == 0 {
 		return "No relevant information found.", nil, nil

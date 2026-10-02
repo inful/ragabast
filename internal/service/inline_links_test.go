@@ -184,7 +184,7 @@ func TestSourceLinkURL_GitLabPrefersDocumentURL(t *testing.T) {
 	}
 	require.Equal(t,
 		"https://gitlab.example.com/group/bar/-/issues/42",
-		sourceLinkURL(s),
+		SourceLinkURL(s),
 		"SourceGitLab must cite DocumentURLs[0] even when DocbuilderURL is set")
 }
 
@@ -204,7 +204,7 @@ func TestSourceLinkURL_GitLabFallsBackToDocbuilderURL(t *testing.T) {
 	}
 	require.Equal(t,
 		"https://docs.example.com/_uid/gitlab:group/bar:42/",
-		sourceLinkURL(s),
+		SourceLinkURL(s),
 		"SourceGitLab with no DocumentURLs must fall back to DocbuilderURL")
 }
 
@@ -224,7 +224,7 @@ func TestSourceLinkURL_DocbuilderPrefersDocbuilderURL(t *testing.T) {
 	}
 	require.Equal(t,
 		"https://docs.example.com/_uid/adr-001/",
-		sourceLinkURL(s),
+		SourceLinkURL(s),
 		"SourceDocbuilder must prefer DocbuilderURL over DocumentURLs")
 }
 
@@ -245,7 +245,7 @@ func TestSourceLinkURL_UnknownBehavesAsDocbuilder(t *testing.T) {
 	}
 	require.Equal(t,
 		"https://docs.example.com/_uid/legacy/",
-		sourceLinkURL(s),
+		SourceLinkURL(s),
 		"SourceUnknown (zero value) must use the docbuilder preference order to keep pre-SourceKind corpora working")
 }
 
