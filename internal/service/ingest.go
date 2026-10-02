@@ -121,6 +121,27 @@ func (s *Service) IngestDocument(ctx context.Context, content string) (*models.D
 		return nil, fmt.Errorf("failed to parse document: %w", err)
 	}
 
+	// Default SourceKind to SourceDocbuilder for the docbuilder
+	// ingest path. The parser only sets doc.SourceKind when the
+	// frontmatter carries an explicit `source_kind:` line; for
+	// the common case (an operator uploading markdown without
+	// thinking about source identity) we want the kind
+	// explicitly populated so:
+	//
+	//  1. The BSON round-trip carries `source_kind: docbuilder`
+	//     instead of relying on the read-time UID-prefix
+	//     inference in the vector layer.
+	//  2. Future code that branches on "is this kind explicit or
+	//     inferred-from-empty" can distinguish.
+	//
+	// The default is only applied when the parser left
+	// SourceKind empty; explicit operator intent (e.g.
+	// `source_kind: gitlab` for a test fixture, or a future
+	// source) is preserved.
+	if doc.SourceKind == "" {
+		doc.SourceKind = models.SourceDocbuilder
+	}
+
 	// Hugo "don't publish" preflight (issue #97). Returns the
 	// parsed doc even when filtered — the caller asked us to
 	// process this content; we processed it (by deleting the

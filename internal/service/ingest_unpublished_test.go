@@ -388,3 +388,47 @@ func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 }
+
+// TestIngestDocument_DefaultsSourceKindToDocbuilder pins the
+// docbuilder-writer side of the multi-source split: a doc
+// ingested through /api/ingest (the default path) without an
+// explicit `source_kind:` frontmatter key must come back with
+// SourceKind = SourceDocbuilder set on the returned doc and
+// propagated to every chunk. Without this default, every
+// docbuilder-sourced chunk would land with SourceUnknown, and
+// the post-filter would rely on the "unknown == docbuilder"
+// fallback rule. That's the same outcome today, but explicit
+// kinds (1) survive the bson round-trip with a populated field
+// instead of relying on the read-time UID-prefix inference, and
+// (2) keep the field authoritative even if a future contributor
+// changes the inference rule.
+func TestIngestDocument_DefaultsSourceKindToDocbuilder(t *testing.T) {
+	rig := newUnpublishedTestRig(t)
+
+	doc, err := rig.svc.IngestDocument(context.Background(), publishableDoc())
+	require.NoError(t, err)
+	require.Equal(t, models.SourceDocbuilder, doc.SourceKind,
+		"a doc ingested through /api/ingest with no explicit source_kind must default to SourceDocbuilder")
+	for i, c := range doc.Chunks {
+		require.Equal(t, models.SourceDocbuilder, c.SourceKind,
+			"chunk[%d] must inherit doc.SourceKind = SourceDocbuilder", i)
+	}
+}
+
+// TestIngestDocument_PreservesExplicitSourceKind pins the
+// precedence rule: when an operator (or another ingest path)
+// sets `source_kind: gitlab` (or any future kind) in the
+// frontmatter, the docbuilder ingest path must NOT overwrite it.
+// The parser reads source_kind; the service must respect what
+// the parser saw instead of forcing SourceDocbuilder. Without
+// this test, a future "always default to docbuilder" optimization
+// would silently override operator intent.
+func TestIngestDocument_PreservesExplicitSourceKind(t *testing.T) {
+	rig := newUnpublishedTestRig(t)
+
+	doc := "---\nuid: gitlab-override\nfingerprint: fp-1\nsource_kind: gitlab\n---\n\nbody\n"
+	parsed, err := rig.svc.IngestDocument(context.Background(), doc)
+	require.NoError(t, err)
+	require.Equal(t, models.SourceGitLab, parsed.SourceKind,
+		"explicit source_kind: gitlab in frontmatter must NOT be overwritten by the docbuilder default")
+}
