@@ -43,7 +43,8 @@ func FilenameFromPath(path string) string {
 // result. The preference order is:
 //
 //  1. DocumentTitle (most user-friendly; set from the parent
-//     document's H1 by the parser)
+//     document's frontmatter `title:` field by the parser —
+//     there is no H1 fallback)
 //  2. FilenameFromPath(DocumentFilePath) (the basename without
 //     its extension — the on-disk filename the operator
 //     recognizes)

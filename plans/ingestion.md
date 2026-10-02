@@ -20,7 +20,7 @@ graph LR
 1. **Parse** — `DocbuilderParser.ParseDocument` splits the document
    into a YAML frontmatter map and a markdown body, validates the
    required fields, computes a fingerprint if one wasn't supplied,
-   and extracts the title from the first H1.
+   and reads the title from the frontmatter `title:` field.
 2. **Chunk** — `Chunker.ChunkWithHierarchy` splits on H1/H2 headers,
    enforces `processing.min_chunk_size` / `processing.max_chunk_size`
    with `processing.chunk_overlap`, and produces **deterministic
@@ -50,6 +50,7 @@ followed by a standard Markdown body. The frontmatter is delimited by
 
 | Field | Type | Notes |
 |---|---|---|
+| `title` | string | The document's display title. **Strict precedence**: the frontmatter `title:` is THE title. There is no H1 fallback — a document without `title:` has `doc.Title = ""`, and the presentation layer (DisplayLabel) falls through to the parent filename then the UID. |
 | `tags` | `[]string` | Free-form labels. Used as `SearchFilters.Tag` and surfaced by `GET /api/tags`. |
 | `categories` | `[]string` | Hierarchical classifications. Used as `SearchFilters.Category` and surfaced by `GET /api/categories`. |
 | `urls` | `[]string` | At least one is conventional (link-suggestion works better when the document has a canonical URL), but not enforced. |
@@ -59,10 +60,12 @@ followed by a standard Markdown body. The frontmatter is delimited by
 ### Body
 
 - Standard Markdown.
-- The first H1 (`# ...`) becomes the document title; subsequent H1/H2
-  headers define the chunking boundaries. Chunks smaller than
-  `processing.min_chunk_size` get merged with their neighbour; chunks
-  larger than `processing.max_chunk_size` get split with overlap.
+- The title comes from the frontmatter `title:` field, not from
+  the body. A `# H1` in the body is ignored for title extraction;
+  H1/H2 headers still define the chunking boundaries. Chunks
+  smaller than `processing.min_chunk_size` get merged with their
+  neighbour; chunks larger than `processing.max_chunk_size` get
+  split with overlap.
 - If the body has no H1, the whole document is a single chunk.
 - Frontmatter handling in the strict `ingest` path
   (`DocbuilderParser.ParseDocument`):

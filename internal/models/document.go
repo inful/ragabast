@@ -28,7 +28,10 @@ type Document struct {
 	// URLs associated with the document.
 	URLs []string `bson:"urls" json:"urls"`
 
-	// Title is extracted from the first H1 header.
+	// Title is set from the frontmatter `title:` field by the
+	// parser. There is no H1 fallback — a document that doesn't
+	// declare `title:` has an empty Title, and DisplayLabel fills the
+	// gap with the parent document's basename or its UID.
 	Title string `bson:"title" json:"title"`
 
 	// Content is the full markdown content.
@@ -137,7 +140,8 @@ type DocumentInfo struct {
 // DisplayLabel returns the human-readable label for the document.
 // The preference order mirrors SearchResult.DisplayLabel:
 //
-//  1. Title (set from the parent document's H1 by the parser)
+//  1. Title (set from the parent document's frontmatter
+//     `title:` field by the parser — there is no H1 fallback)
 //  2. FilenameFromPath(FilePath) (the basename without its
 //     extension — the on-disk filename the operator recognizes)
 //  3. UID (the existing fallback, the user-defined unique id)
