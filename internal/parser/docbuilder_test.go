@@ -154,3 +154,112 @@ func TestParseDocument_CRLFPreservesRawContent(t *testing.T) {
 	require.Equal(t, raw, doc.RawContent,
 		"RawContent must be the original bytes, not the normalized form")
 }
+
+// TestParseDocument_SourceKindFromFrontmatter pins that the
+// gitlab writer's `source_kind: gitlab` line lands on
+// models.Document.SourceKind via the typed extraction. Without
+// this, every gitlab-ingested doc would deserialize back as
+// SourceUnknown, and the citation dispatch + post-filter would
+// treat it as a docbuilder doc (the legacy default) —
+// specifically, gitlab citations would resolve to the
+// docbuilder permalink instead of the original GitLab URL.
+func TestParseDocument_SourceKindFromFrontmatter(t *testing.T) {
+	p := NewDocbuilderParser()
+	raw := []byte(`---
+uid: sample
+source_kind: gitlab
+---
+
+# Title
+
+Hello
+`)
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "gitlab", string(doc.SourceKind),
+		"source_kind: gitlab must populate doc.SourceKind verbatim")
+}
+
+// TestParseDocument_UntypedFrontmatterGoesToMetadata pins the
+// generic "extra fields → doc.Metadata" pass. The gitlab writer
+// emits source-specific keys (state, author_username) that the
+// parser doesn't recognize as typed fields; they must flow
+// through to doc.Metadata so the ingest pipeline can copy them
+// to chunk.Metadata. If the parser dropped unknown keys, every
+// gitlab-sourced chunk would lose its state filter.
+func TestParseDocument_UntypedFrontmatterGoesToMetadata(t *testing.T) {
+	p := NewDocbuilderParser()
+	raw := []byte(`---
+uid: sample
+source_kind: gitlab
+state: opened
+author_username: alice
+---
+
+# Title
+
+Hello
+`)
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "opened", doc.Metadata["state"],
+		"untyped 'state' frontmatter key must flow through to doc.Metadata")
+	require.Equal(t, "alice", doc.Metadata["author_username"],
+		"untyped 'author_username' frontmatter key must flow through to doc.Metadata")
+}
+
+// TestParseDocument_TypedKeysAreNotCopiedToMetadata pins the
+// "no double-storage" rule: a frontmatter key that IS typed
+// (uid, title, tags, urls, dates, etc.) must NOT also land in
+// doc.Metadata. Without this, chunk metadata would carry the
+// title as both doc.Title (typed) and doc.Metadata["title"]
+// (string), wasting space and confusing downstream filters.
+func TestParseDocument_TypedKeysAreNotCopiedToMetadata(t *testing.T) {
+	p := NewDocbuilderParser()
+	raw := []byte(`---
+uid: sample
+title: My Document
+tags:
+  - foo
+urls:
+  - https://example.com
+state: opened
+---
+
+# Title
+
+Hello
+`)
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "My Document", doc.Title,
+		"sanity: typed title extraction still applies")
+	_, hasUID := doc.Metadata["uid"]
+	_, hasTitle := doc.Metadata["title"]
+	_, hasTags := doc.Metadata["tags"]
+	_, hasURLs := doc.Metadata["urls"]
+	require.False(t, hasUID, "typed 'uid' must NOT be copied to Metadata")
+	require.False(t, hasTitle, "typed 'title' must NOT be copied to Metadata")
+	require.False(t, hasTags, "typed 'tags' must NOT be copied to Metadata (it's a list, not a string)")
+	require.False(t, hasURLs, "typed 'urls' must NOT be copied to Metadata (it's a list, not a string)")
+	require.Equal(t, "opened", doc.Metadata["state"],
+		"untyped 'state' must still flow to Metadata even when typed keys are present")
+}
+
+// TestParseDocument_NoMetadataWhenFrontmatterIsOnlyTyped pins the
+// empty-bag rule: a doc whose frontmatter contains only typed
+// keys must have doc.Metadata == nil (not an empty map). The
+// ingest pipeline uses `len(doc.Metadata) > 0` to decide whether
+// to copy; an empty map would still be > 0 in some languages
+// but Go's len works on nil maps too — both are zero-length. The
+// stricter guarantee here is the JSON/BSON serialization shape:
+// nil maps serialize as nothing (omitempty), empty maps serialize
+// as {}.
+func TestParseDocument_NoMetadataWhenFrontmatterIsOnlyTyped(t *testing.T) {
+	p := NewDocbuilderParser()
+	raw := []byte("---\nuid: sample\ntitle: Plain\n---\n\n# Title\n\nBody\n")
+	parsed, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Nil(t, parsed.Metadata,
+		"docs with no untyped frontmatter keys must have nil Metadata so omitempty drops the BSON/JSON field")
+}

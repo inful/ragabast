@@ -75,6 +75,18 @@ type Document struct {
 	// documents ingested before the field was added; downstream
 	// code treats that as SourceDocbuilder per the spec.
 	SourceKind SourceKind `bson:"source_kind,omitempty" json:"source_kind,omitempty"`
+
+	// Metadata carries source-specific key/value pairs that
+	// don't fit into the typed fields above. The gitlab writer
+	// populates "state" and "author_username" here; the parser
+	// copies any non-typed frontmatter keys into this bag so a
+	// source-specific filter (e.g. "only open issues") can run
+	// at the vector layer without the parser knowing the field
+	// names. The chunk-level Metadata (models.Chunk.Metadata)
+	// is populated from this bag during the ingest pipeline.
+	// Nil by default so omitempty drops the field for documents
+	// without source-specific metadata.
+	Metadata map[string]string `bson:"metadata,omitempty" json:"metadata,omitempty"`
 }
 
 // NewDocument creates a new document with default values.

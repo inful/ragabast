@@ -484,3 +484,82 @@ func TestNotePayload_UnmarshalFromGitLabRealism(t *testing.T) {
 	assert.Equal(t, "2013-10-02T09:56:03Z", note.CreatedAt,
 		"the timestamp must round-trip unchanged — created_at is a string, not a time.Time, in the wire shape")
 }
+
+// TestEnvelopeToDocbuilderMarkdown_EmitsSourceKindInFrontmatter pins
+// that the rendered markdown carries `source_kind: gitlab` in the
+// frontmatter. The parser uses this field to populate
+// models.Document.SourceKind, which the citation dispatch and the
+// source-kind post-filter both branch on. Without this line, every
+// GitLab-ingested doc would be treated as SourceDocbuilder (the
+// legacy default), citations would resolve to the docbuilder
+// permalink instead of the original GitLab URL, and the operator
+// would lose the per-source scoping the multi-source work is
+// designed to enable.
+func TestEnvelopeToDocbuilderMarkdown_EmitsSourceKindInFrontmatter(t *testing.T) {
+	env := IssueEnvelope{
+		Issue: IssuePayload{
+			IID: 1, Title: "t", CreatedAt: "2026-01-15T10:00:00.000Z",
+			WebURL: "https://x",
+		},
+		PathWithNamespace: "g/p",
+	}
+	md, _, err := EnvelopeToDocbuilderMarkdown(env)
+	require.NoError(t, err)
+	assert.Contains(t, md, "source_kind: gitlab",
+		"gitlab writer must emit 'source_kind: gitlab' so the parser tags every chunk with SourceGitLab")
+}
+
+// TestEnvelopeToDocbuilderMarkdown_EmitsStateAndAuthorUsername pins
+// that the source-specific metadata keys the multi-source spec calls
+// for land in the frontmatter. The parser copies them into the
+// chunk metadata so the source-kind post-filter can scope
+// retrievals (e.g. 'only open issues') without the operator having
+// to know the GitLab wire shape.
+//
+// Keys are emitted only when non-empty: a closed issue still emits
+// 'state: closed' (so consumers can tell open from closed), but an
+// issue with no AuthorUsername field drops the author line.
+func TestEnvelopeToDocbuilderMarkdown_EmitsStateAndAuthorUsername(t *testing.T) {
+	env := IssueEnvelope{
+		Issue: IssuePayload{
+			IID: 1, Title: "t",
+			CreatedAt: "2026-01-15T10:00:00.000Z",
+			WebURL:    "https://x",
+			State:     "opened",
+			Author:    Author{Username: "alice", Name: "Alice"},
+		},
+		PathWithNamespace: "g/p",
+	}
+	md, _, err := EnvelopeToDocbuilderMarkdown(env)
+	require.NoError(t, err)
+	assert.Contains(t, md, "state: opened",
+		"state must be in the frontmatter so retrieval filters can scope to open/closed")
+	assert.Contains(t, md, "author_username: alice",
+		"author_username must be in the frontmatter so the chat surface can attribute the issue author")
+}
+
+// TestEnvelopeToDocbuilderMarkdown_OmitsAuthorUsernameWhenEmpty pins
+// the "don't emit empty values" contract: an issue with no author
+// username (e.g. an anonymous/system actor) must not produce a
+// stray 'author_username: ""' line in the frontmatter. The parser's
+// generic "extra fields → doc.Metadata" path treats an empty string
+// the same as a missing key, but emitting it would force the
+// author_username check downstream to special-case empty strings,
+// which is a footgun. Better to omit when empty.
+func TestEnvelopeToDocbuilderMarkdown_OmitsAuthorUsernameWhenEmpty(t *testing.T) {
+	env := IssueEnvelope{
+		Issue: IssuePayload{
+			IID: 1, Title: "t", CreatedAt: "2026-01-15T10:00:00.000Z",
+			WebURL: "https://x",
+			State:  "opened",
+			Author: Author{Username: "", Name: ""},
+		},
+		PathWithNamespace: "g/p",
+	}
+	md, _, err := EnvelopeToDocbuilderMarkdown(env)
+	require.NoError(t, err)
+	assert.NotContains(t, md, "author_username:",
+		"empty author_username must NOT appear in the frontmatter; emit only when populated")
+	// state should still appear (the issue has a state).
+	assert.Contains(t, md, "state: opened")
+}

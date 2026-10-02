@@ -103,6 +103,14 @@ func (p *DocbuilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 		return fmt.Errorf("invalid YAML: %w", err)
 	}
 
+	// Extract SourceKind (typed field, gitlab writer sets "source_kind: gitlab").
+	// Operators writing docbuilder markdown shouldn't set this unless they
+	// intentionally want the per-source citation dispatch + post-filter to
+	// treat their doc as a non-default kind.
+	if k, ok := frontmatter["source_kind"].(string); ok {
+		doc.SourceKind = models.SourceKind(k)
+	}
+
 	// hugoFields is the lowercased lookup map for the four Hugo
 	// "don't publish" markers and their aliases. Hugo itself is
 	// case-insensitive on field names; yaml.v3 is case-sensitive
@@ -193,7 +201,75 @@ func (p *DocbuilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 		}
 	}
 
+	// Copy non-typed frontmatter keys into doc.Metadata so the
+	// gitlab writer's "state" / "author_username" (and any future
+	// source-specific keys) flow through to chunk.Metadata during
+	// the ingest pipeline. The typedKeys set is the explicit
+	// allow-list of fields the parser recognizes — anything not in
+	// it lands in Metadata. Keep this list in sync with the typed
+	// extractions above AND with the Hugo fields handled at the
+	// top of this function.
+	doc.Metadata = extractUntypedFrontmatter(frontmatter, typedFrontmatterKeys)
+
 	return nil
+}
+
+// typedFrontmatterKeys is the closed allow-list of frontmatter keys
+// the parser recognizes as typed fields. Any other top-level key in
+// the YAML frontmatter flows into doc.Metadata via
+// extractUntypedFrontmatter. Hugo's "don't publish" markers and
+// their case-insensitive aliases are also excluded (handled
+// separately via lowerHugoKeys).
+//
+// Add a key here when you give it a typed extraction in
+// parseFrontmatter; do NOT add a key without a corresponding
+// extraction, or that field will be silently discarded from
+// chunk.Metadata.
+var typedFrontmatterKeys = map[string]struct{}{
+	"fingerprint": {},
+	"uid":         {},
+	"tags":        {},
+	"categories":  {},
+	"urls":        {},
+	"title":       {},
+	"created_at":  {},
+	"updated_at":  {},
+	"source_kind": {},
+	// hugoFields (draft, date, publishdate, expirydate, etc.) are
+	// matched case-insensitively and would also be excluded, but
+	// we don't need them in the metadata bag anyway.
+}
+
+// extractUntypedFrontmatter returns a map[string]string of every
+// top-level frontmatter key that is not in typedKeys and that has
+// a string scalar value. Non-string values (lists, maps, nested
+// structures) are skipped — they don't fit the chunk.Metadata
+// contract (a flat string→string map) and trying to coerce them
+// would surprise the writer. Returns nil for empty input so the
+// doc.Metadata field stays lean with omitempty.
+//
+// Why this is generic: a source writer (gitlab, future redmine,
+// ...) can introduce a new metadata key without coordinating with
+// the parser. The parser just plumbs it through; the writer and
+// the downstream filter agree on the key names. See the
+// MetadataKey* constants in internal/gitlab/payload.go for the
+// gitlab-side wire contract.
+func extractUntypedFrontmatter(fm map[string]any, typed map[string]struct{}) map[string]string {
+	var out map[string]string
+	for k, v := range fm {
+		if _, isTyped := typed[k]; isTyped {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]string)
+		}
+		out[k] = s
+	}
+	return out
 }
 
 // generateFingerprint creates a stable content fingerprint.
