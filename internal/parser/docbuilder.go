@@ -103,6 +103,33 @@ func (p *DocbuilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 		return fmt.Errorf("invalid YAML: %w", err)
 	}
 
+	// hugoFields is the lowercased lookup map for the four Hugo
+	// "don't publish" markers and their aliases. Hugo itself is
+	// case-insensitive on field names; yaml.v3 is case-sensitive
+	// on map keys when unmarshaling into map[string]any. Without
+	// this normalization step, `publishDate:` and `publishdate:`
+	// would each parse but only one would be reachable by a
+	// case-sensitive lookup.
+	hugoFields := lowerHugoKeys(frontmatter)
+	if v, ok := hugoFields["draft"]; ok {
+		if b, ok := v.(bool); ok {
+			doc.Draft = b
+		}
+	}
+	if v, ok := hugoFields["date"]; ok {
+		if t, ok := parseHugoTime(v); ok {
+			doc.Date = t
+		}
+	}
+	// publishDate wins over pubdate over published — first non-empty
+	// wins, matching Hugo's own lookup order.
+	if t := firstHugoTime(hugoFields, "publishdate", "pubdate", "published"); !t.IsZero() {
+		doc.PublishDate = t
+	}
+	if t := firstHugoTime(hugoFields, "expirydate", "unpublishdate"); !t.IsZero() {
+		doc.ExpiryDate = t
+	}
+
 	// Extract fingerprint
 	if fp, ok := frontmatter["fingerprint"].(string); ok {
 		// Docbuilder convention: this placeholder means "compute it".

@@ -3,10 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/parser"
 )
 
 // IngestResult summarizes a batch ingestion. Callers (CLI, future
@@ -80,6 +83,19 @@ func (s *Service) IngestFile(ctx context.Context, filePath string) error {
 		return fmt.Errorf("failed to parse document %s: %w", filePath, err)
 	}
 
+	// Hugo "don't publish" preflight (issue #97). Filtered
+	// documents skip the chunking path entirely; an error
+	// from the helper still surfaces to the caller so a
+	// transient vector-store failure isn't mistaken for a
+	// silent skip.
+	filtered, err := s.applyUnpublishedPreflight(ctx, doc, s.now())
+	if err != nil {
+		return fmt.Errorf("preflight %s: %w", filePath, err)
+	}
+	if filtered {
+		return nil
+	}
+
 	if err := chunkAndIngest(ctx, s.chunker, s.vectorOps, doc); err != nil {
 		return fmt.Errorf("ingest %s: %w", filePath, err)
 	}
@@ -105,6 +121,18 @@ func (s *Service) IngestDocument(ctx context.Context, content string) (*models.D
 		return nil, fmt.Errorf("failed to parse document: %w", err)
 	}
 
+	// Hugo "don't publish" preflight (issue #97). Returns the
+	// parsed doc even when filtered — the caller asked us to
+	// process this content; we processed it (by deleting the
+	// previously-embedded copy or by ignoring it).
+	filtered, err := s.applyUnpublishedPreflight(ctx, doc, s.now())
+	if err != nil {
+		return nil, err
+	}
+	if filtered {
+		return doc, nil
+	}
+
 	if err := chunkAndIngest(ctx, s.chunker, s.vectorOps, doc); err != nil {
 		return nil, err
 	}
@@ -115,4 +143,44 @@ func (s *Service) IngestDocument(ctx context.Context, content string) (*models.D
 	// tradeoff vs serving stale rankings.
 	s.cache.Clear()
 	return doc, nil
+}
+
+// applyUnpublishedPreflight checks the parsed document against
+// Hugo's "don't publish" frontmatter markers (issue #97). When the
+// document should not be published under Hugo's defaults:
+//
+//   - if it was previously embedded, delete it from the embeddings;
+//   - if it was never embedded, ignore the request silently.
+//
+// Returns filtered=true so the caller knows to skip the chunking
+// path. The pure detection logic lives in parser.IsUnpublished; this
+// helper layers the I/O (existence check + delete) on top.
+//
+// Errors from the existence check or the delete propagate to the
+// caller — a transient vector-store failure is not the same as a
+// silent skip, and the operator should see it in the logs.
+func (s *Service) applyUnpublishedPreflight(ctx context.Context, doc *models.Document, now time.Time) (filtered bool, err error) {
+	if !parser.IsUnpublished(doc, now) {
+		return false, nil
+	}
+	uid := doc.UID
+	if uid == "" {
+		// Defensive: ParseDocument already validated UID.
+		// If we got here with an empty UID something else
+		// is wrong — surface it rather than silently skipping.
+		return false, fmt.Errorf("preflight called with empty UID on unpublished doc %q", doc.Title)
+	}
+	_, exists, err := s.GetDocumentFingerprint(ctx, uid)
+	if err != nil {
+		return false, fmt.Errorf("check existence of unpublished doc %q: %w", uid, err)
+	}
+	if !exists {
+		log.Printf("service: skipping ingest of unpublished doc %q (not previously embedded)", uid)
+		return true, nil
+	}
+	if err := s.DeleteDocument(ctx, uid); err != nil {
+		return true, fmt.Errorf("remove unpublished doc %q from embeddings: %w", uid, err)
+	}
+	log.Printf("service: removed unpublished doc %q from embeddings", uid)
+	return true, nil
 }
