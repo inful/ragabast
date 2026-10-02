@@ -235,6 +235,10 @@ func (f *fakeHumaService) ChatSessionHistory(string) []service.ChatMessage {
 	return []service.ChatMessage{}
 }
 
+func (f *fakeHumaService) ChatSessionSourceKinds(string) []string { return nil }
+
+func (f *fakeHumaService) SetChatSessionSourceKinds(string, []string) {}
+
 func (f *fakeHumaService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {
 	f.appendedTurns = append(f.appendedTurns, appendedTurn{sessionID: sessionID, messages: exchange})
 	return nil
@@ -308,6 +312,7 @@ type fakeService struct {
 	queryDebug        *service.QueryDebugInfo
 	lastQueryOpts     service.LLMOptions
 	history           []service.ChatMessage
+	chatSessionKinds  []chatSessionSourceKind // Stage 2.5: per-session source-kind sticky default
 	appendedTurns     []appendedTurn
 	clearedSessions   []string
 	queryErr          error
@@ -473,6 +478,44 @@ func (f *fakeService) ChatSessionHistory(string) []service.ChatMessage {
 	return []service.ChatMessage{}
 }
 
+// chatSessionSourceKinds is the fake's in-memory backing for
+// the per-session source-kind default. Tests that exercise
+// the sticky-default round-trip populate the session id via
+// chatSessionSeed; the chat handler then reads/writes through
+// ChatSessionSourceKinds / SetChatSessionSourceKinds as if it
+// were the real *service.Service.
+type chatSessionSourceKind struct {
+	sessionID string
+	kinds     []string
+}
+
+func (f *fakeService) ChatSessionSourceKinds(sessionID string) []string {
+	for _, e := range f.chatSessionKinds {
+		if e.sessionID == sessionID {
+			out := make([]string, len(e.kinds))
+			copy(out, e.kinds)
+			return out
+		}
+	}
+	return nil
+}
+
+func (f *fakeService) SetChatSessionSourceKinds(sessionID string, kinds []string) {
+	if sessionID == "" {
+		return
+	}
+	for i, e := range f.chatSessionKinds {
+		if e.sessionID == sessionID {
+			f.chatSessionKinds[i].kinds = append([]string(nil), kinds...)
+			return
+		}
+	}
+	f.chatSessionKinds = append(f.chatSessionKinds, chatSessionSourceKind{
+		sessionID: sessionID,
+		kinds:     append([]string(nil), kinds...),
+	})
+}
+
 func (f *fakeService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {
 	f.appendedTurns = append(f.appendedTurns, appendedTurn{sessionID: sessionID, messages: exchange})
 	return nil
@@ -480,6 +523,15 @@ func (f *fakeService) AppendChatTurn(_ context.Context, sessionID string, exchan
 
 func (f *fakeService) ClearChatSession(sessionID string) {
 	f.clearedSessions = append(f.clearedSessions, sessionID)
+	// Clear also wipes the source-kind default (mirrors the
+	// real service's ClearChatSession, which deletes the
+	// session slot entirely).
+	for i, e := range f.chatSessionKinds {
+		if e.sessionID == sessionID {
+			f.chatSessionKinds = append(f.chatSessionKinds[:i], f.chatSessionKinds[i+1:]...)
+			return
+		}
+	}
 }
 
 func (f *fakeService) GetNormalizedTags(context.Context) ([]string, error) {

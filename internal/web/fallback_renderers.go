@@ -73,10 +73,12 @@ type pageHeaderData struct {
 
 // chatFallbackData is the data shape for the chat landing page.
 type chatFallbackData struct {
-	Title     string
-	CsrfToken string
-	SessionID string // issue #22: chat session id, embedded in the form so reloads preserve context
-	Header    pageHeaderData
+	Title         string
+	CsrfToken     string
+	SessionID     string // issue #22: chat session id, embedded in the form so reloads preserve context
+	Header        pageHeaderData
+	SourceKinds   []models.SourceKind // Stage 2.5: closed set of source kinds the multi-select renders
+	SelectedKinds []string            // Stage 2.5: per-session sticky default; pre-fills the checkboxes
 }
 
 // documentsFallbackData is the data shape for GET /documents.
@@ -300,6 +302,23 @@ const chatFallbackBody = `<!DOCTYPE html>
 				<textarea id="chat-input" class="textarea" name="message" rows="2" placeholder="Ask a question..." required></textarea>
 			</div>
 			<p class="help">Press Ctrl+Enter (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
+		</div>
+		<div class="field">
+			<label class="label">Sources</label>
+			<div class="control">
+				{{ $selected := .SelectedKinds }}
+				{{ range .SourceKinds }}
+				{{ $kind := . }}
+				<label class="checkbox source-kind-option">
+					<input type="checkbox" name="source_kinds" value="{{ $kind }}"
+						{{ if eq (len $selected) 0 }}checked{{ end }}
+						{{ range $selected }}{{ if eq . $kind }}checked{{ end }}{{ end }}>
+					<span class="source-kind-emoji">{{ $kind.InlineSourceIcon }}</span>
+					<span class="source-kind-name">{{ $kind.DisplayName }}</span>
+				</label>
+				{{ end }}
+			</div>
+			<p class="help">Empty selection = all sources. Your choice persists across messages in this session; unchecking all boxes does NOT clear the stored default.</p>
 		</div>
 		<div class="field is-grouped">
 			<div class="control">
