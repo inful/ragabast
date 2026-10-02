@@ -342,7 +342,6 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 		dropTemplatesFor string // sub-test name for the fallback variant
 	}{
 		{path: "/search", method: http.MethodGet},
-		{path: "/ingest", method: http.MethodGet},
 		{path: "/documents", method: http.MethodGet},
 		// chat landing page lives only in the fallback; cover it
 		// below by exercising the fallback variant.
@@ -368,8 +367,8 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 				"%s must not reference cdn.jsdelivr.net", p.path)
 
 			// Pages that use htmx (search) must also load it from
-			// /static/. The ingest and documents pages don't
-			// currently use htmx, so we only assert for /search.
+			// /static/. The documents page doesn't currently
+			// use htmx, so we only assert for /search.
 			if p.path == "/search" {
 				require.Contains(t, body, `src="/static/htmx.min.js`,
 					"%s must load htmx from the embedded /static/htmx.min.js", p.path)
@@ -401,25 +400,6 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 			"chat fallback must not reference cdn.jsdelivr.net")
 		require.NotContains(t, body, "unpkg.com",
 			"chat fallback must not reference unpkg.com")
-	})
-
-	t.Run("ingest fallback", func(t *testing.T) {
-		// The ingest page is rendered from a fallback template
-		// when the embedded set is missing it. Drop the embedded
-		// templates to exercise that path.
-		s.templates = nil
-
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ingest", nil)
-		w := httptest.NewRecorder()
-		s.router.ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusOK, w.Code)
-		body := w.Body.String()
-
-		require.Contains(t, body, `href="/static/bulma.min.css`,
-			"ingest fallback must load Bulma from /static/bulma.min.css")
-		require.NotContains(t, body, "cdn.jsdelivr.net",
-			"ingest fallback must not reference cdn.jsdelivr.net")
 	})
 
 	t.Run("documents fallback", func(t *testing.T) {

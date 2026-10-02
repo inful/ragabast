@@ -21,7 +21,7 @@ import (
 //     POST /api/frontmatter/suggest — same
 //     rationale.
 //   - content:    the docbuilder markdown body posted to
-//     /api/ingest, /ingest, /api/ingest/raw,
+//     /api/ingest, /api/ingest/raw,
 //     /api/ingest/file. May be many KiB.
 //   - document_id, docbuilder_base_url: path-shaped fields
 //     that may carry sensitive identifiers.

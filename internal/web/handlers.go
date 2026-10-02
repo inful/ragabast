@@ -3,7 +3,6 @@ package web
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -107,14 +106,15 @@ func (s *Server) renderTemplate(w http.ResponseWriter, templateName string, data
 // QueryDebugInfo.Results), so we want the in-tree template there
 // too. These three are absent here on purpose.
 //
-// All four pages that DO fall back here (chat.html, ingest.html,
-// ingest_success.html, documents.html) are rendered through
-// html/template instances pre-parsed in newFallbackTemplates
-// (see fallback_renderers.go). That guarantees every {{ }}
-// substitution is contextually escaped — fixing the previous
-// stored-XSS bug where fmt.Fprintf %s/%v interpolated
-// attacker-controlled strings (doc.Title from the H1 header,
-// doc.Tags from YAML frontmatter) directly into the response.
+// All three pages that DO fall back here (chat.html,
+// documents.html, and the search fallback if one is added
+// later) are rendered through html/template instances
+// pre-parsed in newFallbackTemplates (see fallback_renderers.go).
+// That guarantees every {{ }} substitution is contextually
+// escaped — fixing the previous stored-XSS bug where
+// fmt.Fprintf %s/%v interpolated attacker-controlled strings
+// (doc.Title from the frontmatter `title:` field, doc.Tags
+// from YAML frontmatter) directly into the response.
 func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data any) {
 	header := headerFromMap(data)
 	switch templateName {
@@ -123,22 +123,6 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 			Title:     titleFromMap(data, "RAGabast - Chat"),
 			CsrfToken: stringFromMap(data, "CsrfToken"),
 			Header:    header,
-		})
-	case "ingest.html":
-		s.renderFallback(w, "ingest.html", ingestFallbackData{
-			Title:     titleFromMap(data, "RAGabast - Ingest"),
-			CsrfToken: stringFromMap(data, "CsrfToken"),
-			Error:     stringFromMap(data, "Error"),
-			Content:   stringFromMap(data, "Content"),
-			Header:    header,
-		})
-	case "ingest_success.html":
-		s.renderFallback(w, "ingest_success.html", ingestSuccessFallbackData{
-			Title:      titleFromMap(data, "Ingest Successful"),
-			DocumentID: stringFromMap(data, "DocumentID"),
-			Chunks:     intFromMap(data, "Chunks"),
-			Tags:       tagsFromMap(data),
-			Header:     header,
 		})
 	case "documents.html":
 		s.renderFallback(w, "documents.html", documentsFallbackData{
@@ -278,31 +262,6 @@ func intFromMap(data any, key string) int {
 		return int(v)
 	default:
 		return 0
-	}
-}
-
-// tagsFromMap extracts a []string from the data map, regardless
-// of whether the handler stored it as []string or []any. The
-// legacy handlers stored []any because the data map flowed from
-// an untyped literal.
-func tagsFromMap(data any) []string {
-	m, ok := data.(map[string]any)
-	if !ok {
-		return nil
-	}
-	switch v := m["Tags"].(type) {
-	case []string:
-		return v
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
 	}
 }
 
@@ -608,111 +567,6 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 		"Filters": filters,
 		"Results": rendered,
 	})
-}
-
-func (s *Server) handleIngestPage(w http.ResponseWriter, r *http.Request) {
-	s.renderTemplate(w, "ingest.html", map[string]any{
-		"Title":     "RAGabast - Ingest",
-		"CsrfToken": CsrfTokenFromContext(r.Context()),
-		"Header":    s.pageHeaderFromContext(r),
-	})
-}
-
-// handleIngestSubmit processes a docbuilder POST. Three outcomes:
-//
-//   - happy path → ingest_success.html (200)
-//   - client-side rejection (validation, oversize) → ingest.html
-//     re-render with the actual reason and the user's original
-//     content preserved (4xx). The operator can correct and retry
-//     without guessing what went wrong.
-//   - genuine server-side failure (embedding crash, vector DB
-//     unreachable) → generic message + request id (500). The
-//     detail belongs in the server log, not the browser.
-//
-// errors.Is is used to classify the service-layer error so adding
-// new validation sentinels in models/errors.go automatically gets
-// the right UX treatment here.
-func (s *Server) handleIngestSubmit(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Failed to parse form", http.StatusBadRequest)
-		return
-	}
-
-	content := r.FormValue("content")
-	if content == "" {
-		s.renderIngestError(w, r, http.StatusBadRequest, "Paste docbuilder content before submitting.", content)
-		return
-	}
-
-	// Per-document size cap (server.max_ingest_document_bytes).
-	// The 10 MiB request-body limit (H-2) caps the whole
-	// request, but a single ingest request is one document —
-	// the smaller per-document cap protects the chunker and
-	// embedding model from being pinned by one giant input.
-	if maxBytes := s.config.Server.MaxIngestDocumentBytes; maxBytes > 0 && len(content) > maxBytes {
-		s.renderIngestError(w, r, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("Document exceeds server.max_ingest_document_bytes (%d bytes).", maxBytes),
-			content)
-		return
-	}
-
-	// Ingest document
-	doc, err := s.service.IngestDocument(r.Context(), content)
-	if err != nil {
-		if isClientIngestError(err) {
-			s.renderIngestError(w, r, http.StatusBadRequest, err.Error(), content)
-			return
-		}
-		internalError(w, r, "ingest", err)
-		return
-	}
-
-	s.renderTemplate(w, "ingest_success.html", map[string]any{
-		"Title":      "Ingest Successful",
-		"DocumentID": doc.ID,
-		"Chunks":     len(doc.Chunks),
-		"Tags":       doc.Tags,
-		"Header":     s.pageHeaderFromContext(r),
-	})
-}
-
-// renderIngestError re-renders the ingest form with an inline
-// error banner. Used for validation errors and oversize bodies so
-// the user sees the actual reason and can correct and retry
-// without guessing.
-func (s *Server) renderIngestError(w http.ResponseWriter, r *http.Request, status int, message, originalContent string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	s.renderTemplate(w, "ingest.html", map[string]any{
-		"Title":     "RAGabast - Ingest",
-		"CsrfToken": CsrfTokenFromContext(r.Context()),
-		"Error":     message,
-		"Content":   originalContent,
-		"Header":    s.pageHeaderFromContext(r),
-	})
-}
-
-// isClientIngestError reports whether err is a deterministic
-// client-side rejection (validation, malformed frontmatter,
-// empty document, etc.) and therefore deserves a 4xx with a
-// useful message, vs. a genuine server-side failure that should
-// return a generic 500. Adding a new sentinel to models/errors.go
-// makes the new case fall into the right bucket automatically.
-func isClientIngestError(err error) bool {
-	for _, sentinel := range []error{
-		models.ErrMissingFingerprint,
-		models.ErrMissingUID,
-		models.ErrMissingContent,
-		models.ErrInvalidFrontmatter,
-		models.ErrParseFailed,
-		models.ErrInvalidFormat,
-		models.ErrEmptyDocument,
-	} {
-		if errors.Is(err, sentinel) {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Server) handleDocumentsPage(w http.ResponseWriter, r *http.Request) {

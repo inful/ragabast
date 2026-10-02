@@ -3,7 +3,6 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/ragabast/internal/config"
@@ -13,13 +12,16 @@ import (
 
 // TestFallbackRenderers_EscapeUserControlledStrings pins the
 // security requirement that every page rendered via the
-// serveBasicHTML fallback (chat.html, ingest.html,
-// ingest_success.html, documents.html) MUST HTML-escape
-// user-controlled strings before they hit the page. The
-// fallback fires when the embedded template set does not
-// include the requested page name — which is the production
-// Docker image today, where only chat_message.html,
+// serveBasicHTML fallback (chat.html, documents.html) MUST
+// HTML-escape user-controlled strings before they hit the
+// page. The fallback fires when the embedded template set
+// does not include the requested page name — which is the
+// production Docker image today, where only chat_message.html,
 // search.html, and search_results.html ship in the embed.
+//
+// PR 2 removed the HTML /ingest form, so ingest.html and
+// ingest_success.html are no longer fallback targets. The
+// test now covers chat.html and documents.html.
 //
 // The XSS threat: doc.Title (set from the frontmatter `title:`
 // field in markdown) and doc.Tags (taken verbatim from the
@@ -84,38 +86,5 @@ func TestFallbackRenderers_EscapeUserControlledStrings(t *testing.T) {
 		// the document was just dropped).
 		require.Contains(t, body, "&lt;script&gt;",
 			"escaped title missing from /documents body")
-	})
-
-	t.Run("ingest success page escapes document id and tags", func(t *testing.T) {
-		cfg := config.DefaultConfig()
-		cfg.Paths.TemplatesDir = ""
-
-		maliciousTag := "<img src=x onerror=alert(1)>"
-
-		svc := &fakeService{
-			ingestDocument: &models.Document{
-				ID:   "doc-<script>alert(1)</script>",
-				Tags: []string{maliciousTag},
-				Chunks: []models.Chunk{
-					{}, {}, {},
-				},
-			},
-		}
-		s := NewServer(cfg, svc)
-		s.templates = nil
-
-		form := strings.NewReader("content=hello")
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/ingest", form)
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		w := httptest.NewRecorder()
-		s.router.ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusOK, w.Code)
-		body := w.Body.String()
-
-		require.NotContains(t, body, "<script>alert(1)</script>",
-			"un-escaped document id in ingest_success body — XSS in fallback renderer")
-		require.NotContains(t, body, "<img src=x onerror=alert(1)>",
-			"un-escaped tag in ingest_success body — XSS in fallback renderer")
 	})
 }

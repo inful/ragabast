@@ -218,22 +218,6 @@ func TestChatForm_RendersCsrfTokenField(t *testing.T) {
 		"csrf_token input must be hidden (not user-visible)")
 }
 
-// TestIngestForm_RendersCsrfTokenField pins the same
-// contract for the ingest form. POST /ingest is on the
-// protected list, so it needs the same hidden field.
-func TestIngestForm_RendersCsrfTokenField(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Server.AuthToken = "secret"
-	s := NewServer(cfg, &fakeHumaService{})
-
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/ingest", nil)
-	w := httptest.NewRecorder()
-	s.router.ServeHTTP(w, req)
-
-	assert.Contains(t, w.Body.String(), `name="csrf_token"`,
-		"ingest form must render <input name=\"csrf_token\">")
-}
-
 // TestSearchForm_RendersCsrfTokenField pins the same
 // contract for the search form.
 func TestSearchForm_RendersCsrfTokenField(t *testing.T) {

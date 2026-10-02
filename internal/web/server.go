@@ -405,8 +405,6 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 		s.templates = templates.Funcs(funcs)
 	}
 	s.fallback.chat = parseFallback("chat.html", chatFallbackBody, funcs)
-	s.fallback.ingest = parseFallback("ingest.html", ingestFallbackBody, funcs)
-	s.fallback.ingestSuccess = parseFallback("ingest_success.html", ingestSuccessFallbackBody, funcs)
 	s.fallback.documents = parseFallback("documents.html", documentsFallbackBody, funcs)
 
 	s.registerRoutes()
@@ -606,8 +604,6 @@ func (s *Server) registerRoutes() {
 	s.router.Post("/chat/clear", s.handleChatClear)
 	s.router.Get("/search", s.handleSearchPage)
 	s.router.Post("/search", s.handleSearchSubmit)
-	s.router.Get("/ingest", s.handleIngestPage)
-	s.router.Post("/ingest", s.handleIngestSubmit)
 	s.router.Get("/documents", s.handleDocumentsPage)
 	s.router.Post("/documents/{document_id}/delete", s.handleDocumentDelete)
 

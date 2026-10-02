@@ -58,7 +58,6 @@ func TestAuthMiddleware_RequiresBearerToken(t *testing.T) {
 		// Form-mounted web handlers
 		{http.MethodPost, "/chat/message"},
 		{http.MethodPost, "/search"},
-		{http.MethodPost, "/ingest"},
 	}
 
 	for _, p := range protected {
@@ -432,18 +431,21 @@ func TestAuthMiddleware_StaticRouteIsPublic(t *testing.T) {
 }
 
 // TestAuthMiddleware_GET_ChatPageIsPublic confirms the GET
-// page routes (/, /chat, /search, /ingest, /documents) stay
+// page routes (/, /chat, /search, /documents) stay
 // public so the browser can load the form. Only the
 // state-changing POST handlers are protected. The rationale
 // is the same as the static route: browsers do not send
 // Authorization on a top-level GET, so protecting these would
 // break the operator's own UI.
+//
+// PR 2 removed the HTML /ingest form, so /ingest is no
+// longer in the public-GET list.
 func TestAuthMiddleware_GET_ChatPageIsPublic(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.AuthToken = "secret"
 	s := NewServer(cfg, &fakeService{})
 
-	publicGets := []string{"/", "/search", "/ingest", "/documents"}
+	publicGets := []string{"/", "/search", "/documents"}
 	for _, p := range publicGets {
 		t.Run(p, func(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, p, nil)

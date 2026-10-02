@@ -18,17 +18,15 @@ import (
 // every {{ .Field }} substitution. This is the same defense the
 // embedded templates rely on; the fallback path used to bypass
 // it with raw fmt.Fprintf %s/%v, which produced stored XSS via
-// any user-controllable string (doc.Title from the first H1
-// header, doc.Tags from the YAML `tags:` array).
+// any user-controllable string (doc.Title from the frontmatter
+// `title:` field, doc.Tags from the YAML `tags:` array).
 //
 // The page bodies are kept close to the previous fmt.Fprintf
 // output to minimize visual drift; the security-relevant change
 // is the renderer, not the markup.
 type fallbackTemplates struct {
-	chat          *template.Template
-	ingest        *template.Template
-	ingestSuccess *template.Template
-	documents     *template.Template
+	chat      *template.Template
+	documents *template.Template
 }
 
 // pageHeaderData is the per-page nav-bar data every fallback
@@ -79,35 +77,10 @@ type chatFallbackData struct {
 	Header    pageHeaderData
 }
 
-// ingestFallbackData is the data shape for the GET /ingest page.
-// Error and Content are populated only when the page is re-rendered
-// after a failed POST /ingest submission — Error carries the
-// human-readable reason the content was rejected, and Content is
-// the user's original submission so they can correct and retry
-// without losing what they typed.
-type ingestFallbackData struct {
-	Title     string
-	CsrfToken string
-	Error     string
-	Content   string
-	Header    pageHeaderData
-}
-
-// ingestSuccessFallbackData is the data shape for POST /ingest's
-// success page. DocumentID comes from the docbuilder UID
-// (user-controllable in YAML frontmatter), so the renderer MUST
-// escape it; the same applies to Tags.
-type ingestSuccessFallbackData struct {
-	Title      string
-	DocumentID string
-	Chunks     int
-	Tags       []string
-	Header     pageHeaderData
-}
-
 // documentsFallbackData is the data shape for GET /documents.
 // Title, Tags, Category, and ID are all user-controllable (parsed
-// from ingested frontmatter / H1 header).
+// from the ingested frontmatter — specifically the `title:` field
+// for Title, the `tags:` array for Tags, etc.).
 //
 // Pagination fields (Total, Limit, Offset, PrevOffset, NextOffset,
 // StartShowing, EndShowing) drive the Previous/Next links
@@ -204,10 +177,14 @@ func parseFallback(name, body string, funcs template.FuncMap) *template.Template
 // renderer parses this with the page body string in
 // mustParseWithHeader.
 //
-// The basic links (Chat | Search | Documents | Ingest) render
-// on every page regardless of OAuth configuration; the user
-// display name and Sign in / Sign out bits render on top when
-// auth is also enabled. Issue #85.
+// The basic links (Chat | Search | Documents) render on
+// every page regardless of OAuth configuration; the user
+// display name and Sign in / Sign out bits render on top
+// when auth is also enabled. Issue #85. The HTML /ingest
+// form was removed in PR 2 (see plans/remove-ingest-form.md);
+// ingest is reachable via the Huma HTTP API
+// (/api/ingest, /api/ingest/raw, /api/ingest/file) so the
+// link was no longer pointing at a resource.
 //
 // Bulma navbar markup keeps the visual language consistent
 // with the rest of the page chrome (chat-message, search,
@@ -233,7 +210,6 @@ const pageHeaderFallbackBody = `
       <a class="navbar-item" href="/">Chat</a>
       <a class="navbar-item" href="/search">Search</a>
       <a class="navbar-item" href="/documents">Documents</a>
-      <a class="navbar-item" href="/ingest">Ingest</a>
     </div>
     <div class="navbar-end">
       {{- if .AuthEnabled }}
@@ -266,10 +242,6 @@ func (s *Server) renderFallback(w http.ResponseWriter, name string, data any) {
 	switch name {
 	case "chat.html":
 		tmpl = s.fallback.chat
-	case "ingest.html":
-		tmpl = s.fallback.ingest
-	case "ingest_success.html":
-		tmpl = s.fallback.ingestSuccess
 	case "documents.html":
 		tmpl = s.fallback.documents
 	default:
@@ -338,74 +310,6 @@ const chatFallbackBody = `<!DOCTYPE html>
 </body>
 </html>`
 
-// ingestFallbackBody renders the GET /ingest page. When Error is
-// non-empty (a failed POST re-render), the form shows a Bulma
-// `is-danger` notification with the human-readable reason and
-// pre-fills the textarea with the user's original submission so
-// they can correct and retry without losing what they typed.
-const ingestFallbackBody = `<!DOCTYPE html>
-<html>
-<head>
-    <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
-    <link rel="stylesheet" href="{{ asset "chat.css" }}">
-    <script src="{{ asset "chat.js" }}" defer></script>
-</head>
-<body class="container mt-4">
-    {{ template "header" .Header }}
-    <h1 class="title">Ingest Document</h1>
-    {{ if .Error }}
-    <div class="notification is-danger">
-        <strong>Ingest failed:</strong> {{ .Error }}
-    </div>
-    {{ end }}
-    <form method="post" action="/ingest">
-        <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
-        <div class="field">
-            <label class="label">Docbuilder Content</label>
-            <div class="control">
-                <textarea class="textarea" name="content" rows="15" placeholder="Paste your docbuilder markdown content here..." required>{{ .Content }}</textarea>
-            </div>
-            <p class="help">Include YAML frontmatter with fingerprint, uid, tags, categories, and URLs</p>
-        </div>
-        <div class="field">
-            <div class="control">
-                <button class="button is-primary" type="submit">Ingest</button>
-            </div>
-        </div>
-    </form>
-</body>
-</html>`
-
-// ingestSuccessFallbackBody renders the POST /ingest confirmation.
-//
-// Security: DocumentID comes from the docbuilder UID in the
-// ingested frontmatter; Tags is parsed from the YAML `tags:`
-// array. Both MUST pass through html/template's auto-escaping.
-const ingestSuccessFallbackBody = `<!DOCTYPE html>
-<html>
-<head>
-    <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
-    <link rel="stylesheet" href="{{ asset "chat.css" }}">
-    <script src="{{ asset "chat.js" }}" defer></script>
-</head>
-<body class="container mt-4">
-    {{ template "header" .Header }}
-    <div class="notification is-success">
-        <h1 class="title">Document Ingested Successfully!</h1>
-        <p><strong>Document ID:</strong> {{ .DocumentID }}</p>
-        <p><strong>Chunks Created:</strong> {{ .Chunks }}</p>
-        <p><strong>Tags:</strong> {{ .Tags }}</p>
-    </div>
-    <div class="buttons">
-        <a href="/ingest" class="button is-primary">Ingest Another</a>
-        <a href="/search" class="button is-info">Search</a>
-        <a href="/" class="button">Home</a>
-    </div>
-</body>
-</html>`
-
 // documentsFallbackBody renders the GET /documents page.
 //
 // Security: every row's Title (H1 header), ID (UID), Tags
@@ -467,7 +371,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
     </table>
     {{ else }}
     <div class="notification">
-        No documents ingested yet. Use the <a href="/ingest">Ingest</a> page to add some.
+        No documents ingested yet. Submit one through <code>POST /api/ingest</code> to add some.
     </div>
     {{ end }}
 

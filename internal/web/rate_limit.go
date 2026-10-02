@@ -198,13 +198,16 @@ func clientIP(r *http.Request) string {
 //     /api/frontmatter/suggest, /chat/message (POST),
 //     /search (POST).
 //   - Ingest endpoints (embedding + write cost):
-//     /api/ingest, /api/ingest/raw, /api/ingest/file,
-//     /ingest (POST).
+//     /api/ingest, /api/ingest/raw, /api/ingest/file.
 //
 // Ingest is included because a single caller can saturate
 // the 5-slot IngestLimiter forever without per-IP
 // throttling — a hostile operator could amplify embedding
 // spend by hammering /api/ingest at line rate.
+//
+// The HTML /ingest form was removed in PR 2 (see
+// plans/remove-ingest-form.md); the Huma API endpoints
+// remain.
 var llmPathPrefixes = []string{
 	"/api/query",
 	"/api/search",
@@ -215,7 +218,6 @@ var llmPathPrefixes = []string{
 	"/api/ingest",
 	"/api/ingest/raw",
 	"/api/ingest/file",
-	"/ingest",
 }
 
 // llmPathMiddleware is the chi-level rate-limit middleware

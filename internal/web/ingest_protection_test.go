@@ -18,11 +18,12 @@ import (
 // amplify spend on the chat provider.
 //
 // The endpoint under test is /api/ingest (JSON body); the
-// other ingest endpoints (/api/ingest/raw, /api/ingest/file,
-// /ingest) share the same rate-limit bucket because they
-// share the same path prefix. The test asserts the rate
-// limiter fires on the API path; a second test asserts it
-// fires on the form path too.
+// other ingest endpoints (/api/ingest/raw, /api/ingest/file)
+// share the same rate-limit bucket because they share the
+// same path prefix.
+//
+// PR 2 removed the HTML /ingest form, so the form-mounted
+// counterpart test was deleted with the route.
 func TestRateLimiter_IngestEndpointsThrottled(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Server.RateLimitPerMinute = 60
@@ -47,33 +48,6 @@ func TestRateLimiter_IngestEndpointsThrottled(t *testing.T) {
 		"second ingest before refill must be 429")
 	require.NotEmpty(t, w.Header().Get("Retry-After"),
 		"429 must advertise Retry-After")
-}
-
-// TestRateLimiter_FormIngestEndpointThrottled covers the
-// form-mounted /ingest endpoint (separate path prefix from
-// /api/ingest, but the same logical operation).
-func TestRateLimiter_FormIngestEndpointThrottled(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.Server.RateLimitPerMinute = 60
-	cfg.Server.RateLimitBurst = 1
-	s := NewServer(cfg, &fakeHumaService{})
-
-	doIngest := func(remoteAddr string) *httptest.ResponseRecorder {
-		body := "content=hello"
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/ingest", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.RemoteAddr = remoteAddr
-		w := httptest.NewRecorder()
-		s.router.ServeHTTP(w, req)
-		return w
-	}
-
-	w := doIngest("192.0.2.10:1234")
-	require.Equal(t, http.StatusOK, w.Code,
-		"first form ingest within burst must succeed")
-	w = doIngest("192.0.2.10:1234")
-	require.Equal(t, http.StatusTooManyRequests, w.Code,
-		"second form ingest before refill must be 429")
 }
 
 // TestIngestDocumentSizeLimit_PinsClamp pins the per-document
