@@ -706,3 +706,39 @@ func TestStaticAssets_AllowListIsExact(t *testing.T) {
 	require.Equal(t, expected, actual,
 		"staticAssets allow-list drifted; a new bundled asset must be registered here")
 }
+
+// TestEtagMatches pins the If-None-Match parser used by
+// the static handler's conditional GET path. RFC 7232 §3.2
+// allows a comma-separated list of opaque tags plus a
+// wildcard; the helper must treat any strong-equality
+// match as a hit, treat the wildcard as a hit, and tolerate
+// the W/ weak-validator prefix so a future contributor
+// adding weak validation doesn't have to revisit the
+// matcher.
+//
+// The static handler is the only caller; the test covers
+// the helper directly so the per-case behavior is anchored
+// in isolation from the request plumbing.
+func TestEtagMatches(t *testing.T) {
+	const etag = `"abc123"`
+
+	cases := []struct {
+		name   string
+		header string
+		want   bool
+	}{
+		{name: "wildcard matches any", header: "*", want: true},
+		{name: "exact match", header: etag, want: true},
+		{name: "no match", header: `"different"`, want: false},
+		{name: "empty header", header: "", want: false},
+		{name: "comma list with match", header: `"x", ` + etag + `, "y"`, want: true},
+		{name: "comma list no match", header: `"x", "y"`, want: false},
+		{name: "weak prefix matches", header: `W/` + etag, want: true},
+		{name: "whitespace tolerated", header: "  " + etag + "  ", want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, etagMatches(tc.header, etag))
+		})
+	}
+}

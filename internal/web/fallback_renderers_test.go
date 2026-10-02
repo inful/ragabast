@@ -88,3 +88,157 @@ func TestFallbackRenderers_EscapeUserControlledStrings(t *testing.T) {
 			"escaped title missing from /documents body")
 	})
 }
+
+// TestFirstOrEmpty pins the small string helper the
+// documents-fallback renderer uses to flatten a multi-value
+// category into the single-value "Category" column. Moving
+// the function to a new file shouldn't change its behavior;
+// the test anchors the contract.
+func TestFirstOrEmpty(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want string
+	}{
+		{name: "nil", in: nil, want: ""},
+		{name: "empty", in: []string{}, want: ""},
+		{name: "single", in: []string{"a"}, want: "a"},
+		{name: "multi returns first", in: []string{"a", "b", "c"}, want: "a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, firstOrEmpty(tc.in))
+		})
+	}
+}
+
+// TestFromMap_Header pins the headerFromMap contract: it
+// returns an empty pageHeaderData when the input isn't a
+// map[string]any, and the field-zeroed struct when the
+// map is missing the "Header" key. Used by serveBasicHTML
+// to wire the navbar data into the chat/documents fallback
+// templates; the type assertions must not panic on a
+// missing or wrong-typed value because that would
+// 500 every page that fell through to the fallback.
+func TestFromMap_Header(t *testing.T) {
+	t.Run("non-map returns empty", func(t *testing.T) {
+		require.Equal(t, pageHeaderData{}, headerFromMap("not a map"))
+		require.Equal(t, pageHeaderData{}, headerFromMap(nil))
+	})
+	t.Run("missing key returns empty", func(t *testing.T) {
+		require.Equal(t, pageHeaderData{}, headerFromMap(map[string]any{}))
+	})
+	t.Run("wrong-typed key returns empty", func(t *testing.T) {
+		require.Equal(t, pageHeaderData{},
+			headerFromMap(map[string]any{"Header": "not a struct"}))
+	})
+	t.Run("correct type returns the value", func(t *testing.T) {
+		want := pageHeaderData{AuthEnabled: true, SignedIn: true, DisplayName: "alice"}
+		got := headerFromMap(map[string]any{"Header": want})
+		require.Equal(t, want, got)
+	})
+}
+
+// TestFromMap_String pins the stringFromMap accessor's
+// "silent default on type mismatch" contract. The fallback
+// templates render empty when the field is missing; a
+// panic would 500 the page.
+func TestFromMap_String(t *testing.T) {
+	t.Run("non-map returns empty", func(t *testing.T) {
+		require.Empty(t, stringFromMap(42, "CsrfToken"))
+		require.Empty(t, stringFromMap(nil, "CsrfToken"))
+	})
+	t.Run("missing key returns empty", func(t *testing.T) {
+		require.Empty(t, stringFromMap(map[string]any{}, "CsrfToken"))
+	})
+	t.Run("wrong type returns empty", func(t *testing.T) {
+		require.Empty(t, stringFromMap(map[string]any{"CsrfToken": 123}, "CsrfToken"))
+	})
+	t.Run("correct type returns the value", func(t *testing.T) {
+		require.Equal(t, "abc",
+			stringFromMap(map[string]any{"CsrfToken": "abc"}, "CsrfToken"))
+	})
+	// Exercise the key parameter with a different key so
+	// the function is anchored as a generic accessor, not
+	// a CsrfToken-specialist. The unparam linter would
+	// otherwise flag this when every production call site
+	// happens to pass the same string.
+	t.Run("different key returns the matching value", func(t *testing.T) {
+		require.Equal(t, "ok",
+			stringFromMap(map[string]any{"Other": "ok"}, "Other"))
+	})
+}
+
+// TestFromMap_Int pins the intFromMap accessor's three
+// accepted numeric kinds (int, int64, float64) and the
+// type-mismatch fallthrough to 0. The template renders 0
+// in the mismatch case; the test pins that contract so a
+// future contributor who widens the type set sees the
+// existing scope.
+func TestFromMap_Int(t *testing.T) {
+	t.Run("non-map returns 0", func(t *testing.T) {
+		require.Equal(t, 0, intFromMap("nope", "Limit"))
+		require.Equal(t, 0, intFromMap(nil, "Limit"))
+	})
+	t.Run("missing key returns 0", func(t *testing.T) {
+		require.Equal(t, 0, intFromMap(map[string]any{}, "Limit"))
+	})
+	t.Run("int kind", func(t *testing.T) {
+		require.Equal(t, 25, intFromMap(map[string]any{"Limit": 25}, "Limit"))
+	})
+	t.Run("int64 kind", func(t *testing.T) {
+		require.Equal(t, 25, intFromMap(map[string]any{"Limit": int64(25)}, "Limit"))
+	})
+	t.Run("float64 kind", func(t *testing.T) {
+		require.Equal(t, 25, intFromMap(map[string]any{"Limit": float64(25)}, "Limit"))
+	})
+	t.Run("wrong type returns 0", func(t *testing.T) {
+		require.Equal(t, 0, intFromMap(map[string]any{"Limit": "25"}, "Limit"))
+	})
+}
+
+// TestFromMap_Title pins the titleFromMap accessor's
+// "fallback when missing or empty" contract. The page
+// titles (e.g. "RAGabast - Chat") come from a hardcoded
+// fallback because the handler-side Title is sometimes
+// unset in the fallback path.
+func TestFromMap_Title(t *testing.T) {
+	t.Run("non-map returns fallback", func(t *testing.T) {
+		require.Equal(t, "FB", titleFromMap(nil, "FB"))
+	})
+	t.Run("missing key returns fallback", func(t *testing.T) {
+		require.Equal(t, "FB", titleFromMap(map[string]any{}, "FB"))
+	})
+	t.Run("empty string returns fallback", func(t *testing.T) {
+		require.Equal(t, "FB",
+			titleFromMap(map[string]any{"Title": ""}, "FB"))
+	})
+	t.Run("non-string key returns fallback", func(t *testing.T) {
+		require.Equal(t, "FB",
+			titleFromMap(map[string]any{"Title": 42}, "FB"))
+	})
+	t.Run("set value wins", func(t *testing.T) {
+		require.Equal(t, "real",
+			titleFromMap(map[string]any{"Title": "real"}, "FB"))
+	})
+}
+
+// TestDocsRowsFromMap pins the documents-fallback adapter
+// contract: it must adapt the []models.DocumentInfo the
+// handler-side supplies into the strongly-typed
+// documentsFallbackRow slice the fallback template reads.
+// Wrong-typed input must return nil (no panic) because the
+// handler always supplies the right type in production,
+// but a unit test against the wrong type pins the safe
+// behavior the test fake might depend on.
+func TestDocsRowsFromMap(t *testing.T) {
+	t.Run("non-map returns nil", func(t *testing.T) {
+		require.Nil(t, docsRowsFromMap(nil))
+	})
+	t.Run("missing Documents key returns nil", func(t *testing.T) {
+		require.Nil(t, docsRowsFromMap(map[string]any{}))
+	})
+	t.Run("wrong-typed Documents key returns nil", func(t *testing.T) {
+		require.Nil(t, docsRowsFromMap(map[string]any{"Documents": "not a slice"}))
+	})
+}
