@@ -238,9 +238,60 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 	answerHTML = sanitizeForChatHTML(answerHTML)
 
 	s.renderTemplate(w, "chat_message.html", map[string]any{
-		"User":       msg,
-		"Answer":     answerWithInlineLinks,
-		"AnswerHTML": template.HTML(answerHTML),
-		"Sources":    sources,
+		"User":          msg,
+		"Answer":        answerWithInlineLinks,
+		"AnswerHTML":    template.HTML(answerHTML),
+		"Sources":       sources,
+		"SourcesByKind": sourcesByKind(sources),
 	})
+}
+
+// kindGroup is one section of the chat sources panel: every
+// source with the same SourceKind, in input order (which the
+// service layer populates as similarity-descending, so the most
+// relevant cited source for a kind is at the top of its group).
+type kindGroup struct {
+	Kind    models.SourceKind
+	Sources []models.SearchResult
+}
+
+// sourcesByKind groups sources by SourceKind for the chat
+// sources panel. Returns a slice (not a map) so the template
+// iterates in a stable order; map iteration in Go is randomized,
+// which would surface as flaky group-header ordering in the
+// rendered output.
+//
+// Within each group, sources preserve their input order — the
+// service layer already returns them sorted by similarity, so
+// the most-relevant-cited-source lands at the top of its kind's
+// section.
+//
+// Group order is fixed: docbuilder first (the legacy default,
+// what operators saw for the entire pre-multi-source era),
+// then gitlab, then any future kinds in declaration order
+// (SourceUnknown included as a fallback so legacy chunks
+// surface; the template suppresses the group header for empty
+// SourceUnknown groups, so an empty legacy chunk shows as
+// nothing rather than a misleading badge).
+func sourcesByKind(sources []models.SearchResult) []kindGroup {
+	kindOrder := []models.SourceKind{
+		models.SourceDocbuilder,
+		models.SourceGitLab,
+		models.SourceUnknown,
+	}
+	grouped := make(map[models.SourceKind][]models.SearchResult, len(kindOrder))
+	for _, s := range sources {
+		k := s.SourceKind
+		if k == "" {
+			k = models.SourceUnknown
+		}
+		grouped[k] = append(grouped[k], s)
+	}
+	out := make([]kindGroup, 0, len(kindOrder))
+	for _, k := range kindOrder {
+		if entries := grouped[k]; len(entries) > 0 {
+			out = append(out, kindGroup{Kind: k, Sources: entries})
+		}
+	}
+	return out
 }

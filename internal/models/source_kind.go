@@ -92,3 +92,26 @@ func (s SourceKind) SourceIcon() template.HTML {
 		return template.HTML("")
 	}
 }
+
+// DisplayName returns the human-readable name for the source
+// kind, used in chat sources panel section headers ("GitLab (3)"
+// rather than the wire-value "gitlab (3)"). The wire format
+// (the SourceKind constant value) stays lowercase; this is the
+// presentation surface only.
+//
+// SourceUnknown returns "" so pre-SourceKind chunks don't show
+// a misleading section header. The chat handler's
+// sourcesByKind helper skips empty groups, so a single
+// SourceUnknown chunk produces no group at all.
+func (s SourceKind) DisplayName() string {
+	switch s {
+	case SourceGitLab:
+		return "GitLab"
+	case SourceDocbuilder:
+		return "Docbuilder"
+	case SourceUnknown:
+		return ""
+	default:
+		return ""
+	}
+}
