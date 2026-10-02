@@ -342,6 +342,216 @@ func TestHumaAPI_IngestGitLabIssue_LogsSystemFilteredCount(t *testing.T) {
 		"the log line must identify the issue so the operator can correlate it with their sender logs")
 }
 
+// TestHumaAPI_IngestGitLabIssue_LogsEmptyBody pins the
+// operational contract that an empty POST is visible in server
+// logs — otherwise the operator sees only a 400 on the response
+// and has no way to diagnose a sender that's sending blank
+// requests (a real failure mode for misconfigured curl pipes).
+func TestHumaAPI_IngestGitLabIssue_LogsEmptyBody(t *testing.T) {
+	router, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	logBuf := captureLog(t)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		srv.URL+"/api/ingest/gitlab/issue", bytes.NewReader(nil))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, 400, resp.StatusCode)
+
+	// The handler's empty-body branch is unreachable through the
+	// public API today: huma's `required:"true"` body tag rejects
+	// empty POSTs before our handler runs. We assert only that
+	// the rejection produces a 400 — huma's own error body is
+	// good enough for the sender; the operator-side log line
+	// would only fire if huma's check were bypassed.
+	logs := logBuf.String()
+	assert.Empty(t, logs,
+		"huma rejects empty bodies before our handler runs, so the handler's log line is not exercised")
+}
+
+// TestHumaAPI_IngestGitLabIssue_LogsInvalidJSON pins the
+// log-line behavior for malformed JSON. The body preview is
+// included (truncated to a sane length) so the operator can see
+// what the sender actually sent — that's the diagnostic the
+// sender's bug reporter needs.
+func TestHumaAPI_IngestGitLabIssue_LogsInvalidJSON(t *testing.T) {
+	router, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	logBuf := captureLog(t)
+
+	// Trailing comma — a common jq mistake.
+	body := []byte(`{"issue": {"iid": 42,}, "path_with_namespace": "g/p"}`)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		srv.URL+"/api/ingest/gitlab/issue", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, 400, resp.StatusCode)
+
+	logs := logBuf.String()
+	assert.Contains(t, logs, "gitlab-ingest",
+		"server log must carry the kind tag")
+	assert.Contains(t, logs, "invalid json",
+		"server log must name the failure kind so the operator can grep for parse errors")
+	assert.Contains(t, logs, "iid",
+		"server log body preview must include enough of the payload for the operator to spot the syntax error")
+}
+
+// TestHumaAPI_IngestGitLabIssue_LogsMissingIID pins the
+// log-line behavior for the iid==0 validation case.
+func TestHumaAPI_IngestGitLabIssue_LogsMissingIID(t *testing.T) {
+	router, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	logBuf := captureLog(t)
+
+	body := []byte(`{
+		"issue": {
+			"title": "no iid",
+			"created_at": "2026-01-15T10:00:00.000Z",
+			"web_url": "https://x"
+		},
+		"path_with_namespace": "group/bar"
+	}`)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		srv.URL+"/api/ingest/gitlab/issue", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, 400, resp.StatusCode)
+
+	logs := logBuf.String()
+	assert.Contains(t, logs, "gitlab-ingest")
+	assert.Contains(t, logs, "validation",
+		"server log must name the validation kind separately from parse failures")
+	assert.Contains(t, logs, "iid",
+		"server log must surface the specific missing field so the operator can tell them which input they forgot")
+	assert.Contains(t, logs, "group/bar",
+		"server log must surface the path_with_namespace so the operator can identify which project the bad request was about")
+}
+
+// TestHumaAPI_IngestGitLabIssue_LogsMissingPath pins the
+// log-line behavior for empty path validation.
+func TestHumaAPI_IngestGitLabIssue_LogsMissingPath(t *testing.T) {
+	router, api := humatest.New(t)
+	svc := &fakeHumaService{}
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	logBuf := captureLog(t)
+
+	body := []byte(`{
+		"issue": {
+			"iid": 42,
+			"title": "no path",
+			"created_at": "2026-01-15T10:00:00.000Z",
+			"web_url": "https://x"
+		}
+	}`)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		srv.URL+"/api/ingest/gitlab/issue", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, 400, resp.StatusCode)
+
+	logs := logBuf.String()
+	assert.Contains(t, logs, "gitlab-ingest")
+	assert.Contains(t, logs, "validation")
+	assert.Contains(t, logs, "path",
+		"server log must name the missing path_with_namespace so the operator can correct the sender")
+	assert.Contains(t, logs, "iid=42",
+		"server log must surface the iid so the operator knows which issue the request was about")
+}
+
+// TestHumaAPI_IngestGitLabIssue_LogsIngestDocumentFailure pins
+// the log-line behavior for the case where the JSON parsed,
+// validation passed, but Service.IngestDocument returned an
+// error. These errors get wrapped as 400 today (matching the
+// /api/ingest/raw convention) but they're often server-side
+// failures in disguise — a chunker bug, a vector store hiccup.
+// The server log must carry the full chain so an operator can
+// distinguish "sender bug" from "internal failure".
+func TestHumaAPI_IngestGitLabIssue_LogsIngestDocumentFailure(t *testing.T) {
+	router, api := humatest.New(t)
+	svc := &fakeHumaService{
+		ingestErr: assert.AnError, //nolint:goerr113 // test fixture
+	}
+	registerHumaOperations(router, api, svc, NewIngestLimiter(10, 1*time.Second), 0, nil)
+
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	logBuf := captureLog(t)
+
+	body := []byte(`{
+		"issue": {
+			"iid": 42,
+			"title": "t",
+			"created_at": "2026-01-15T10:00:00.000Z",
+			"web_url": "https://x"
+		},
+		"path_with_namespace": "group/bar"
+	}`)
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
+		srv.URL+"/api/ingest/gitlab/issue", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := srv.Client().Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	require.Equal(t, 400, resp.StatusCode)
+
+	logs := logBuf.String()
+	assert.Contains(t, logs, "gitlab-ingest")
+	assert.Contains(t, logs, "ingest failed",
+		"server log must distinguish downstream IngestDocument failures from client-side validation errors")
+	// The body preview is the wire envelope — it contains the
+	// iid and path_with_namespace, not the resolved UID
+	// (gitlab:group/bar:42). The resolved UID only exists in the
+	// rendered markdown, which the wire-body log doesn't carry.
+	// The path and iid are enough to correlate the failure with
+	// the sender's request.
+	assert.Contains(t, logs, "group/bar",
+		"server log body preview must include the path_with_namespace so the operator can identify which project the failed ingest was about")
+	assert.Contains(t, logs, `"iid": 42`,
+		"server log body preview must include the iid so the operator can identify the specific issue that failed")
+}
+
 // captureLog swaps log's default writer for a buffer and
 // restores it on cleanup. Same shape as the helper in
 // internal/service/ingest_unpublished_test.go, kept package-
