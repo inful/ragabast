@@ -59,6 +59,11 @@ func TestDocumentsPage_NextPageRoundTrip(t *testing.T) {
 // branch: no documents means no pagination links at
 // all (rather than "Showing 0–0 of 0"). The empty
 // placeholder is rendered by the table branch.
+//
+// Phase 6.1 of plans/ux-overhaul.md updated the
+// empty-state copy from "No documents ingested yet"
+// to "Nothing here yet." as part of the cross-cutting
+// polish pass.
 func TestDocumentsPage_EmptyCorpus(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
@@ -68,8 +73,8 @@ func TestDocumentsPage_EmptyCorpus(t *testing.T) {
 	s.router.ServeHTTP(w, req)
 
 	body := w.Body.String()
-	require.Contains(t, body, "No documents ingested yet",
-		"empty state must render the placeholder")
+	require.Contains(t, body, "Nothing here yet",
+		"empty state must surface the Phase 6.1 copy (Nothing here yet.)")
 	require.NotContains(t, body, "Showing",
 		"empty state must NOT render pagination summary")
 }

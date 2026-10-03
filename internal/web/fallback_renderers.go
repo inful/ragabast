@@ -297,7 +297,17 @@ const chatFallbackBody = `<!DOCTYPE html>
 				<p class="text-base-content/60">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
 			</div>
 		</div>
-		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
+		<!--
+			Phase 6.3 of plans/ux-overhaul.md: the
+			jump-to-latest button is icon-only-ish
+			(an arrow + "Jump to latest ↓" label);
+			the daisyUI data-tooltip pattern provides
+			a CSS-only hover hint without changing
+			the rendered label. The aria-label stays
+			for screen readers; the data-tooltip is
+			the mouse-hover signal.
+		-->
+		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message" data-tooltip="Jump to latest message">Jump to latest ↓</button>
 	</div>
 
 	<form id="chat-form" class="card mt-4" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input">
@@ -397,8 +407,15 @@ const documentsFallbackBody = `<!DOCTYPE html>
         </tbody>
     </table>
     {{ else }}
-    <div class="alert">
-        No documents ingested yet. Submit one through <code>POST /api/ingest</code> to add some.
+    <div class="alert flex flex-col items-center text-center">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="mb-3 size-12 opacity-50" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm-1 7V3.5L18.5 9H13Z"/>
+        </svg>
+        <p class="m-0">Nothing here yet.</p>
+        <p class="m-0 text-sm">
+            Submit one through <code>POST /api/ingest</code> or
+            <a href="/docs#/operations/ingest" class="link link-primary font-medium">read the ingest guide →</a>
+        </p>
     </div>
     {{ end }}
 
