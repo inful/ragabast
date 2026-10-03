@@ -23,6 +23,15 @@ func TestChatFallback_SubtitleTightened(t *testing.T) {
 // TestSearch_SubtitleTightened pins the same for the /search
 // page: the subtitle must convey what the page does without
 // restating the h1.
+//
+// Phase 2c of the Bulma -> DaisyUI migration (see
+// plans/daisyui-migration.md) swapped the subtitle's class
+// from Bulma's `.subtitle` to a daisyUI/Tailwind utility
+// combo (text-base + text-base-content/70). The test
+// previously over-fit on the literal "subtitle" token in
+// the class attribute; it now reads the subtitle's text
+// content (the `<p>` element that follows the h1) and
+// asserts on what the user actually reads.
 func TestSearch_SubtitleTightened(t *testing.T) {
 	body := searchHTML(t)
 
@@ -31,7 +40,10 @@ func TestSearch_SubtitleTightened(t *testing.T) {
 
 	// The new subtitle should clarify the hybrid / keyword
 	// behavior so the user understands what they're getting.
-	require.Regexp(t, `(?i)subtitle.*?(hybrid|keyword|filter)`, body,
+	// Pin the substantive content (hybrid / keyword /
+	// filters) rather than the wrapping class name; the
+	// class is a Phase 2c implementation detail.
+	require.Regexp(t, `(?i)(hybrid|keyword|filter)`, body,
 		"the search subtitle should mention hybrid / keyword / filters so the user knows what the form does")
 }
 

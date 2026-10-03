@@ -61,6 +61,75 @@ func TestHandleSearchPage_GET_RendersFormWithFilters(t *testing.T) {
 	require.Contains(t, body, `<option value="Guides"`, "available categories must surface as <option>s")
 }
 
+// TestHandleSearchPage_GET_UsesDaisyUIComponents pins the
+// post-migration contract for the /search form (Phase 2c of
+// the Bulma -> DaisyUI migration; see
+// plans/daisyui-migration.md). The form moves from Bulma's
+// field/control wrapper soup to daisyUI's idiomatic
+// pattern: each field is wrapped in a `fieldset` with a
+// `fieldset-legend`, the input/select carries the daisyUI
+// `input` / `select` / `checkbox` / `btn` class directly,
+// and the two-column layout (tag + category) is a Tailwind
+// grid (not Bulma's `columns/column`).
+//
+// The page also gains a `<link>` to daisyui.min.css so the
+// new class names are actually styled — the migration is
+// progressive, but each sub-phase must leave the page in a
+// renderable state, not a "markup is right but everything is
+// unstyled" state. Bulma stays loaded until Phase 3.
+//
+// This test is a regression guard for the migration: a
+// future contributor who reaches for Bulma's `field/control`
+// wrappers (or any of the other pre-migration class names)
+// gets a red test, with a comment that points at the SPEC
+// and explains the daisyUI alternative.
+func TestHandleSearchPage_GET_UsesDaisyUIComponents(t *testing.T) {
+	chdirToRepoRoot(t)
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/search", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// daisyUI components used in the form. The exact
+	// class strings (e.g. "input w-full" vs "input") may
+	// differ from contributor to contributor; the test
+	// pins the component class name as a token, not the
+	// literal class attribute.
+	require.Contains(t, body, `daisyui.min.css`,
+		"the page must load daisyui.min.css so the new daisyUI class names are actually styled (Phase 2c)")
+
+	// Use word-boundary regex so the assertions don't
+	// match substrings of unrelated class names.
+	require.Regexp(t, `\bclass="[^"]*\binput\b`, body,
+		"the query/document_id/top_k fields must use daisyUI's `input` class on a <input> element")
+	require.Regexp(t, `\bclass="[^"]*\bselect\b`, body,
+		"the tag/category fields must use daisyUI's `select` class on a <select> element")
+	require.Regexp(t, `\bclass="[^"]*\bbtn-info\b`, body,
+		"the submit button must use daisyUI's `btn btn-info` class")
+	require.Regexp(t, `<input type="checkbox"[^>]*\bclass="[^"]*\bcheckbox\b`, body,
+		"the source-kind checkboxes must use daisyUI's `checkbox` class on the <input>")
+	require.Regexp(t, `<fieldset[^>]*\bclass="[^"]*\bfieldset\b`, body,
+		"the form must group related fields with daisyUI's `fieldset` component")
+
+	// Anti-regression: no Bulma class names should remain
+	// in the form. The page chrome (navbar) is still Bulma
+	// in this phase, so we only assert that the form's
+	// own structure has no Bulma wrappers.
+	require.NotRegexp(t, `class="field"`, body,
+		"the form must not use Bulma's `field` wrapper (daisyUI uses `fieldset` instead)")
+	require.NotRegexp(t, `class="control"`, body,
+		"the form must not use Bulma's `control` wrapper (daisyUI inputs carry their own class)")
+	require.NotRegexp(t, `class="select is-fullwidth"`, body,
+		"the form must not use Bulma's `select is-fullwidth` (daisyUI's `select w-full` is the equivalent)")
+	require.NotRegexp(t, `<button[^>]*class="button is-info"`, body,
+		"the submit button must not use Bulma's `button is-info` (daisyUI's `btn btn-info` is the equivalent)")
+}
+
 // TestHandleSearchSubmit_BasicQuery_RendersResults pins the happy
 // path: POST with just a query returns 200, calls the service with
 // that query and empty filters, and renders the results without
