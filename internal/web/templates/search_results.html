@@ -18,10 +18,28 @@
 
 {{ if .Filters }}
 {{ if or .Filters.Tag .Filters.Category .Filters.DocumentID }}
+<!--
+    Phase 3.1 of plans/ux-overhaul.md: the active-filter
+    row is a row of removable chips rather than static
+    badges. Each chip is an <a> that links to the same
+    search with the filter removed (preserving the
+    other params + the query). The hover:badge-error
+    modifier on each chip signals "clicking removes"
+    — the badge brightens to the danger color on
+    hover, the standard daisyUI "destructive" affordance.
+
+    The link construction is htmx-friendly: each href
+    is a regular /search?... URL, so a click navigates
+    to a fresh results page rather than mutating in
+    place. (We could wire hx-get here for a smoother
+    experience, but the in-place removal would
+    invalidate the page's "you searched for X" context.)
+-->
 <div class="mb-3 flex flex-wrap gap-2">
-    {{ if .Filters.Tag }}<span class="badge badge-info">tag: {{ .Filters.Tag }}</span>{{ end }}
-    {{ if .Filters.Category }}<span class="badge badge-info">category: {{ .Filters.Category }}</span>{{ end }}
-    {{ if .Filters.DocumentID }}<span class="badge badge-info">doc: {{ .Filters.DocumentID }}</span>{{ end }}
+    <span class="text-sm opacity-60">Active filters:</span>
+    {{ if .Filters.Tag }}<a href="/search?query={{ .Query}}{{ if .Filters.Category }}&category={{ .Filters.Category }}{{ end }}{{ if .Filters.DocumentID }}&document_id={{ .Filters.DocumentID }}{{ end }}" class="badge badge-info hover:badge-error">tag: {{ .Filters.Tag }} <span aria-hidden="true">×</span></a>{{ end }}
+    {{ if .Filters.Category }}<a href="/search?query={{ .Query }}{{ if .Filters.Tag }}&tag={{ .Filters.Tag }}{{ end }}{{ if .Filters.DocumentID }}&document_id={{ .Filters.DocumentID }}{{ end }}" class="badge badge-info hover:badge-error">category: {{ .Filters.Category }} <span aria-hidden="true">×</span></a>{{ end }}
+    {{ if .Filters.DocumentID }}<a href="/search?query={{ .Query }}{{ if .Filters.Tag }}&tag={{ .Filters.Tag }}{{ end }}{{ if .Filters.Category }}&category={{ .Filters.Category }}{{ end }}" class="badge badge-info hover:badge-error">doc: {{ .Filters.DocumentID }} <span aria-hidden="true">×</span></a>{{ end }}
 </div>
 {{ end }}
 {{ end }}
@@ -69,7 +87,19 @@
     {{ end }}
 </div>
 {{ else }}
-<div class="alert alert-warning">
-    No results found for this query.
+<!--
+    Phase 3.3 of plans/ux-overhaul.md: the no-results
+    alert surfaces a CTA link to the ingest guide so
+    an operator who searched and found nothing has an
+    in-page next step. The link is the same /docs#/
+    operations/ingest anchor the documents page's
+    empty state uses.
+-->
+<div class="alert alert-warning flex flex-col items-center text-center">
+    <p class="m-0">No results found for this query.</p>
+    <p class="m-0 text-sm">
+        Try removing a filter above, or
+        <a href="/docs#/operations/ingest" class="link link-warning">ingest a new document →</a>
+    </p>
 </div>
 {{ end }}

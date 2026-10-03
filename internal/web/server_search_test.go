@@ -106,11 +106,11 @@ func TestHandleSearchPage_GET_UsesDaisyUIComponents(t *testing.T) {
 	// Use word-boundary regex so the assertions don't
 	// match substrings of unrelated class names.
 	require.Regexp(t, `\bclass="[^"]*\binput\b`, body,
-		"the query/document_id/top_k fields must use daisyUI's `input` class on a <input> element")
+		"the query/document_id fields must use daisyUI's `input` class on a <input> element")
 	require.Regexp(t, `\bclass="[^"]*\bselect\b`, body,
-		"the tag/category fields must use daisyUI's `select` class on a <select> element")
-	require.Regexp(t, `\bclass="[^"]*\bbtn-info\b`, body,
-		"the submit button must use daisyUI's `btn btn-info` class")
+		"the tag/category/result_count fields must use daisyUI's `select` class on a <select> element")
+	require.Regexp(t, `\bclass="[^"]*\bbtn-primary\b`, body,
+		"the submit button must use daisyUI's `btn btn-primary` class (Phase 3.6)")
 	require.Regexp(t, `<input type="checkbox"[^>]*\bclass="[^"]*\bcheckbox\b`, body,
 		"the source-kind checkboxes must use daisyUI's `checkbox` class on the <input>")
 	require.Regexp(t, `<fieldset[^>]*\bclass="[^"]*\bfieldset\b`, body,
@@ -127,7 +127,12 @@ func TestHandleSearchPage_GET_UsesDaisyUIComponents(t *testing.T) {
 	require.NotRegexp(t, `class="select is-fullwidth"`, body,
 		"the form must not use Bulma's `select is-fullwidth` (daisyUI's `select w-full` is the equivalent)")
 	require.NotRegexp(t, `<button[^>]*class="button is-info"`, body,
-		"the submit button must not use Bulma's `button is-info` (daisyUI's `btn btn-info` is the equivalent)")
+		"the submit button must not use Bulma's `button is-info` (daisyUI's `btn btn-primary` is the equivalent)")
+	// The result-count field is a <select> with
+	// discrete options (Phase 3.4); the legacy
+	// <input type="number"> pattern is gone.
+	require.NotRegexp(t, `<input[^>]*type="number"[^>]*name="top_k"`, body,
+		"the result-count field must be a <select>, not <input type=\"number\"> (Phase 3.4)")
 }
 
 // TestHandleSearchSubmit_BasicQuery_RendersResults pins the happy
@@ -373,9 +378,13 @@ func TestHandleSearchSubmit_RendersDaisyUIResults(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	// Filter chips use daisyUI's `badge badge-info` (was
-	// Bulma's `tag is-info`).
-	require.Regexp(t, `<span[^>]*\bclass="[^"]*\bbadge-info\b`, body,
+	// Filter chips use daisyUI's `badge badge-info`
+	// (was Bulma's `tag is-info`). Phase 3.1 of
+	// plans/ux-overhaul.md upgrades the chips to
+	// <a> elements (clickable, navigate to remove
+	// the filter) — the regex accepts either
+	// <span> or <a> as the chip wrapper.
+	require.Regexp(t, `<(?:span|a)[^>]*\bclass="[^"]*\bbadge-info\b`, body,
 		"filter chips must use daisyUI's `badge badge-info` class")
 
 	// Each result is wrapped in a daisyUI `card` (was

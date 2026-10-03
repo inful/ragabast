@@ -68,8 +68,26 @@
 
         <fieldset class="fieldset">
             <legend class="fieldset-legend">Result count</legend>
-            <input class="input w-full max-w-32" id="top_k" type="number" name="top_k"
-                   value="5" min="1" max="50">
+            <!--
+                Phase 3.4 of plans/ux-overhaul.md: result
+                count is a <select> with discrete options
+                (5 / 10 / 20 / 50) rather than a free-form
+                <input type="number">. The free-form input
+                lets users type arbitrary values; the
+                server-side clamp silently caps them at
+                50. The select makes the valid options
+                explicit and removes the "I typed 100 and
+                got 50" surprise. The default (5) is
+                selected on the first render; the previous
+                value is selected on subsequent renders
+                via the eq conditional on each option.
+            -->
+            <select class="select w-full max-w-32" id="top_k" name="top_k">
+                <option value="5" {{ if eq .TopK 5 }}selected{{ end }}>5</option>
+                <option value="10" {{ if eq .TopK 10 }}selected{{ end }}>10</option>
+                <option value="20" {{ if eq .TopK 20 }}selected{{ end }}>20</option>
+                <option value="50" {{ if eq .TopK 50 }}selected{{ end }}>50</option>
+            </select>
         </fieldset>
 
         <fieldset class="fieldset">
@@ -91,7 +109,16 @@
         </fieldset>
 
         <div>
-            <button class="btn btn-info" type="submit">Search</button>
+            <!--
+                Phase 3.6 of plans/ux-overhaul.md: the
+                Search submit button uses btn-primary
+                (the daisyUI primary action color), not
+                btn-info. The pre-Phase-3.6 design used
+                btn-info (cyan); the primary action
+                convention reserves the brightest color
+                for the action the user came to do.
+            -->
+            <button class="btn btn-primary" type="submit">Search</button>
         </div>
     </form>
 
