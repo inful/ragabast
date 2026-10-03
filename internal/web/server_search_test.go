@@ -330,3 +330,111 @@ func TestHandleSearchSubmit_RendersFilenameFallback(t *testing.T) {
 	require.Contains(t, body, "adr-001",
 		"a result with no title must show the filename (basename without extension) as the heading")
 }
+
+// TestHandleSearchSubmit_RendersDaisyUIResults pins the
+// post-migration shape of the results fragment. Each
+// result renders inside a daisyUI `card` (replacing
+// Bulma's `box`); the filter chips use daisyUI's
+// `badge badge-info` (replacing Bulma's `tag is-info`);
+// the "New Search" link uses daisyUI's `btn`.
+//
+// Phase 2d of the Bulma -> DaisyUI migration. The
+// fragment is rendered as the htmx response body and
+// swapped into #search-results on the /search page; the
+// parent page already loads daisyui.min.css (Phase 2c).
+func TestHandleSearchSubmit_RendersDaisyUIResults(t *testing.T) {
+	chdirToRepoRoot(t)
+	cfg := config.DefaultConfig()
+	svc := &fakeService{
+		searchResults: []models.SearchResult{
+			{
+				ChunkID:       "c1",
+				DocumentID:    "doc-1",
+				DocumentTitle: "Getting Started",
+				HeaderPath:    "Introduction",
+				Level:         1,
+				Content:       "ragabast is a RAG service",
+				Similarity:    0.87,
+			},
+		},
+	}
+	s := NewServer(cfg, svc)
+
+	form := url.Values{}
+	form.Set("query", "what is ragabast")
+	form.Set("tag", "tut")
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/search", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// Filter chips use daisyUI's `badge badge-info` (was
+	// Bulma's `tag is-info`).
+	require.Regexp(t, `<span[^>]*\bclass="[^"]*\bbadge-info\b`, body,
+		"filter chips must use daisyUI's `badge badge-info` class")
+
+	// Each result is wrapped in a daisyUI `card` (was
+	// Bulma's `box`).
+	require.Regexp(t, `<div[^>]*\bclass="[^"]*\bcard\b`, body,
+		"results must be wrapped in daisyUI's `card` class")
+
+	// The "New Search" link uses daisyUI's `btn` (was
+	// Bulma's `button is-small`).
+	require.Regexp(t, `<a[^>]*\bclass="[^"]*\bbtn\b`, body,
+		"the 'New Search' link must use daisyUI's `btn` class")
+
+	// Anti-regression: no Bulma class names.
+	require.NotRegexp(t, `class="tag is-info"`, body,
+		"the results fragment must not use Bulma's `tag is-info` (daisyUI's `badge badge-info` is the equivalent)")
+	require.NotRegexp(t, `class="box"`, body,
+		"the results fragment must not use Bulma's `box` (daisyUI's `card` is the equivalent)")
+	require.NotRegexp(t, `class="button is-small"`, body,
+		"the new-search link must not use Bulma's `button is-small` (daisyUI's `btn btn-sm` is the equivalent)")
+	require.NotRegexp(t, `class="title is-5"`, body,
+		"the result heading must not use Bulma's `title is-5` (daisyUI's `text-xl font-semibold` is the equivalent)")
+}
+
+// TestHandleSearchSubmit_NoResults_UsesDaisyUIAlert pins the
+// empty-state path. When the service returns no results, the
+// response fragment renders daisyUI's `alert alert-warning`
+// (the equivalent of the pre-migration Bulma `notification
+// is-warning`).
+//
+// Phase 2d of the Bulma -> DaisyUI migration (see
+// plans/daisyui-migration.md) swapped Bulma's
+// `notification is-warning` for daisyUI's `alert
+// alert-warning`. The fragment is rendered as the htmx
+// response body; daisyui.min.css is already loaded by the
+// parent /search page (Phase 2c).
+func TestHandleSearchSubmit_NoResults_UsesDaisyUIAlert(t *testing.T) {
+	chdirToRepoRoot(t)
+	cfg := config.DefaultConfig()
+	svc := &fakeService{
+		searchResults: []models.SearchResult{},
+	}
+	s := NewServer(cfg, svc)
+
+	form := url.Values{}
+	form.Set("query", "nothing should match this")
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/search", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// DaisyUI's `alert alert-warning` is the daisyUI
+	// equivalent of Bulma's `notification is-warning`.
+	require.Regexp(t, `<div[^>]*\bclass="[^"]*\balert-warning\b`, body,
+		"the no-results fragment must use daisyUI's `alert alert-warning` class")
+	require.NotRegexp(t, `class="notification`, body,
+		"the empty-state must not use Bulma's `notification` (daisyUI's `alert` is the equivalent)")
+}
