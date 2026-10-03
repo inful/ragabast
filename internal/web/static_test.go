@@ -58,6 +58,56 @@ func TestStaticHandler_ServesBulmaCSS(t *testing.T) {
 		"served CSS must be the actual Bulma library (missing version stamp)")
 }
 
+// TestStaticHandler_ServesDaisyUICSS pins the contract that
+// GET /static/daisyui.min.css returns the DaisyUI CSS that
+// ships with the binary (embedded via go:embed), not a
+// third-party CDN URL. Phase 1 of the Bulma -> DaisyUI
+// migration; both files ship side-by-side until Phase 3
+// drops Bulma. See plans/daisyui-migration.md.
+//
+// The file is what styles the chat, search, and documents
+// pages once Phase 2 swaps the class names; if the embedded
+// copy is missing or the Content-Type is wrong, the browser
+// refuses to apply the stylesheet and the UI renders
+// unstyled.
+//
+// The size assertion guards against a Tailwind config
+// regression that re-includes all utilities and blows the
+// bundle past Bulma's size. Phase 0 ships ~106 KB; we have
+// headroom for added components but want a hard ceiling
+// well below Bulma's 678 KB.
+func TestStaticHandler_ServesDaisyUICSS(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/daisyui.min.css", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"the embedded daisyui.min.css must be served by the static handler")
+
+	ct := w.Header().Get("Content-Type")
+	require.True(t, strings.HasPrefix(ct, "text/css"),
+		"daisyui.min.css Content-Type must start with text/css (got %q)", ct)
+
+	body := w.Body.Bytes()
+	require.NotEmpty(t, body, "daisyui.min.css body must not be empty")
+	// Tailwind stamps a license header at the top of the
+	// minified bundle. A missing or wrong-version payload
+	// would fail this sanity check, surfacing the regression
+	// immediately.
+	require.Contains(t, string(body), "tailwindcss v",
+		"served CSS must be the actual Tailwind/DaisyUI library (missing version stamp)")
+
+	// Size guard. Phase 0 ships ~106 KB; we leave room for
+	// future component additions but want to catch a config
+	// regression that drops the include: list and re-emits
+	// the full utility set.
+	require.Less(t, len(body), 250*1024,
+		"daisyui.min.css must stay under 250 KB (got %d bytes) - a regression in static/src/daisyui.css (e.g. dropping the include: list) would bloat the bundle", len(body))
+}
+
 // TestStaticHandler_ServesHTMXJS pins the contract that GET
 // /static/htmx.min.js returns the htmx runtime. htmx is what
 // makes the chat form, search form, and chat-message swap
@@ -692,6 +742,7 @@ func TestStaticAssets_AllowListIsExact(t *testing.T) {
 		"bulma.min.css",
 		"chat.css",
 		"chat.js",
+		"daisyui.min.css",
 		"htmx.min.js",
 		"login.css",
 	}

@@ -89,6 +89,17 @@ var staticAssets = map[string]staticAsset{
 	"bulma.min.css": {
 		contentType: "text/css; charset=utf-8",
 	},
+	"daisyui.min.css": {
+		// Phase 1 of the Bulma -> DaisyUI migration (see
+		// plans/daisyui-migration.md). Both files ship
+		// side-by-side until Phase 3 drops Bulma. The
+		// file is built by `make css` from
+		// static/src/daisyui.css (Tailwind 4 + daisyUI 5)
+		// and committed alongside its source. The size is
+		// ~106 KB vs Bulma's 678 KB; the static test pins
+		// a 250 KB ceiling as a regression guard.
+		contentType: "text/css; charset=utf-8",
+	},
 	"htmx.min.js": {
 		contentType: "application/javascript; charset=utf-8",
 	},
