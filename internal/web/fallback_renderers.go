@@ -216,9 +216,26 @@ func parseFallback(name, body string, funcs template.FuncMap) *template.Template
 // single-user open-access install (AuthEnabled=false).
 const pageHeaderFallbackBody = `
 {{ define "header" -}}
-<nav class="navbar bg-base-100 shadow-sm" role="navigation" aria-label="main navigation">
+<!--
+  Phase 5.4 of plans/ux-overhaul.md: the brand bar
+  pairs a small inline SVG mark with the "ragabast"
+  text. The daisyUI brand-bar pattern uses a logo as
+  the visual anchor and the text as the label; the
+  mark follows the link's text color in both themes
+  via fill="currentColor". The path is a simple
+  speech-bubble shape (ragabast is a chat product).
+  A future redesign of the mark is fine; the
+  contract is "the brand bar has an SVG mark next to
+  the text".
+-->
+<nav class="navbar bg-base-100 shadow-sm sticky top-0 z-10" role="navigation" aria-label="main navigation">
   <div class="navbar-start">
-    <a class="btn btn-ghost text-xl" href="/">ragabast</a>
+    <a class="btn btn-ghost text-xl" href="/">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="size-5 shrink-0" aria-hidden="true">
+        <path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/>
+      </svg>
+      ragabast
+    </a>
   </div>
   <div class="navbar-end gap-1">
     <a class="btn btn-ghost btn-sm" href="/">Chat</a>

@@ -474,7 +474,17 @@ func TestOAuthCallback_RejectsProviderNameMismatch(t *testing.T) {
 	res := w.Result()
 	defer func() { _ = res.Body.Close() }()
 
-	assert.Equal(t, http.StatusForbidden, res.StatusCode)
+	// Phase 5.2 of plans/ux-overhaul.md: the
+	// callback redirects to /auth/login?error=...
+	// rather than returning a raw HTTP error. The
+	// login page surfaces the error as an alert
+	// alert-error.
+	assert.Equal(t, http.StatusFound, res.StatusCode,
+		"provider-name mismatch must redirect (Phase 5.2: /auth/login?error=...) rather than render a raw error")
+	loc2, _ := res.Location()
+	require.NotNil(t, loc2, "Location header must be set on the redirect")
+	assert.Contains(t, loc2.String(), "/auth/login?error=oauth_state_mismatch",
+		"the redirect must carry the whitelisted error code (Phase 5.2 contract)")
 }
 
 func TestOAuthCallback_RejectsUserNotInAllowedList(t *testing.T) {
