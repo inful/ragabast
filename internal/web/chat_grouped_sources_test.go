@@ -9,24 +9,30 @@ import (
 	"github.com/ragabast/internal/config"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestHandleChatMessage_SourcesGroupedByKind is the headline
-// pin for Stage 2.3: the chat sources panel must group retrieved
-// chunks by source kind so an operator skimming a multi-source
-// reply can see "2 from GitLab, 2 from docs" rather than a
-// flat list where the kinds are indistinguishable.
+// TestHandleChatMessage_AllSourcesRenderAsInlineBadges is the
+// headline pin for Phase 2.2 of plans/ux-overhaul.md: the chat
+// message fragment replaces the legacy per-kind grouping
+// (`<summary>GitLab (2)</summary>`-style headers) with inline
+// badge chips. Every source cited in the reply must appear
+// as a daisyUI badge anchor with the source's label and
+// citation URL.
+//
+// The pre-Phase-2.2 design wrapped sources in a
+// `<details><summary>Kind (N)</summary>...<ol>...</ol></details>`
+// block per kind. Phase 2.2 collapses all kinds into a single
+// row of badges — the operator sees all citations at a glance
+// without clicking to expand a disclosure.
 //
 // The test seeds two gitlab sources and two docbuilder sources
-// and asserts on the GROUPED-OUTPUT per-kind headers (not just
-// on URL presence, which would also pass against the flat
-// template). The current flat template outputs a single
-// `<summary>Sources (4)</summary>` and one <ol>; the grouped
-// template outputs two `<summary>` blocks with kind names + per-
-// kind counts. The assertions on the group-header text
-// distinguish the two shapes.
-func TestHandleChatMessage_SourcesGroupedByKind(t *testing.T) {
+// and pins: every URL appears (the badges actually link to
+// each source's citation URL); every label appears (the
+// badge text matches the source's DisplayLabel); the
+// legacy per-kind grouping is gone.
+func TestHandleChatMessage_AllSourcesRenderAsInlineBadges(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Paths.TemplatesDir = ""
 
@@ -82,33 +88,48 @@ func TestHandleChatMessage_SourcesGroupedByKind(t *testing.T) {
 	body := w.Body.String()
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// Each kind must appear as a group header with its count.
-	// Pinning the count distinguishes the grouped layout
-	// (two `<summary>GitLab (2)</summary>`-style blocks) from
-	// the current flat layout (one `<summary>Sources (4)</summary>`).
-	require.Contains(t, body, "GitLab (2)",
-		"the chat sources panel must render a GitLab group with count 2; flat layout outputs only 'Sources (4)'")
-	require.Contains(t, body, "Docbuilder (2)",
-		"the chat sources panel must render a Docbuilder group with count 2; flat layout outputs only 'Sources (4)'")
-
-	// All four URLs must appear.
+	// Every URL must appear (the badges actually
+	// link to each source's citation URL).
 	require.Contains(t, body, gitlabURL1)
 	require.Contains(t, body, gitlabURL2)
 	require.Contains(t, body, docbuilderURL1)
 	require.Contains(t, body, docbuilderURL2)
 
-	// The flat "Sources (4)" header must NOT appear — that's
-	// the marker of the un-grouped layout this commit replaces.
-	require.NotContains(t, body, "Sources (4)",
-		"the flat 'Sources (4)' header must not appear after grouping")
+	// Every source label must appear (the badge
+	// text matches the source's DisplayLabel).
+	require.Contains(t, body, "GitLab 1")
+	require.Contains(t, body, "GitLab 2")
+	require.Contains(t, body, "ADR 1")
+	require.Contains(t, body, "ADR 2")
+
+	// Each source must be a daisyUI badge anchor.
+	// We count occurrences of `class="badge ...` to
+	// verify each source has its own badge. (The
+	// action bar's "4 sources" badge uses the same
+	// class, so we count >= 4, not == 4.)
+	badgeCount := strings.Count(body, `class="badge`)
+	require.GreaterOrEqual(t, badgeCount, 4,
+		"each cited source must render as its own daisyUI badge anchor (got %d badges)", badgeCount)
+
+	// The legacy per-kind grouping headers are gone.
+	// The "N sources" badge in the action bar is the
+	// new summary, but it doesn't have parentheses
+	// around a count.
+	assert.NotContains(t, body, "GitLab (",
+		"the legacy per-kind 'GitLab (N)' grouping header must be gone (Phase 2.2 inline badge pattern)")
+	assert.NotContains(t, body, "Docbuilder (",
+		"the legacy per-kind 'Docbuilder (N)' grouping header must be gone (Phase 2.2 inline badge pattern)")
+	assert.NotContains(t, body, "Sources (",
+		"the legacy 'Sources (N)' header must be gone (Phase 2.2 replaces with inline badges)")
 }
 
-// TestHandleChatMessage_SingleKindStillGroups pins the
-// single-kind case: even when all sources are gitlab, the
-// panel still groups (one group header is still useful —
-// tells the operator what kind of sources the LLM drew
-// from). Counts down from the headline test.
-func TestHandleChatMessage_SingleKindStillGroups(t *testing.T) {
+// TestHandleChatMessage_SingleKindAllSourcesRender pins the
+// single-kind case: even when all sources are gitlab, every
+// source still renders as its own badge. (The pre-Phase-2.2
+// design grouped them under a single "GitLab (2)" header;
+// Phase 2.2 flattens everything into a single row of
+// badges.)
+func TestHandleChatMessage_SingleKindAllSourcesRender(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Paths.TemplatesDir = ""
 
@@ -142,17 +163,24 @@ func TestHandleChatMessage_SingleKindStillGroups(t *testing.T) {
 
 	body := w.Body.String()
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, body, "GitLab (2)",
-		"a single-kind reply must still group — one group header is useful")
-	require.NotContains(t, body, "Sources (2)",
-		"flat 'Sources (2)' header must not appear after grouping")
+
+	// Both source labels render as badges.
+	require.Contains(t, body, "Issue 42")
+	require.Contains(t, body, "Issue 7")
+
+	// The legacy grouping is gone — no "GitLab (2)"
+	// header, no "Sources (2)" flat header.
+	assert.NotContains(t, body, "GitLab (",
+		"the legacy per-kind 'GitLab (N)' grouping header must be gone (Phase 2.2 inline badge pattern)")
+	assert.NotContains(t, body, "Sources (",
+		"the flat 'Sources (N)' header must be gone (Phase 2.2 inline badge pattern)")
 }
 
-// TestHandleChatMessage_NoSources_NoGroupHeader pins the
-// empty-state contract: "Sources:" headers must not appear
-// when the reply has zero sources. A spurious empty group
-// would render as "Sources (0)" — worse than no panel at all.
-func TestHandleChatMessage_NoSources_NoGroupHeader(t *testing.T) {
+// TestHandleChatMessage_NoSources_NoBadges pins the
+// empty-state contract: when the reply has zero sources,
+// no source badges render. A spurious empty badge row
+// would be worse than no row at all.
+func TestHandleChatMessage_NoSources_NoBadges(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Paths.TemplatesDir = ""
 
@@ -171,6 +199,16 @@ func TestHandleChatMessage_NoSources_NoGroupHeader(t *testing.T) {
 
 	body := w.Body.String()
 	require.Equal(t, http.StatusOK, w.Code)
-	require.NotContains(t, body, "Sources (",
-		"an empty sources list must NOT render a 'Sources (0)' header")
+
+	// No "Sources (" group header, no "N sources" badge
+	// in the action bar (because there are no sources
+	// to count). The new test pins the specific "N
+	// sources" action-bar badge via the data-tooltip +
+	// text pattern; a plain " sources" substring would
+	// false-positive on a chat answer that happens
+	// to contain the word.
+	assert.NotContains(t, body, "Sources (",
+		"an empty sources list must NOT render a 'Sources (N)' header")
+	assert.NotRegexp(t, `\b\d+\s+sources\b`, body,
+		"an empty sources list must NOT render an 'N sources' badge in the action bar")
 }

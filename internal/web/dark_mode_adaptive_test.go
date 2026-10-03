@@ -109,21 +109,27 @@ func TestDarkMode_AssistantReplyBoxNoLightBackground(t *testing.T) {
 }
 
 // TestChatMessageFragment_UsesDaisyUIComponents pins the
-// post-migration shape of the chat message fragment
-// (Phase 2g of the Bulma -> DaisyUI migration; see
-// plans/daisyui-migration.md). The fragment is rendered
-// as the htmx response body for POST /chat/message and
-// swapped into #chat-messages on the chat landing page.
-// The parent page already loads daisyui.min.css
-// (Phase 2f), so the fragment inherits the daisyUI
-// stylesheet and doesn't need its own <link>.
+// shape of the chat message fragment across two
+// generations of daisyUI adoption.
 //
-// The Bulma 'box' surfaces (user message, assistant
-// reply) become daisyUI 'card'. Bulma's 'content'
-// typography reset (which set margins on h1/h2/p/ul/ol
-// inside the reply) becomes daisyUI's 'prose'. The
-// 'has-text-weight-semibold' on the You/Assistant
-// headings becomes 'font-semibold'.
+// (1) Phase 2g of the Bulma -> DaisyUI migration (see
+// plans/daisyui-migration.md): the fragment moved from
+// Bulma's `box` / `content` to daisyUI's `card` /
+// `prose`. The Bulma 'box' surfaces (user message,
+// assistant reply) became daisyUI 'card'. Bulma's
+// 'content' typography reset became daisyUI's 'prose'.
+// The 'has-text-weight-semibold' on the You/Assistant
+// headings became 'font-semibold'.
+//
+// (2) Phase 2.2 of the UX-overhaul plan refined the
+// surfaces further: the generic 'card' was replaced
+// with daisyUI's purpose-built 'chat' component (chat
+// / chat-start / chat-end / chat-bubble / chat-image /
+// chat-header / chat-footer). The contract below
+// accepts either the Phase-2g or the Phase-2.2 shape
+// because both are valid daisyUI patterns; the
+// 'prose chat-turn' wrapper is the structural
+// invariant that survives both.
 func TestChatMessageFragment_UsesDaisyUIComponents(t *testing.T) {
 	cfg := config.DefaultConfig()
 	svc := &fakeService{
@@ -141,20 +147,41 @@ func TestChatMessageFragment_UsesDaisyUIComponents(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	// The user/assistant message boxes use daisyUI's
-	// `card` (was Bulma's `box`).
-	require.Regexp(t, `<div[^>]*\bclass="[^"]*\bcard\b`, body,
-		"the chat-message fragment must use daisyUI's `card` class for the user/assistant message surfaces")
-
-	// The chat-turn wrapper uses daisyUI's `prose` for
-	// typography (was Bulma's `content`).
+	// The chat-turn wrapper uses daisyUI's `prose`
+	// for typography (was Bulma's `content`). This
+	// class is the structural invariant — both the
+	// Phase-2g (`card` inside) and the Phase-2.2
+	// (`chat` inside) layouts wrap the user +
+	// assistant messages in a `<div class="prose
+	// chat-turn">` so multi-turn sessions stay
+	// easy to scan.
 	require.Regexp(t, `\bclass="prose chat-turn"`, body,
 		"the chat-turn wrapper must use daisyUI's `prose` class for typography")
+
+	// The message surface must be a daisyUI
+	// component — either the Phase-2g `card` (the
+	// generic surface) or the Phase-2.2 `chat`
+	// (the purpose-built chat-bubble layout). The
+	// contract accepts both because the daisyUI
+	// migration and the UX overhaul are separate
+	// tracks; a future contributor should know that
+	// either component is acceptable but the
+	// `chat` component is the preferred layout
+	// (matches Linear, Notion AI, ChatGPT).
+	//
+	// We use a regex rather than a literal Contains
+	// check because the daisyUI `chat` class can
+	// appear inside any class attribute
+	// (`class="chat chat-start"`, `class="chat
+	// chat-end"`, etc.) and we want a flexible
+	// match.
+	require.Regexp(t, `\bclass="[^"]*\b(card|chat)\b`, body,
+		"the chat-message fragment must use a daisyUI message surface — either the generic 'card' (Phase 2g) or the purpose-built 'chat' component (Phase 2.2)")
 
 	// Anti-regression: no Bulma class names remain on
 	// the fragment.
 	require.NotRegexp(t, `class="box"`, body,
-		"the chat-message fragment must not use Bulma's `box` (daisyUI's `card` is the equivalent)")
+		"the chat-message fragment must not use Bulma's `box` (daisyUI's `card` / `chat` is the equivalent)")
 	require.NotRegexp(t, `class="content chat-turn"`, body,
 		"the chat-turn wrapper must not use Bulma's `content` class (daisyUI's `prose` is the equivalent)")
 }

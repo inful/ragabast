@@ -9,23 +9,20 @@ import (
 	"github.com/ragabast/internal/config"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// TestHandleChatMessage_SourcesPanelOpenByDefault pins the fix
-// for issue #86: the sources disclosure must render with `open`
-// so the citations the system worked to surface are visible to
-// the operator the moment the chat reply lands. Before the fix,
-// the disclosure was collapsed by default and the small
-// "N sources" summary was easy to miss entirely.
-//
-// The test asserts two things at once:
-//   - the <details> element carries the open attribute (or
-//     <details open> serialized markup) so the browser renders
-//     it expanded
-//   - the body of the disclosure (the <ol> with each source) is
-//     visible without any client-side script — the rendered HTML
-//     must contain the per-source labels
+// TestHandleChatMessage_SourcesPanelOpenByDefault pins the
+// "citations are immediately visible" affordance. The
+// pre-Phase-2.2 design used a collapsed <details> block
+// with the `open` attribute so citations were visible
+// without a click (issue #86). Phase 2.2 replaces the
+// collapsed disclosure with inline badge chips that are
+// visible by definition — there's nothing to click or
+// expand. The new contract is: source labels appear in
+// the rendered body, attached to the assistant's reply
+// bubble, with no client-side action required.
 func TestHandleChatMessage_SourcesPanelOpenByDefault(t *testing.T) {
 	cfg := config.DefaultConfig()
 	svc := &fakeService{
@@ -54,24 +51,30 @@ func TestHandleChatMessage_SourcesPanelOpenByDefault(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	require.Regexp(t, `<details[^>]*\bopen\b`,
-		body, "the sources disclosure must render with the open attribute so citations are visible without a click")
-	// Source labels are inside the <details>; they are emitted
-	// in the rendered HTML whether the element is collapsed or
-	// not, so this assertion also confirms the <ol> follows the
-	// <summary> rather than being hidden behind a click.
+	// Phase 2.2 of plans/ux-overhaul.md: the
+	// collapsed <details> is gone. Sources render as
+	// inline badge chips, immediately visible without
+	// a click. The new test pins the "always visible"
+	// property by checking the source label appears
+	// in the rendered body without any user
+	// interaction.
+	assert.NotContains(t, body, "<details",
+		"Phase 2.2 replaces the <details> source disclosure with inline badges; the disclosure must be gone")
+
+	// The source label must appear in the rendered
+	// body. (In the new design, the label is inside
+	// the badge anchor.)
 	require.Contains(t, body, "ADR 001",
-		"the source label must appear in the rendered body, inside the disclosure")
+		"the source label must appear in the rendered body (Phase 2.2 inline badge pattern)")
 }
 
 // TestHandleChatMessage_SourcesPanelInsideAssistantReply pins
-// the second half of the fix: the disclosure must be visually
-// attached to the assistant's reply box, not floating between
-// the reply and the input form. We assert structural containment
-// — the <details> element lives inside the same <div
-// class="box"> that wraps the assistant
-// reply, not as a sibling. A future template edit that lifts
-// the disclosure back out surfaces the regression immediately.
+// the "sources are attached to the assistant's reply" property.
+// Phase 2.2 moves the source citations inside the
+// chat-bubble (the daisyUI chat component for the assistant
+// message). The contract: the source badges render inside
+// the assistant's chat-bubble, not floating between the
+// reply and the input form.
 func TestHandleChatMessage_SourcesPanelInsideAssistantReply(t *testing.T) {
 	cfg := config.DefaultConfig()
 	svc := &fakeService{
@@ -100,28 +103,38 @@ func TestHandleChatMessage_SourcesPanelInsideAssistantReply(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	assistantBoxOpen := strings.Index(body, `<div class="card">`)
-	require.GreaterOrEqual(t, assistantBoxOpen, 0, "assistant box must be present (Phase 2g: was `<div class=\"box\">` under Bulma, now `<div class=\"card\">` under daisyUI)")
+	// The assistant message uses daisyUI's chat
+	// component. Pin the chat-bubble element (the
+	// message surface) and the chat-image (the
+	// avatar anchor) as the structural markers of
+	// the assistant's reply.
+	assistantBubbleOpen := strings.Index(body, "chat-bubble")
+	require.GreaterOrEqual(t, assistantBubbleOpen, 0,
+		"assistant chat-bubble must be present (Phase 2.2 daisyUI chat component)")
 
-	assistantContentIdx := strings.Index(body, "Assistant")
-	require.Greater(t, assistantContentIdx, assistantBoxOpen,
-		"Assistant heading must come after the assistant box opens")
-	detailsIdx := strings.Index(body, "<details")
-	require.Greater(t, detailsIdx, assistantContentIdx,
-		"sources disclosure must follow the Assistant heading (be inside the assistant box)")
+	// The "Assistant" label appears in the chat-header
+	// (above the bubble). Find it; the source
+	// badges must come after it.
+	assistantHeaderIdx := strings.Index(body, "Assistant")
+	require.GreaterOrEqual(t, assistantHeaderIdx, 0,
+		"Assistant chat-header must be present (Phase 2.2 daisyUI chat-header)")
 
-	// The </div> that closes the assistant box must come after
-	// the </details>. Find each closing tag after the <details>
-	// and assert at least one pair of <details>...</details>
-	// lives entirely inside the assistant box.
-	detailsCloseIdx := strings.Index(body[detailsIdx:], "</details>")
-	require.Positive(t, detailsCloseIdx)
-	detailsEnd := detailsIdx + detailsCloseIdx + len("</details>")
-	// After </details>, look for the next </div> — that should
-	// be the close of the assistant box. Find the </div> that
-	// closes the outer content div too, to confirm the
-	// disclosure is inside the assistant box, not after it.
-	assistantBoxCloseIdx := strings.Index(body[detailsEnd:], "</div>")
-	require.Positive(t, assistantBoxCloseIdx,
-		"assistant box must have a closing </div> after the sources disclosure")
+	// The source badge (containing the document
+	// title) must render after the Assistant
+	// header, inside the assistant bubble.
+	badgeIdx := strings.Index(body, "ADR 001")
+	require.Greater(t, badgeIdx, assistantHeaderIdx,
+		"source badge label must follow the Assistant header (be inside the assistant's reply block)")
+
+	// The source badge must be inside the assistant
+	// chat-bubble. Find the chat-bubble that
+	// contains the badge label.
+	bubbleBeforeBadge := body[assistantBubbleOpen:badgeIdx]
+	require.Positive(t, strings.Count(bubbleBeforeBadge, "chat-bubble"),
+		"source badge must render inside the assistant's chat-bubble (not floating between reply and input form)")
+
+	// Pin the absence of the legacy <details> block
+	// to catch a refactor that re-introduces it.
+	assert.NotContains(t, body, "<details",
+		"the legacy <details> source disclosure must not be re-introduced (Phase 2.2 replaces it with inline badges)")
 }

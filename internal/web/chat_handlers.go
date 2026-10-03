@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
@@ -291,6 +292,21 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		"AnswerHTML":    template.HTML(answerHTML),
 		"Sources":       sources,
 		"SourcesByKind": sourcesByKind(sources),
+		// Phase 2.2 of plans/ux-overhaul.md: the chat
+		// message fragment uses daisyUI's chat-header
+		// element to surface a "name + timestamp" line
+		// next to each message bubble. The timestamp
+		// is the time the reply was rendered; the
+		// template formats it as ISO 8601 in the
+		// <time datetime="..."> attribute and a short
+		// "just now" / HH:MM label in the rendered
+		// text. The "just now" phrasing is hardcoded
+		// here because the reply is always "just now"
+		// from the user's perspective; a future
+		// enhancement could swap in a relative-time
+		// helper for messages older than the
+		// session.
+		"Timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

@@ -246,5 +246,90 @@
       // the button stays hidden until the first reply.
       updateJumpVisibility();
     }
+
+    // Phase 2.2 of plans/ux-overhaul.md: the chat
+    // message fragment renders an action bar (Copy +
+    // Regenerate buttons + "N sources" badge) on the
+    // assistant bubble. The buttons use
+    // data-action="copy" and data-action="regenerate"
+    // attributes; chat.js wires them via a delegated
+    // handler on the chat log so newly swapped-in
+    // messages get the behavior without re-binding.
+    //
+    // The handler is installed only on the chat log
+    // container (#chat-messages), not on document,
+    // so the wiring stays scoped to the chat surface.
+    // htmx swaps the new chat message fragment into
+    // #chat-messages via beforeend; the delegated
+    // handler picks up the new buttons without
+    // needing a per-button listener.
+    if (log) {
+      log.addEventListener('click', function (e) {
+        var target = e.target;
+        // Walk up to find the button with the
+        // data-action attribute. The user might
+        // click the <span> inside the button (the
+        // "Copy" / "↻" text), so closest() is the
+        // right tool.
+        var btn = target.closest && target.closest('button[data-action]');
+        if (!btn) {
+          return;
+        }
+        var action = btn.getAttribute('data-action');
+        if (action === 'copy') {
+          // Find the assistant's chat-bubble that
+          // contains this button. The reply text is
+          // the .chat-msg element inside the
+          // bubble; we copy its textContent (plain
+          // text, not the rendered HTML) so the
+          // clipboard ends up with what the
+          // operator reads.
+          var bubble = btn.closest('.chat-bubble');
+          if (!bubble) {
+            return;
+          }
+          var msgEl = bubble.querySelector('.chat-msg');
+          if (!msgEl) {
+            return;
+          }
+          var text = msgEl.textContent || '';
+          // The Clipboard API requires a secure
+          // context (https or localhost) and a
+          // user gesture (the click). Both are
+          // present. navigator.clipboard is
+          // supported in every modern browser;
+          // the legacy execCommand('copy') path
+          // is omitted as a deliberate
+          // simplification (this app does not
+          // target IE).
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+              if (typeof window.showToast === 'function') {
+                window.showToast('Reply copied to clipboard', 'success', 2000);
+              }
+            }, function () {
+              if (typeof window.showToast === 'function') {
+                window.showToast('Could not copy to clipboard', 'error');
+              }
+            });
+          } else {
+            if (typeof window.showToast === 'function') {
+              window.showToast('Clipboard API not available in this browser', 'warning');
+            }
+          }
+        } else if (action === 'regenerate') {
+          // The regenerate flow is a follow-on
+          // enhancement (the current LLM
+          // integration does not support
+          // regeneration). For now, show an
+          // informational toast; the wire-up
+          // for the actual regenerate endpoint
+          // is a separate phase.
+          if (typeof window.showToast === 'function') {
+            window.showToast('Regenerate is not yet implemented', 'info');
+          }
+        }
+      });
+    }
   });
 })();
