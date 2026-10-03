@@ -83,14 +83,20 @@ func TestDocumentsFallback_RendersTagsAsChips(t *testing.T) {
 		require.NoError(t, s.fallback.documents.Execute(&buf, data))
 		body := buf.String()
 
-		// Each tag rendered as its own chip. Phase 2e of
-		// the Bulma -> DaisyUI migration (see
+		// Each tag rendered as its own chip. Phase 2e
+		// of the Bulma -> DaisyUI migration (see
 		// plans/daisyui-migration.md) swapped Bulma's
 		// `tag is-info` for daisyUI's `badge badge-info`.
-		assert.Contains(t, body, `<span class="badge badge-info">alpha</span>`,
-			"first tag must render as a daisyUI badge")
-		assert.Contains(t, body, `<span class="badge badge-info">beta</span>`,
-			"second tag must render as a daisyUI badge")
+		// Phase 4.3 of plans/ux-overhaul.md upgrades
+		// the static <span> to a clickable <a> linking
+		// to /search?tag=foo. We use a regex (rather
+		// than a literal substring) to tolerate the
+		// `hover:badge-primary` modifier Phase 4.3
+		// adds on top of the base badge classes.
+		assert.Regexp(t, `<a[^>]*class="[^"]*\bbadge-info\b[^"]*"[^>]*>alpha</a>`, body,
+			"first tag must render as a daisyUI badge anchor")
+		assert.Regexp(t, `<a[^>]*class="[^"]*\bbadge-info\b[^"]*"[^>]*>beta</a>`, body,
+			"second tag must render as a daisyUI badge anchor")
 
 		// Order preserved: alpha appears before beta.
 		assert.Less(t, strings.Index(body, "alpha"), strings.Index(body, "beta"),
@@ -312,18 +318,27 @@ func TestDocumentsFallback_UsesDaisyUIComponents(t *testing.T) {
 	require.Regexp(t, `<table[^>]*\bclass="[^"]*\bw-full\b`, body,
 		"the documents table must use daisyUI's `w-full` utility")
 
-	// The delete button uses daisyUI's `btn btn-sm
-	// btn-error` (was Bulma's `button is-small
-	// is-danger`).
-	require.Regexp(t, `<button[^>]*\bclass="[^"]*\bbtn-error\b`, body,
-		"the delete button must use daisyUI's `btn-error` class")
-	require.Regexp(t, `<button[^>]*\bclass="[^"]*\bbtn-sm\b`, body,
-		"the delete button must use daisyUI's `btn-sm` size")
+	// The delete button is a daisyUI btn that
+	// opens the confirmation modal (Phase 4.5 of
+	// plans/ux-overhaul.md replaces the inline
+	// checkbox + submit pattern). The trigger
+	// button uses btn-ghost + text-error (a quiet
+	// affordance that brightens to the danger
+	// color via the text-error utility). The
+	// actual destructive button is inside the
+	// modal; TestDocuments_DeleteUsesModal (new
+	// in documents_overhaul_test.go) pins the
+	// modal rendering.
+	require.Regexp(t, `<button[^>]*class="[^"]*\bbtn\b[^"]*"[^>]*data-modal-open=`, body,
+		"the row's delete action must be a <button> that opens a confirmation modal (Phase 4.5)")
 
-	// The confirm checkbox uses daisyUI's `checkbox
-	// checkbox-sm` (was Bulma's `checkbox is-small`).
-	require.Regexp(t, `<input[^>]*type="checkbox"[^>]*\bclass="[^"]*\bcheckbox\b`, body,
-		"the confirm checkbox must use daisyUI's `checkbox` class")
+	// The legacy <input type="checkbox" name="confirm">
+	// pattern is gone. We don't pin 'no checkbox
+	// exists' (a future filter-bar checkbox is
+	// fine); we pin 'no checkbox carries the name
+	// "confirm"'.
+	assert.NotRegexp(t, `<input[^>]*type="checkbox"[^>]*name="confirm"`, body,
+		"the legacy <input type=\"checkbox\" name=\"confirm\"> delete confirmation must be gone (Phase 4.5 replaces with modal)")
 
 	// Anti-regression: no Bulma class names remain on
 	// the page (the navbar still uses Bulma but is

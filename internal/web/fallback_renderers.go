@@ -108,6 +108,16 @@ type documentsFallbackData struct {
 	StartShowing int
 	EndShowing   int
 	Header       pageHeaderData
+	// Filter is the current value of the ?q= query
+	// param echoed back into the filter input's
+	// value attribute. Phase 4.2 of
+	// plans/ux-overhaul.md adds the filter input;
+	// the round-trip is via hx-get on the input
+	// (htmx fires a server request with the typed
+	// value, the handler re-renders, and the new
+	// filter value is reflected in the input's
+	// value attribute).
+	Filter string
 }
 
 // documentsFallbackRow is one row of the documents table.
@@ -362,7 +372,9 @@ const documentsFallbackBody = `<!DOCTYPE html>
     {{ template "header" .Header }}
     <h1 class="text-2xl font-semibold">Ingested Documents</h1>
     {{ if .Documents }}
-    <table class="table table-zebra w-full">
+    <input type="search" name="q" value="{{ .Filter }}" placeholder="Filter by title, ID, tag, or category" class="input input-bordered w-full max-w-sm mb-4" autocomplete="off" hx-get="/documents" hx-trigger="input changed delay:200ms" hx-target="#documents-table" hx-push-url="true" hx-swap="outerHTML" hx-indicator="#documents-loading">
+
+    <table class="table table-zebra w-full" id="documents-table">
         <thead><tr><th scope="col">Title</th><th scope="col">ID</th><th scope="col">Tags</th><th scope="col">Category</th><th scope="col">Chunks</th><th scope="col">Ingested</th><th scope="col"></th></tr></thead>
         <tbody>
         {{ range .Documents }}
@@ -371,7 +383,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
                 <td><code>{{ .ID }}</code></td>
                 <td>
                     {{- range .Tags }}
-                    <span class="badge badge-info">{{ . }}</span>
+                    <a href="/search?tag={{ . }}" class="badge badge-info hover:badge-primary">{{ . }}</a>
                     {{- end }}
                 </td>
                 <td>{{ .Category }}</td>
@@ -384,35 +396,51 @@ const documentsFallbackBody = `<!DOCTYPE html>
                     {{- end }}
                 </td>
                 <td>
-                    <form method="post" action="/documents/{{ .ID }}/delete" class="inline-flex items-center gap-2">
-                        <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
-                        <label class="flex items-center gap-1 text-sm">
-                            <input type="checkbox" name="confirm" value="1" required class="checkbox checkbox-sm"> confirm
-                        </label>
-                        <button class="btn btn-sm btn-error" type="submit">Delete</button>
-                    </form>
+                    <button class="btn btn-ghost btn-xs text-error" data-modal-open="delete-{{ .ID }}">Delete</button>
+                    <dialog id="delete-{{ .ID }}" class="modal">
+                        <div class="modal-box">
+                            <h3 class="text-lg font-bold">Delete document?</h3>
+                            <p class="py-4">"<strong>{{ .DisplayLabel }}</strong>" will be removed from the corpus. The source file on disk is not affected. This action cannot be undone.</p>
+                            <form method="post" action="/documents/{{ .ID }}/delete" class="modal-action">
+                                <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
+                                <button type="button" class="btn btn-ghost" data-modal-close="delete-{{ .ID }}">Cancel</button>
+                                <button type="submit" class="btn btn-error">Delete</button>
+                            </form>
+                        </div>
+                        <form method="dialog" class="modal-backdrop">
+                            <button>close</button>
+                        </form>
+                    </dialog>
                 </td>
             </tr>
         {{ end }}
         </tbody>
     </table>
     {{ else }}
-    <div class="alert">
-        No documents ingested yet. Submit one through <code>POST /api/ingest</code> to add some.
+    <div class="alert flex flex-col items-center text-center">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="mb-3 size-12 opacity-50" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm-1 7V3.5L18.5 9H13Z"/>
+        </svg>
+        <p class="m-0">No documents ingested yet.</p>
+        <p class="m-0 text-sm">
+            Submit one through <code>POST /api/ingest</code> or
+            <a href="/docs#/operations/ingest" class="link link-primary font-medium">read the ingest guide →</a>
+        </p>
     </div>
     {{ end }}
 
     {{ if .Total }}
-    <p class="text-base-content/60 mt-4">
-        Showing {{ .StartShowing }}–{{ .EndShowing }} of {{ .Total }}
-        (page size {{ .Limit }}).
+    <div class="join mt-4">
+        <span class="text-base-content/60 join-item bg-base-100 border border-base-300 px-4 py-2 text-sm">
+            Showing {{ .StartShowing }}–{{ .EndShowing }} of {{ .Total }}
+        </span>
         {{ if gt .PrevOffset -1 }}
-        <a class="btn btn-sm ml-2" href="/documents?limit={{ .Limit }}&offset={{ .PrevOffset }}">Previous</a>
+        <a class="join-item btn btn-sm" href="/documents?limit={{ .Limit }}&offset={{ .PrevOffset }}">Previous</a>
         {{ end }}
         {{ if gt .NextOffset -1 }}
-        <a class="btn btn-sm ml-2" href="/documents?limit={{ .Limit }}&offset={{ .NextOffset }}">Next</a>
+        <a class="join-item btn btn-sm" href="/documents?limit={{ .Limit }}&offset={{ .NextOffset }}">Next</a>
         {{ end }}
-    </p>
+    </div>
     {{ end }}
 </body>
 </html>`

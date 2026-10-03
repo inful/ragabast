@@ -184,5 +184,81 @@
       // the button stays hidden until the first reply.
       updateJumpVisibility();
     }
+
+    // Phase 1.2 / 4.5 of plans/ux-overhaul.md: a delegated
+    // click handler on the document installs the
+    // openModal / closeModal wiring for the daisyUI
+    // modal pattern. Phase 4.5 (documents delete) is the
+    // first real consumer; the pattern is
+    // data-modal-open="<id>" / data-modal-close="<id>"
+    // on any element; chat.js calls
+    // window.openModal(id) / closeModal(id) in response.
+    //
+    // The handler is installed at the document level
+    // (not scoped to a specific page) so the wiring
+    // works on every page that includes chat.js —
+    // chat, search, documents, login.
+    document.addEventListener('click', function (e) {
+      var target = e.target;
+      // data-modal-open / data-modal-close may sit
+      // on a child element (icon, text) — walk up
+      // to the element carrying the attribute.
+      var openEl = target.closest && target.closest('[data-modal-open]');
+      if (openEl) {
+        openModal(openEl.getAttribute('data-modal-open'));
+        return;
+      }
+      var closeEl = target.closest && target.closest('[data-modal-close]');
+      if (closeEl) {
+        closeModal(closeEl.getAttribute('data-modal-close'));
+      }
+    });
   });
 })();
+
+// ----------------------------------------------------------------
+// Modal helpers (Phase 1.2 of plans/ux-overhaul.md).
+// ----------------------------------------------------------------
+// openModal(id) and closeModal(id) wrap the native
+// <dialog>.showModal() / <dialog>.close() browser APIs
+// so per-page flows (Phase 4.5 documents delete
+// confirmation, future flows) can open a daisyUI modal
+// with a one-liner rather than re-implementing the
+// lookup + showModal / close calls in every consumer.
+//
+// Pattern:
+//
+//   <button data-modal-open="confirm-delete-{{.ID}}">Delete</button>
+//   <dialog id="confirm-delete-{{.ID}}" class="modal">
+//     <div class="modal-box">…</div>
+//   </dialog>
+//
+// The <dialog> element is the recommended daisyUI modal
+// pattern (over the popover API) for two reasons: (a)
+// the browser handles focus management and ESC-to-close
+// for free, and (b) the daisyUI .modal-box / .modal-action /
+// .modal-backdrop classes are all designed around the
+// <dialog> element. Phase 4.5 (documents delete) is the
+// first real consumer.
+function openModal(id) {
+  var dlg = document.getElementById(id);
+  if (!dlg) {
+    return;
+  }
+  if (typeof dlg.showModal === 'function') {
+    dlg.showModal();
+  }
+}
+
+function closeModal(id) {
+  var dlg = document.getElementById(id);
+  if (!dlg) {
+    return;
+  }
+  if (typeof dlg.close === 'function') {
+    dlg.close();
+  }
+}
+
+window.openModal = openModal;
+window.closeModal = closeModal;

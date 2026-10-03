@@ -7,16 +7,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ragabast/internal/config"
 	"github.com/ragabast/internal/models"
-	"github.com/stretchr/testify/require"
 )
 
 // TestDocumentsPage_RendersDeleteButton pins the headline fix
-// for issue #87: every row in /documents has a Delete form so
-// the operator can remove a stale or wrongly-ingested document
-// without falling back to the CLI. Before the fix, no such
-// affordance existed in the UI.
+// for issue #87: every row in /documents has a Delete affordance
+// so the operator can remove a stale or wrongly-ingested
+// document without falling back to the CLI. Before the fix,
+// no such affordance existed in the UI.
+//
+// Phase 4.5 of plans/ux-overhaul.md replaces the inline
+// <input type="checkbox" name="confirm"> + submit
+// pattern with a daisyUI <dialog class="modal">. The
+// trigger button now opens the modal; the actual
+// destructive button is inside the modal. The form
+// is still keyed against /documents/{id}/delete and
+// still carries the csrf token.
 func TestDocumentsPage_RendersDeleteButton(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Paths.TemplatesDir = "" // force fallback renderer
@@ -30,12 +40,22 @@ func TestDocumentsPage_RendersDeleteButton(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
+	// Phase 4.5: the row carries a button that
+	// opens the modal; the modal's form posts to
+	// /documents/{id}/delete. The "open the modal"
+	// button is the new surface — the destructive
+	// action is gated behind the modal.
+	require.Contains(t, body, `data-modal-open="delete-doc-1"`,
+		"each row must render a delete button that opens a confirmation modal (Phase 4.5)")
 	require.Contains(t, body, `action="/documents/doc-1/delete"`,
-		"each row must render a delete form posting to /documents/{id}/delete")
+		"the modal must contain the actual delete form posting to /documents/{id}/delete")
 	require.Contains(t, body, `name="csrf_token"`,
-		"delete form must carry the csrf token")
-	require.Contains(t, body, `name="confirm"`,
-		"delete form must require the operator to tick the confirm checkbox")
+		"the modal's delete form must carry the csrf token")
+	// The legacy inline <input type="checkbox"
+	// name="confirm"> is gone — the modal is the
+	// new confirmation surface.
+	assert.NotContains(t, body, `name="confirm"`,
+		"the legacy <input name=\"confirm\"> delete confirmation must be gone (Phase 4.5)")
 }
 
 // TestDocumentsDelete_HappyPath deletes the targeted document
