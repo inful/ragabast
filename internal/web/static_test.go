@@ -687,9 +687,18 @@ func TestStaticHandler_ServesLoginCSS(t *testing.T) {
 		"/static/login.css Content-Type must start with text/css (got %q)", ct)
 	require.NotEmpty(t, w.Body.Bytes(), "/static/login.css body must not be empty")
 	body := w.Body.String()
-	// Sanity: login-specific selectors must be present.
-	require.Contains(t, body, "ul.providers",
-		"login.css must carry the ul.providers selector")
+	// Sanity: the hardcoded dark-theme background must be
+	// present. Phase 2a of the Bulma -> DaisyUI migration
+	// slimmed login.css to just the body styling; the
+	// per-element layout moved to Tailwind utility classes
+	// in templates/login.html. The dark GitHub-style
+	// palette is the new core contract — a future
+	// contributor who removes the hardcoded colors
+	// (e.g. to "use daisyUI semantic tokens") would
+	// regress the visual to whatever daisyUI's default
+	// dark theme looks like. See plans/daisyui-migration.md.
+	require.Contains(t, body, "#0e1116",
+		"login.css must carry the hardcoded dark background color (the login page is intentionally always dark)")
 }
 
 // TestLoginTemplate_NoInlineStyle pins that login.html does
@@ -728,6 +737,67 @@ func TestLoginTemplate_NoInlineStyle(t *testing.T) {
 	// version tests in asset_version_test.go.
 	require.Contains(t, body, `href="/static/login.css`,
 		"login template must load login-specific styles from /static/login.css")
+}
+
+// TestLoginTemplate_UsesTailwindUtilities pins the
+// post-migration contract for the OAuth login chooser
+// (templates/login.html). Phase 2a of the Bulma -> DaisyUI
+// migration (see plans/daisyui-migration.md) replaced the
+// page's custom CSS classes (lead, meta, providers) with
+// Tailwind utility classes in the template itself; the
+// companion login.css is now slimmed to just the body
+// styling (page chrome) that lives outside the per-element
+// layout.
+//
+// The page intentionally uses a hardcoded dark GitHub-style
+// palette — the design predates the migration, the page
+// renders before authentication (no session, no preference
+// cookies), and the operator-facing visual contract is "this
+// page is always dark." For that reason the layout uses
+// Tailwind arbitrary value syntax (text-[#8b949e]) instead
+// of daisyUI semantic tokens (text-base-content/60) which
+// would auto-flip with the OS theme. See the comment in
+// login.html for the full rationale.
+//
+// The contract: the rendered HTML carries the migrated
+// Tailwind class names on the right elements. We assert on
+// a representative subset rather than the whole class list
+// to pin the structure without overfitting to a specific
+// implementation.
+func TestLoginTemplate_UsesTailwindUtilities(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Auth.Providers = []config.OAuthProvider{
+		{Name: "gh", Type: "github", ClientID: "id", ClientSecret: "sec"},
+		{Name: "gl", Type: "gitlab", ClientID: "id", ClientSecret: "sec"},
+	}
+	s := NewServer(cfg, &fakeService{})
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/auth/login", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// Lead paragraph carries the muted color via Tailwind
+	// arbitrary value syntax. The literal class string
+	// pins the post-migration shape.
+	require.Contains(t, body, `text-[#8b949e]`,
+		"the lead paragraph must use a Tailwind arbitrary-value class for the muted color (post-migration contract)")
+
+	// Provider list uses the Tailwind grid utility for
+	// vertical spacing. We assert on the two classes
+	// individually (with word boundaries) so the test
+	// stays robust against class-name reordering.
+	require.Regexp(t, `\bgrid\b`, body,
+		"the providers list must use the Tailwind grid utility class")
+	require.Regexp(t, `\bgap-2\b`, body,
+		"the providers list must use the Tailwind gap-2 utility class")
+
+	// Meta paragraph carries the smaller muted color via
+	// Tailwind arbitrary value syntax.
+	require.Contains(t, body, `text-[#6e7681]`,
+		"the meta paragraph must use a Tailwind arbitrary-value class for the muted color")
 }
 
 // TestStaticAssets_AllowListIsExact pins that the staticAssets

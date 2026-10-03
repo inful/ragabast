@@ -9,19 +9,20 @@
 </head>
 <body>
   {{ template "header" .Header }}
-  <main>
-    <h1>Sign in to ragabast</h1>
-    <p class="lead">Choose an identity provider to continue.</p>
-    <ul class="providers">
+  <main class="max-w-md w-full p-8">
+    <h1 class="m-0 mb-1 text-xl font-semibold">Sign in to ragabast</h1>
+    <p class="m-0 mb-6 text-[0.9rem] text-[#8b949e]">Choose an identity provider to continue.</p>
+    <ul class="m-0 mb-6 grid list-none gap-2 p-0">
       {{range .Providers}}
       <li>
-        <a href="/auth/{{.Name}}/login{{if .Next}}?next={{.Next}}{{end}}">
+        <a href="/auth/{{.Name}}/login{{if .Next}}?next={{.Next}}{{end}}"
+           class="block border border-[#30363d] bg-[#161b22] px-4 py-3 rounded-md font-medium text-[#e6edf3] no-underline transition-colors duration-150 hover:border-[#58a6ff] focus:border-[#58a6ff] focus:outline-none">
           Sign in with {{.DisplayName}}
         </a>
       </li>
       {{end}}
     </ul>
-    <p class="meta">Sessions are in-memory and last {{.SessionTTL}}.</p>
+    <p class="m-0 mt-4 text-center text-[0.8rem] text-[#6e7681]">Sessions are in-memory and last {{.SessionTTL}}.</p>
   </main>
 </body>
 </html>
