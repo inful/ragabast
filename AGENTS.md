@@ -97,6 +97,31 @@ go test ./internal/something -v
 go test -race ./...
 ```
 
+### CSS build (Bulma → DaisyUI migration, Phase 0)
+```bash
+# Rebuild the embedded daisyui.min.css from
+# static/src/daisyui.css. Required after editing a template,
+# the fallback renderers in internal/web/, or the daisyUI
+# config in static/src/daisyui.css. Commit the regenerated
+# file alongside your template change.
+
+make css
+
+# Verify the committed daisyui.min.css is current.
+# Exits non-zero if a contributor changed a template
+# without re-running `make css`. CI runs this on every
+# push and pull request (the `css-check` job in
+# .github/workflows/ci.yml).
+
+make css-check
+```
+
+> Requires Node 20+ (see `.nvmrc`) and npm. The release
+> pipeline (goreleaser, distroless Docker) does NOT need
+> Node — the committed CSS is what ships, embedded via
+> `go:embed`. See `plans/daisyui-migration.md` for the
+> full migration plan.
+
 ### Code Quality
 ```bash
 # Lint check
