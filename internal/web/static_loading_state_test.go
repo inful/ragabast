@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,9 +42,17 @@ func TestChatFallback_LoadingStateAttributes(t *testing.T) {
 
 	// Issue #92 polish: the in-flight indicator must be
 	// visually prominent — a small is-light tag was easy to
-	// miss. Pin a spinner animation so a future contributor
-	// who simplifies the CSS back to a quiet tag gets a
-	// failing test rather than a silent UX regression.
-	require.Contains(t, css, "@keyframes chat-indicator-spin",
-		"chat.css must spin the in-flight indicator so the affordance reads at a glance")
+	// miss. Phase 2.3 of plans/ux-overhaul.md moves the
+	// affordance to daisyUI's loading-dots component, which
+	// ships its own animation in daisyui.min.css. chat.css
+	// no longer defines a custom @keyframes — the daisyUI
+	// loading-dots is the single source of truth.
+	//
+	// Pin the no-keyframes contract here so a future
+	// contributor who adds a custom @keyframes back to
+	// chat.css gets a red test: the daisyUI loading-dots
+	// is already animated; a custom animation would just
+	// double-up.
+	assert.NotContains(t, css, "@keyframes",
+		"chat.css must not define a custom @keyframes for the in-flight indicator (daisyUI's loading-dots ships its own animation)")
 }

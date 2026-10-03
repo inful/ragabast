@@ -376,7 +376,18 @@ const chatFallbackBody = `<!DOCTYPE html>
 			<div class="flex items-center gap-2">
 				<button id="chat-send" class="btn btn-primary" type="submit">Send</button>
 				<div class="htmx-indicator" id="chat-indicator">
-					<span class="badge">Thinking…</span>
+					<!--
+						Phase 2.3 of plans/ux-overhaul.md: the
+						in-flight indicator is now a daisyUI
+						visual-only component (the standard
+						"three pulsing dots" pattern used by
+						Linear, Notion, GitHub). The earlier
+						badge + spinner combo is gone; chat.css
+						no longer defines a custom @keyframes
+						animation — the daisyUI component ships
+						its own.
+					-->
+					<span class="loading loading-dots loading-md" aria-label="Assistant is responding"></span>
 				</div>
 			</div>
 		</div>
