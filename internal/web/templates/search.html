@@ -89,6 +89,24 @@
         </div>
 
         <div class="field">
+            <label class="label">Sources</label>
+            <div class="control">
+                {{ $selected := .SelectedKinds }}
+                {{ range .SourceKinds }}
+                {{ $kind := . }}
+                <label class="checkbox source-kind-option">
+                    <input type="checkbox" name="source_kinds" value="{{ $kind }}"
+                        {{ if eq (len $selected) 0 }}checked{{ end }}
+                        {{ range $selected }}{{ if eq . $kind }}checked{{ end }}{{ end }}>
+                    <span class="source-kind-emoji">{{ $kind.InlineSourceIcon }}</span>
+                    <span class="source-kind-name">{{ $kind.DisplayName }}</span>
+                </label>
+                {{ end }}
+            </div>
+            <p class="help">Empty selection = all sources. Each query is a fresh input — there's no sticky default between searches.</p>
+        </div>
+
+        <div class="field">
             <div class="control">
                 <button class="button is-info" type="submit">Search</button>
             </div>

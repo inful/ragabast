@@ -71,8 +71,14 @@ func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 		"Tags":        tags,
 		"Categories":  categories,
 		"DocumentIDs": documentIDs,
-		"CsrfToken":   CsrfTokenFromContext(r.Context()),
-		"Header":      s.pageHeaderFromContext(r),
+		"SourceKinds": knownSourceKinds(),
+		// Search is stateless — no sticky default per source kind.
+		// Pass an empty SelectedKinds; the template's "if len == 0
+		// → check all" branch renders every box checked, the same
+		// "all sources by default" first-visit UX as the chat form.
+		"SelectedKinds": []string(nil),
+		"CsrfToken":     CsrfTokenFromContext(r.Context()),
+		"Header":        s.pageHeaderFromContext(r),
 	})
 }
 
@@ -105,6 +111,14 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 		Tag:        r.FormValue("tag"),
 		Category:   r.FormValue("category"),
 		DocumentID: r.FormValue("document_id"),
+		// Stage 2.6 — per-source-kind scoping on /search.
+		// Each query is fresh; no sticky default. The handler
+		// reads source_kinds from the form (multi-checkbox or
+		// comma-separated curl) and passes it through to the
+		// service. The post-filter (applySourceKindFilters)
+		// drops out-of-scope results before they reach the
+		// template. nil/empty → all sources (no filter).
+		SourceKinds: parseSourceKindsForm(r),
 	}
 
 	results, err := s.service.Search(r.Context(), query, limit, filters)
