@@ -30,6 +30,13 @@ type QueryDebugInfo struct {
 type LLMOptions struct {
 	Temperature *float64
 	History     []ChatMessage
+	// Filters narrow the retrieval that builds the LLM's
+	// context. Empty (zero-value SearchFilters) means "no
+	// filter / all sources", matching the post-filter
+	// semantics in the vector layer. The chat handler uses
+	// this to scope a query to a subset of source kinds
+	// (e.g. only GitLab issues).
+	Filters SearchFilters
 }
 
 // Search performs a semantic search, optionally narrowed by
@@ -61,7 +68,15 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters S
 	// happen here against the document-level dates that
 	// VectorDB.Search populates from chunk metadata.
 	results = applyDateFilters(results, filters)
+	// Post-filter by source kind. The chat handler can scope a
+	// retrieval to one or more source kinds (e.g. "only GitLab
+	// issues") via SearchFilters.SourceKinds; this is the
+	// cheapest place to drop out-of-scope results because the
+	// top-K is small by the time we get here. See
+	// applySourceKindFilters.
+	results = applySourceKindFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
+	s.enrichWithCitationURLs(results)
 	return results, nil
 }
 
@@ -102,7 +117,11 @@ func (s *Service) HybridSearch(
 	// mode (keyword, semantic, hybrid) so operators don't
 	// have to think about which endpoint honors it.
 	results = applyDateFilters(results, filters)
+	// Post-filter by source kind. Same code path as Search;
+	// applies regardless of mode.
+	results = applySourceKindFilters(results, filters)
 	s.enrichWithDocbuilderURLs(results)
+	s.enrichWithCitationURLs(results)
 	return results, nil
 }
 
@@ -116,6 +135,27 @@ func (s *Service) enrichWithDocbuilderURLs(results []models.SearchResult) {
 	}
 	for i := range results {
 		results[i].DocbuilderURL = s.buildDocbuilderURL(results[i].UID)
+	}
+}
+
+// enrichWithCitationURLs populates the CitationURL field on
+// every result using the per-source-kind dispatch
+// (SourceLinkURL). The chat sources-panel template and the
+// search-results page both consume CitationURL instead of
+// branching on DocbuilderURL vs DocumentURLs themselves —
+// keeping the dispatch logic in Go (service layer) and out of
+// the templates, where it would be untestable. Idempotent:
+// safe to call alongside enrichWithDocbuilderURLs.
+//
+// Differs from enrichWithDocbuilderURLs in that it does NOT
+// short-circuit on the absence of ragabast.docbuilder_base_url:
+// the dispatch can still produce a URL from DocumentURLs
+// alone (the gitlab case), so a result with no DocbuilderURL
+// still gets a populated CitationURL when DocumentURLs is
+// non-empty.
+func (s *Service) enrichWithCitationURLs(results []models.SearchResult) {
+	for i := range results {
+		results[i].CitationURL = SourceLinkURL(results[i])
 	}
 }
 
@@ -158,10 +198,16 @@ func (s *Service) Query(ctx context.Context, query string, limit int) (string, e
 //
 // See the note on Service.Query about the deprecation timeline.
 func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts LLMOptions) (string, *QueryDebugInfo, error) {
-	results, err := s.vectorOps.Search(ctx, query, limit, nil)
+	results, err := s.vectorOps.Search(ctx, query, limit, opts.Filters.ToWhere())
 	if err != nil {
 		return "", nil, fmt.Errorf("search failed: %w", err)
 	}
+	// Post-filter by source kind. Mirrors the post-filter in
+	// Search and HybridSearch: the chromem-go Where filter is
+	// equality-only, so per-kind scoping happens here against
+	// the kind populated on each chunk at read time (see
+	// inferSourceKind in the vector package).
+	results = applySourceKindFilters(results, opts.Filters)
 
 	// Populate DocbuilderURL on every result so the chat handler's
 	// InlineSourceLinks post-processor can convert the LLM's
@@ -173,6 +219,12 @@ func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit
 	// vectorOps.Search directly so it has to do the enrichment
 	// itself.
 	s.enrichWithDocbuilderURLs(results)
+	// Populate CitationURL with the per-source-kind URL choice
+	// (DocumentURLs[0] for gitlab, DocbuilderURL for docbuilder).
+	// The chat sources panel and the search-results page both
+	// consume this so the dispatch logic stays out of the
+	// templates.
+	s.enrichWithCitationURLs(results)
 
 	if len(results) == 0 {
 		return "No relevant information found.", nil, nil

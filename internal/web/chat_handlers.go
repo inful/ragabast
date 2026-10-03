@@ -8,6 +8,7 @@ import (
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/vector"
 )
 
 // defaultChatTopK is the number of retrieved chunks the chat form uses when
@@ -36,6 +37,54 @@ func chatTopK(r *http.Request) int {
 	return v
 }
 
+// parseSourceKindsForm reads the chat form's source-kind
+// selection and returns the recognized entries. Handles both
+// the multi-checkbox form (each kind as a separate form value)
+// and the curl / future-search-form path (single comma-separated
+// value). Empty input or input that contains no recognized
+// kinds returns nil, which the caller interprets as "no filter /
+// all sources".
+//
+// Why drop unknown kinds rather than error: a future SourceKind
+// (e.g. "redmine") arriving via the form before this handler
+// knows about it would otherwise 400 the chat. Silently dropping
+// keeps the chat endpoint available and means the worst case for
+// a new kind is "operator doesn't get the new kind in the filter
+// until we ship code" — a one-deploy delay, not an outage.
+//
+// The wire values are the SourceKind constants verbatim
+// ("docbuilder", "gitlab"); matching is case-sensitive to keep
+// the contract simple.
+func parseSourceKindsForm(r *http.Request) []models.SourceKind {
+	values := r.Form["source_kinds"]
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]models.SourceKind, 0, len(values))
+	seen := make(map[models.SourceKind]struct{}, len(values))
+	for _, raw := range values {
+		for p := range strings.SplitSeq(raw, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			k := models.SourceKind(p)
+			if !k.IsValid() {
+				continue
+			}
+			if _, dup := seen[k]; dup {
+				continue
+			}
+			seen[k] = struct{}{}
+			out = append(out, k)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 	// Issue #22 — pin a session id across page reloads.
 	// First-time callers get a UUID via Set-Cookie; the
@@ -45,12 +94,36 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 	if shouldSet {
 		setChatSessionCookie(w, sessionID)
 	}
+	// Stage 2.5 — source-kind sticky default. The form's
+	// source-kind multi-select pre-fills with the session's
+	// last non-empty selection. The handler also exposes the
+	// full set of known kinds so the template can render one
+	// checkbox per kind (rather than discovering them from
+	// the data). Nil for unknown sessions or first-time visits
+	// (no default to apply) — the template marks every box
+	// unchecked in that scenario.
 	s.renderTemplate(w, "chat.html", map[string]any{
-		"Title":     "RAGabast - Chat",
-		"CsrfToken": CsrfTokenFromContext(r.Context()),
-		"SessionID": sessionID,
-		"Header":    s.pageHeaderFromContext(r),
+		"Title":         "RAGabast - Chat",
+		"CsrfToken":     CsrfTokenFromContext(r.Context()),
+		"SessionID":     sessionID,
+		"Header":        s.pageHeaderFromContext(r),
+		"SourceKinds":   knownSourceKinds(),
+		"SelectedKinds": s.service.ChatSessionSourceKinds(sessionID),
 	})
+}
+
+// knownSourceKinds returns the closed set of source kinds the
+// chat form's multi-select renders as checkboxes. Order is the
+// user-facing order in the rendered form (the Stage 2 spec
+// doesn't pin order; the legacy default goes first so the most-
+// familiar kind is the first option). SourceUnknown is excluded
+// — it would render as a no-op checkbox that the user could
+// tick without seeing any effect.
+func knownSourceKinds() []models.SourceKind {
+	return []models.SourceKind{
+		models.SourceDocbuilder,
+		models.SourceGitLab,
+	}
 }
 
 // handleChatClear implements POST /chat/clear: drops
@@ -92,8 +165,33 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 	sessionID := strings.TrimSpace(r.FormValue("session_id"))
 	history := s.service.ChatSessionHistory(sessionID)
 
+	// Stage 2.5 — sticky-default source-kind filter. Read the
+	// form's current selection, then write it back to the
+	// session only when non-empty. An empty submission
+	// (operator unticked every box) is a per-question override
+	// that means "no filter this turn" but MUST NOT clear the
+	// stored default — clearing every box and getting a blank
+	// form next time would be a UX trap. The session store's
+	// SetSourceKinds is also a no-op on empty input, so this
+	// handler's behavior matches the store's contract.
+	kinds := parseSourceKindsForm(r)
+	kindsAsStrings := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		kindsAsStrings = append(kindsAsStrings, string(k))
+	}
+	s.service.SetChatSessionSourceKinds(sessionID, kindsAsStrings)
+
 	answer, info, err := s.service.QueryDebugWithOptions(r.Context(), msg, chatTopK(r), service.LLMOptions{
 		History: history,
+		// Per-question source-kind filter (Stage 2.1 will
+		// add the chat form UI; today a curl operator can
+		// pass source_kinds=gitlab,docbuilder to scope the
+		// retrieval). Empty result means "no filter / all
+		// sources" — matches the post-filter's empty-means-
+		// no-op semantics.
+		Filters: vector.SearchFilters{
+			SourceKinds: parseSourceKindsForm(r),
+		},
 	})
 	if err != nil {
 		internalError(w, r, "query", err)
@@ -188,9 +286,60 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 	answerHTML = sanitizeForChatHTML(answerHTML)
 
 	s.renderTemplate(w, "chat_message.html", map[string]any{
-		"User":       msg,
-		"Answer":     answerWithInlineLinks,
-		"AnswerHTML": template.HTML(answerHTML),
-		"Sources":    sources,
+		"User":          msg,
+		"Answer":        answerWithInlineLinks,
+		"AnswerHTML":    template.HTML(answerHTML),
+		"Sources":       sources,
+		"SourcesByKind": sourcesByKind(sources),
 	})
+}
+
+// kindGroup is one section of the chat sources panel: every
+// source with the same SourceKind, in input order (which the
+// service layer populates as similarity-descending, so the most
+// relevant cited source for a kind is at the top of its group).
+type kindGroup struct {
+	Kind    models.SourceKind
+	Sources []models.SearchResult
+}
+
+// sourcesByKind groups sources by SourceKind for the chat
+// sources panel. Returns a slice (not a map) so the template
+// iterates in a stable order; map iteration in Go is randomized,
+// which would surface as flaky group-header ordering in the
+// rendered output.
+//
+// Within each group, sources preserve their input order — the
+// service layer already returns them sorted by similarity, so
+// the most-relevant-cited-source lands at the top of its kind's
+// section.
+//
+// Group order is fixed: docbuilder first (the legacy default,
+// what operators saw for the entire pre-multi-source era),
+// then gitlab, then any future kinds in declaration order
+// (SourceUnknown included as a fallback so legacy chunks
+// surface; the template suppresses the group header for empty
+// SourceUnknown groups, so an empty legacy chunk shows as
+// nothing rather than a misleading badge).
+func sourcesByKind(sources []models.SearchResult) []kindGroup {
+	kindOrder := []models.SourceKind{
+		models.SourceDocbuilder,
+		models.SourceGitLab,
+		models.SourceUnknown,
+	}
+	grouped := make(map[models.SourceKind][]models.SearchResult, len(kindOrder))
+	for _, s := range sources {
+		k := s.SourceKind
+		if k == "" {
+			k = models.SourceUnknown
+		}
+		grouped[k] = append(grouped[k], s)
+	}
+	out := make([]kindGroup, 0, len(kindOrder))
+	for _, k := range kindOrder {
+		if entries := grouped[k]; len(entries) > 0 {
+			out = append(out, kindGroup{Kind: k, Sources: entries})
+		}
+	}
+	return out
 }

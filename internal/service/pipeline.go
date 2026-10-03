@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"github.com/ragabast/internal/models"
 )
@@ -27,6 +28,15 @@ type documentIngester interface {
 // focused on building the *models.Document and lets each one call
 // the same pipeline without copy-pasting the chunk→ingest tail.
 //
+// Before persistence, doc.SourceKind and doc.Metadata are
+// propagated to every chunk. The chunker is source-agnostic — it
+// produces chunks without SourceKind or Metadata — so this is the
+// one place that copies the parent doc's source identity onto each
+// child chunk. The citation dispatch and the source-kind post-
+// filter rely on every chunk having a populated SourceKind; the
+// vector layer's metadataToChunk also runs inferSourceKind on
+// read as a backstop for legacy corpora.
+//
 // Errors are wrapped with the same prefixes the callers used so
 // existing log lines and tests that match on the error string keep
 // working.
@@ -39,6 +49,13 @@ func chunkAndIngest(ctx context.Context, ch documentChunker, ingester documentIn
 	doc.Chunks = make([]models.Chunk, len(chunks))
 	for i, chunk := range chunks {
 		doc.Chunks[i] = *chunk
+		doc.Chunks[i].SourceKind = doc.SourceKind
+		if len(doc.Metadata) > 0 {
+			if doc.Chunks[i].Metadata == nil {
+				doc.Chunks[i].Metadata = make(map[string]string, len(doc.Metadata))
+			}
+			maps.Copy(doc.Chunks[i].Metadata, doc.Metadata)
+		}
 	}
 
 	if err := ingester.IngestDocument(ctx, doc); err != nil {

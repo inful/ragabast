@@ -637,6 +637,12 @@ func (db *VectorDB) Search(ctx context.Context, queryEmbedding []float32, limit 
 			Fingerprint:        result.Metadata["fingerprint"],
 			UID:                result.Metadata["uid"],
 			DocumentFilePath:   result.Metadata["document_file_path"],
+			// SourceKind carries the persisted value when the
+			// chunk has one; legacy chunks (no source_kind entry)
+			// get a UID-prefix backfill via inferSourceKind so the
+			// citation dispatch and post-filter can branch on the
+			// kind without re-deriving it themselves.
+			SourceKind: inferSourceKind(result.Metadata["source_kind"], result.Metadata["uid"]),
 		}
 		// Document-level timestamps for date-range filtering
 		// (#38). parseRFC3339 returns the zero time on a

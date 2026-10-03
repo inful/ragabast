@@ -90,6 +90,19 @@ func resolveParentContext(ctx context.Context, result models.SearchResult, prese
 
 func formatContextEntry(ctx context.Context, result models.SearchResult, presentChunkIDs map[string]struct{}, fetcher ChunkFetcher) string {
 	var b strings.Builder
+
+	// Source-kind prefix (light cross-source reasoning). Emitted
+	// only when SourceKind is non-empty so pre-SourceKind corpora
+	// (SourceUnknown) keep the historical unprefixed shape — no
+	// token-budget regression for existing operators. The LLM
+	// reads top-to-bottom; "where is this from?" is the
+	// higher-order question, so the kind line leads the entry.
+	if k := result.SourceKind; k != "" {
+		b.WriteString("[source:")
+		b.WriteString(string(k))
+		b.WriteString("]\n")
+	}
+
 	b.WriteString("TITLE: ")
 	b.WriteString(strings.TrimSpace(result.DocumentTitle))
 	b.WriteByte('\n')

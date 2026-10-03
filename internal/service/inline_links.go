@@ -60,7 +60,17 @@ func InlineSourceLinks(answer string, sources []models.SearchResult) string {
 			return match
 		}
 		text := sourceLinkText(sources[idx])
-		url := sourceLinkURL(sources[idx])
+		url := SourceLinkURL(sources[idx])
+		// Per-kind glyph leading the link text. Markdown
+		// (CommonMark) strips inline HTML inside link text, so
+		// this is a Unicode emoji rather than a <span> icon. For
+		// SourceUnknown (zero value) the glyph is empty and the
+		// rendered link is byte-identical to the pre-icon
+		// behavior — backwards compat for legacy corpora.
+		glyph := sources[idx].SourceKind.InlineSourceIcon()
+		if glyph != "" {
+			text = glyph + " " + text
+		}
 		if url == "" {
 			// No URL anywhere — emit bare title text so the
 			// reference is still visible to the user. An empty
@@ -83,17 +93,62 @@ func sourceLinkText(s models.SearchResult) string {
 	return s.DisplayLabel()
 }
 
-// sourceLinkURL returns the URL to link to for a cited source.
-// Preference order: DocbuilderURL (synthetic permalink set when
-// ragabast.docbuilder_base_url is configured) → first user-set
-// DocumentURL → empty string (caller emits bare text in that
-// case).
-func sourceLinkURL(s models.SearchResult) string {
-	if s.DocbuilderURL != "" {
-		return s.DocbuilderURL
+// SourceLinkURL returns the URL to link to for a cited source
+// or "direct link" in the sources panel. The choice is
+// per-source-kind:
+//
+//   - SourceGitLab: DocumentURLs[0] (the original GitLab web_url),
+//     falling back to DocbuilderURL when the operator didn't
+//     provide a URL. The bug surfaced during review of the
+//     handlers-split refactor was that EVERY citation resolved to
+//     DocbuilderURL when ragabast.docbuilder_base_url was set,
+//     sending operators to the synthetic docbuilder permalink
+//     instead of the original GitLab issue. GitLab sources must
+//     therefore prefer the user-set DocumentURL.
+//   - SourceDocbuilder / SourceUnknown: DocbuilderURL →
+//     DocumentURLs[0] (the historical behavior, preserved for
+//     backwards compatibility — pre-SourceKind corpora serialize
+//     back to SourceUnknown and must continue to land on the
+//     docbuilder permalink).
+//
+// Returns "" when neither field has a value; the caller emits
+// bare title text in that case (see InlineSourceLinks).
+//
+// SourceKind is populated by the vector layer (see
+// inferSourceKind in internal/vector); pre-SourceKind corpora
+// reach this function with SourceUnknown and follow the
+// docbuilder branch, so existing citations keep working.
+//
+// Exported (capital S) so the chat handler can pre-populate
+// SearchResult.CitationURL for the sources-panel template,
+// keeping the per-kind dispatch logic out of the template.
+func SourceLinkURL(s models.SearchResult) string {
+	switch s.SourceKind {
+	case models.SourceGitLab:
+		if len(s.DocumentURLs) > 0 {
+			return s.DocumentURLs[0]
+		}
+		if s.DocbuilderURL != "" {
+			return s.DocbuilderURL
+		}
+		return ""
+	case models.SourceDocbuilder, models.SourceUnknown:
+		// Historical behavior: prefer DocbuilderURL → DocumentURLs[0].
+		// SourceUnknown (zero value) lands here so pre-SourceKind
+		// corpora keep resolving to the docbuilder permalink.
+		if s.DocbuilderURL != "" {
+			return s.DocbuilderURL
+		}
+		if len(s.DocumentURLs) > 0 {
+			return s.DocumentURLs[0]
+		}
+		return ""
+	default:
+		// Future SourceKind constants fall back to the docbuilder
+		// behavior until they get an explicit case. Returning ""
+		// here is not reachable today (every known kind is matched
+		// above) but keeps the switch exhaustive for any new
+		// constant that lands before this file is updated.
+		return ""
 	}
-	if len(s.DocumentURLs) > 0 {
-		return s.DocumentURLs[0]
-	}
-	return ""
 }

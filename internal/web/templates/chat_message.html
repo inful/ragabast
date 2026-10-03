@@ -52,14 +52,15 @@
         <p class="has-text-weight-semibold">Assistant</p>
         <div class="chat-msg content">{{ .AnswerHTML }}</div>
         {{ if .Sources }}
+        {{ range .SourcesByKind }}
         <details class="mt-2" open>
-            <summary>Sources ({{ len .Sources }})</summary>
+            <summary>{{ .Kind.DisplayName }} ({{ len .Sources }})</summary>
             <ol class="mt-2">
                 {{ range .Sources }}
                 <li>
                     {{ .DisplayLabel }}
-                    ({{ if .DocbuilderURL }}
-                        <a href="{{ .DocbuilderURL }}" target="_blank" rel="noopener">direct link</a>
+                    ({{ if .CitationURL }}
+                        <a href="{{ .CitationURL }}" target="_blank" rel="noopener">direct link</a>
                     {{ else }}
                         <code>{{ .DocumentID }}</code>
                     {{ end }})
@@ -68,6 +69,7 @@
                 {{ end }}
             </ol>
         </details>
+        {{ end }}
         {{ end }}
     </div>
 </div>

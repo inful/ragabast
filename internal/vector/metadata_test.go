@@ -32,6 +32,7 @@ func TestChunkToMetadata_AllOptionalFieldsPopulated(t *testing.T) {
 		UID:                "uid-1",
 		ParentID:           "parent-1",
 		DocumentFilePath:   "/var/docs/setup.md",
+		SourceKind:         models.SourceGitLab,
 	}
 
 	meta := chunkToMetadata(chunk.ID, chunk)
@@ -52,6 +53,8 @@ func TestChunkToMetadata_AllOptionalFieldsPopulated(t *testing.T) {
 	require.Equal(t, "uid-1", meta["uid"])
 	require.Equal(t, "parent-1", meta["parent_id"])
 	require.Equal(t, "/var/docs/setup.md", meta["document_file_path"])
+	require.Equal(t, "gitlab", meta["source_kind"],
+		"non-empty SourceKind must be persisted as 'source_kind' metadata so the search post-filter can branch on the kind")
 }
 
 // TestChunkToMetadata_OmitsEmptyOptionalFields ensures the
@@ -75,6 +78,7 @@ func TestChunkToMetadata_OmitsEmptyOptionalFields(t *testing.T) {
 	_, hasUID := meta["uid"]
 	_, hasParent := meta["parent_id"]
 	_, hasFilePath := meta["document_file_path"]
+	_, hasSourceKind := meta["source_kind"]
 
 	require.False(t, hasURLs, "empty URLs should not produce a metadata entry")
 	require.False(t, hasTags, "empty tags should not produce a metadata entry")
@@ -85,6 +89,8 @@ func TestChunkToMetadata_OmitsEmptyOptionalFields(t *testing.T) {
 	require.False(t, hasUID, "empty UID should not produce a metadata entry")
 	require.False(t, hasParent, "empty ParentID should not produce a metadata entry")
 	require.False(t, hasFilePath, "empty DocumentFilePath should not produce a metadata entry")
+	require.False(t, hasSourceKind,
+		"empty SourceKind should not produce a metadata entry — the on-disk shape of pre-SourceKind chunks must be unchanged")
 }
 
 // TestMetadataToChunk_RoundTrips pins that the metadata→chunk
@@ -112,6 +118,7 @@ func TestMetadataToChunk_RoundTrips(t *testing.T) {
 		UID:                "uid-1",
 		ParentID:           "parent-1",
 		DocumentFilePath:   "/var/docs/setup.md",
+		SourceKind:         models.SourceGitLab,
 	}
 
 	meta := chunkToMetadata(original.ID, original)
@@ -134,4 +141,6 @@ func TestMetadataToChunk_RoundTrips(t *testing.T) {
 	require.Equal(t, original.UID, restored.UID)
 	require.Equal(t, original.ParentID, restored.ParentID)
 	require.Equal(t, original.DocumentFilePath, restored.DocumentFilePath)
+	require.Equal(t, original.SourceKind, restored.SourceKind,
+		"SourceKind must round-trip through the metadata conversion")
 }

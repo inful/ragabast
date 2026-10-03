@@ -235,6 +235,10 @@ func (f *fakeHumaService) ChatSessionHistory(string) []service.ChatMessage {
 	return []service.ChatMessage{}
 }
 
+func (f *fakeHumaService) ChatSessionSourceKinds(string) []string { return nil }
+
+func (f *fakeHumaService) SetChatSessionSourceKinds(string, []string) {}
+
 func (f *fakeHumaService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {
 	f.appendedTurns = append(f.appendedTurns, appendedTurn{sessionID: sessionID, messages: exchange})
 	return nil
@@ -306,7 +310,9 @@ type fakeService struct {
 	lastSearchMode    service.SearchMode
 	queryAnswer       string
 	queryDebug        *service.QueryDebugInfo
+	lastQueryOpts     service.LLMOptions
 	history           []service.ChatMessage
+	chatSessionKinds  []chatSessionSourceKind // Stage 2.5: per-session source-kind sticky default
 	appendedTurns     []appendedTurn
 	clearedSessions   []string
 	queryErr          error
@@ -424,12 +430,26 @@ func (f *fakeService) SuggestFrontmatter(context.Context, string, map[string]any
 	return service.FrontmatterSuggestion{}, nil
 }
 
-func (f *fakeService) QueryDebugWithOptions(_ context.Context, _ string, _ int, _ service.LLMOptions) (string, *service.QueryDebugInfo, error) {
+func (f *fakeService) QueryDebugWithOptions(_ context.Context, _ string, _ int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error) {
+	f.lastQueryOpts = opts
 	if f.queryErr != nil {
 		return "", nil, f.queryErr
 	}
 	if f.queryDebug == nil {
 		f.queryDebug = &service.QueryDebugInfo{Results: []models.SearchResult{}}
+	}
+	// Mirror the real service's enrichWithCitationURLs: each
+	// SearchResult that comes out of the query needs a populated
+	// CitationURL so the chat sources-panel template can render
+	// the per-kind URL choice. The real service populates this
+	// alongside DocbuilderURL; the fake doesn't know about
+	// ragabast.docbuilder_base_url, so it skips the DocbuilderURL
+	// side and lets callers pre-populate it on the result if
+	// they want to test that path.
+	for i := range f.queryDebug.Results {
+		if f.queryDebug.Results[i].CitationURL == "" {
+			f.queryDebug.Results[i].CitationURL = service.SourceLinkURL(f.queryDebug.Results[i])
+		}
 	}
 	return f.queryAnswer, f.queryDebug, nil
 }
@@ -458,6 +478,44 @@ func (f *fakeService) ChatSessionHistory(string) []service.ChatMessage {
 	return []service.ChatMessage{}
 }
 
+// chatSessionSourceKinds is the fake's in-memory backing for
+// the per-session source-kind default. Tests that exercise
+// the sticky-default round-trip populate the session id via
+// chatSessionSeed; the chat handler then reads/writes through
+// ChatSessionSourceKinds / SetChatSessionSourceKinds as if it
+// were the real *service.Service.
+type chatSessionSourceKind struct {
+	sessionID string
+	kinds     []string
+}
+
+func (f *fakeService) ChatSessionSourceKinds(sessionID string) []string {
+	for _, e := range f.chatSessionKinds {
+		if e.sessionID == sessionID {
+			out := make([]string, len(e.kinds))
+			copy(out, e.kinds)
+			return out
+		}
+	}
+	return nil
+}
+
+func (f *fakeService) SetChatSessionSourceKinds(sessionID string, kinds []string) {
+	if sessionID == "" {
+		return
+	}
+	for i, e := range f.chatSessionKinds {
+		if e.sessionID == sessionID {
+			f.chatSessionKinds[i].kinds = append([]string(nil), kinds...)
+			return
+		}
+	}
+	f.chatSessionKinds = append(f.chatSessionKinds, chatSessionSourceKind{
+		sessionID: sessionID,
+		kinds:     append([]string(nil), kinds...),
+	})
+}
+
 func (f *fakeService) AppendChatTurn(_ context.Context, sessionID string, exchange ...service.ChatMessage) error {
 	f.appendedTurns = append(f.appendedTurns, appendedTurn{sessionID: sessionID, messages: exchange})
 	return nil
@@ -465,6 +523,15 @@ func (f *fakeService) AppendChatTurn(_ context.Context, sessionID string, exchan
 
 func (f *fakeService) ClearChatSession(sessionID string) {
 	f.clearedSessions = append(f.clearedSessions, sessionID)
+	// Clear also wipes the source-kind default (mirrors the
+	// real service's ClearChatSession, which deletes the
+	// session slot entirely).
+	for i, e := range f.chatSessionKinds {
+		if e.sessionID == sessionID {
+			f.chatSessionKinds = append(f.chatSessionKinds[:i], f.chatSessionKinds[i+1:]...)
+			return
+		}
+	}
 }
 
 func (f *fakeService) GetNormalizedTags(context.Context) ([]string, error) {

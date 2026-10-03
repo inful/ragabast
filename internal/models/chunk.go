@@ -73,6 +73,21 @@ type Chunk struct {
 	// known (e.g. "web_upload" placeholder). Persisted under
 	// the "document_file_path" metadata key.
 	DocumentFilePath string `bson:"document_file_path" json:"document_file_path,omitempty"`
+
+	// SourceKind mirrors the parent document's SourceKind so
+	// retrieval-time filters and citation dispatch can branch
+	// on the kind without re-deriving it from the UID prefix.
+	// Defaults to SourceUnknown for backwards compatibility.
+	SourceKind SourceKind `bson:"source_kind,omitempty" json:"source_kind,omitempty"`
+
+	// Metadata carries source-specific key/value pairs that
+	// don't fit into the typed fields above. The gitlab writer
+	// populates `state` and `author_username` here; future
+	// sources will add their own keys. Nil (not empty map) is
+	// the default so omitempty drops the field for chunks
+	// without source-specific metadata — the BSON/JSON shape
+	// of legacy chunks is unchanged.
+	Metadata map[string]string `bson:"metadata,omitempty" json:"metadata,omitempty"`
 }
 
 // NewChunk creates a new chunk with default values.
@@ -160,4 +175,21 @@ type SearchResult struct {
 	// before the field was added; callers must tolerate the
 	// empty value.
 	DocumentFilePath string `json:"document_file_path,omitempty"`
+
+	// SourceKind mirrors the parent document's SourceKind so
+	// citation dispatch and presentation grouping can branch
+	// on the kind. JSON-only (populated at query time from
+	// the chunk metadata, not persisted separately).
+	SourceKind SourceKind `json:"source_kind,omitempty"`
+
+	// CitationURL is the per-source-kind URL the operator
+	// should land on when they click a citation. Computed by
+	// the service layer using the same per-kind dispatch as
+	// InlineSourceLinks (DocumentURLs[0] for SourceGitLab,
+	// DocbuilderURL -> DocumentURLs[0] for SourceDocbuilder).
+	// Templates consume this instead of branching on
+	// DocbuilderURL vs DocumentURLs themselves, so the
+	// dispatch logic stays testable in Go rather than the
+	// template. JSON-only — not persisted on the chunk.
+	CitationURL string `json:"citation_url,omitempty"`
 }

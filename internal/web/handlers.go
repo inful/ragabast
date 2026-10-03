@@ -52,10 +52,26 @@ func (s *Server) serveBasicHTML(w http.ResponseWriter, templateName string, data
 	header := headerFromMap(data)
 	switch templateName {
 	case "chat.html":
+		// Stage 2.5 — source-kind sticky default. The
+		// unsafe serveBasicHTML path is the legacy fallback
+		// (no embedded template); we still pass the multi-
+		// select fields so the template's `{{ if .SourceKinds }}`
+		// branch renders consistently. Empty slices fall
+		// through to "no default" / "no kinds" — the help text
+		// still explains the empty selection semantics.
+		var selected []string
+		if v, ok := data.(map[string]any); ok {
+			if s, ok := v["SelectedKinds"].([]string); ok {
+				selected = s
+			}
+		}
 		s.renderFallback(w, "chat.html", chatFallbackData{
-			Title:     titleFromMap(data, "RAGabast - Chat"),
-			CsrfToken: stringFromMap(data, "CsrfToken"),
-			Header:    header,
+			Title:         titleFromMap(data, "RAGabast - Chat"),
+			CsrfToken:     stringFromMap(data, "CsrfToken"),
+			SessionID:     stringFromMap(data, "SessionID"),
+			Header:        header,
+			SourceKinds:   knownSourceKinds(),
+			SelectedKinds: selected,
 		})
 	case "documents.html":
 		s.renderFallback(w, "documents.html", documentsFallbackData{

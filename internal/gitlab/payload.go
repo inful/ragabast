@@ -217,6 +217,13 @@ func writeFrontmatter(b *strings.Builder, env IssueEnvelope, uid string) {
 	b.WriteString("uid: " + sanitizeForYAML(uid) + "\n")
 	b.WriteString("title: " + sanitizeForYAML(env.Issue.Title) + "\n")
 
+	// source_kind tags this document so the citation dispatch
+	// (per-kind URL preference) and the source-kind post-filter
+	// (per-kind scoping) can branch correctly. See .planning/
+	// multi-source.md for the rationale; the wire value must
+	// match models.SourceGitLab verbatim.
+	b.WriteString("source_kind: gitlab\n")
+
 	// Tags. We always emit the two discovery-affordance tags
 	// first ("gitlab-issue", "gitlab:<path>") so the chat
 	// surface can filter on them uniformly with other source
@@ -250,6 +257,20 @@ func writeFrontmatter(b *strings.Builder, env IssueEnvelope, uid string) {
 	}
 	if env.Issue.UpdatedAt != "" {
 		b.WriteString("updated_at: " + normalizeRFC3339(env.Issue.UpdatedAt) + "\n")
+	}
+
+	// Source-specific metadata. Emitted only when populated so
+	// a closed issue with no author still round-trips cleanly
+	// through the parser's "extra fields → chunk.Metadata" pass.
+	// The keys here are the wire contract that downstream
+	// filters rely on (see internal/vector/metadata.go for the
+	// post-filter side).
+	if env.Issue.State != "" {
+		b.WriteString(MetadataKeyState + ": " + sanitizeForYAML(env.Issue.State) + "\n")
+	}
+	if env.Issue.Author.Username != "" {
+		b.WriteString(MetadataKeyAuthorUsername + ": " +
+			sanitizeForYAML(env.Issue.Author.Username) + "\n")
 	}
 
 	// file_path is what the chat surface falls back to when a
@@ -365,3 +386,22 @@ func pickNoteAuthor(a Author) string {
 	}
 	return a.Name
 }
+
+// Metadata keys written into the rendered frontmatter and
+// subsequently copied to chunk.Metadata by the parser. These are
+// the wire contract for source-specific filters (e.g. "only
+// open issues" → MetadataKeyState == "opened"). Centralized so
+// typos surface as compile errors within the gitlab package
+// instead of as silent filter misses at retrieval time.
+const (
+	// MetadataKeyState carries the issue state ("opened",
+	// "closed"). The vector layer does not interpret the value;
+	// it's surfaced as-is so future filters can extend (e.g.
+	// "locked", "merged" for non-issue kinds).
+	MetadataKeyState = "state"
+
+	// MetadataKeyAuthorUsername carries the author's GitLab
+	// handle. Stable across display-name changes; chat surfaces
+	// render it as @-handles.
+	MetadataKeyAuthorUsername = "author_username"
+)
