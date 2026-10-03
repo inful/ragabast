@@ -16,9 +16,10 @@ import (
 // the web UI does not have to reach a third-party CDN on every
 // page load.
 //
-// Why this exists: the historical build loaded Bulma from
-// https://cdn.jsdelivr.net and htmx from https://unpkg.com.
-// That had three concrete downsides:
+// Why this exists: the historical build loaded CSS
+// frameworks and JS libraries from
+// https://cdn.jsdelivr.net and https://unpkg.com. That
+// had three concrete downsides:
 //
 //  1. The operator's browser had to reach the CDN before the
 //     page would render correctly. An air-gapped install or a
@@ -36,10 +37,11 @@ import (
 // committed to the repo); a security update requires a rebuild,
 // not a runtime fetch.
 //
-// License attribution (MIT for Bulma, BSD-2-Clause for htmx)
-// lives in THIRD_PARTY_LICENSES.md at the repo root so any
-// redistribution of the binary carries the required notices
-// without the static handler having to serve the text.
+// License attribution (MIT for Tailwind CSS and daisyUI,
+// BSD-2-Clause for htmx) lives in THIRD_PARTY_LICENSES.md at
+// the repo root so any redistribution of the binary carries
+// the required notices without the static handler having to
+// serve the text.
 //
 //go:embed static/*
 var staticFS embed.FS
@@ -55,11 +57,13 @@ var staticFS embed.FS
 //
 // The current set is:
 //
-//   - bulma.min.css  — Bulma v1.0.4 (MIT). Loaded by every page.
-//     Upgraded from 0.9.4 in the v1 migration: CSS variables,
-//     `prefers-color-scheme:dark` automatic theme, no more Sass
-//     dependency (the bundled CSS is what we ship — we don't
-//     customize Sass variables at build time).
+//   - daisyui.min.css — daisyUI 5 + Tailwind CSS 4 (both
+//     MIT). Loaded by every page. The CSS is built by
+//     `make css` from static/src/daisyui.css (the @source
+//     directive scans internal/web/templates/*.html and
+//     internal/web/fallback_renderers.go) and committed
+//     alongside its source. The shipped bundle is ~60 KB
+//     (down from Bulma's 678 KB in the pre-migration build).
 //
 //   - htmx.min.js    — htmx v1.9.10 (BSD-2-Clause). Loaded by
 //     the chat landing page and search.
@@ -79,25 +83,25 @@ var staticFS embed.FS
 //     chooser. Extracted from a former inline
 //     <style> block in templates/login.html.
 //
-// Bulma 1.x ships an automatic `@media (prefers-color-scheme:
-// dark)` block in bulma.min.css, so OS-driven dark mode works
-// with no extra CSS. The earlier manual override file
-// (chat-dark.css) and the navbar theme-toggle button were
-// removed — the override palette diverged from Bulma's
-// designed dark scheme and was hard to maintain.
+// daisyUI 5 ships with the `light` theme as the default and
+// `dark --prefersdark` so OS-driven dark mode flips the entire
+// palette automatically (the daisyUI equivalents of Bulma's
+// 1.x `prefers-color-scheme:dark` block). The earlier manual
+// override file (chat-dark.css) and the navbar theme-toggle
+// button were removed in the Bulma -> DaisyUI migration —
+// the override palette diverged from Bulma's designed dark
+// scheme and was hard to maintain; daisyUI's theme system
+// is the design-correct way to handle dark mode.
 var staticAssets = map[string]staticAsset{
-	"bulma.min.css": {
-		contentType: "text/css; charset=utf-8",
-	},
 	"daisyui.min.css": {
-		// Phase 1 of the Bulma -> DaisyUI migration (see
-		// plans/daisyui-migration.md). Both files ship
-		// side-by-side until Phase 3 drops Bulma. The
-		// file is built by `make css` from
-		// static/src/daisyui.css (Tailwind 4 + daisyUI 5)
-		// and committed alongside its source. The size is
-		// ~106 KB vs Bulma's 678 KB; the static test pins
-		// a 250 KB ceiling as a regression guard.
+		// Phase 3 of the Bulma -> DaisyUI migration (see
+		// plans/daisyui-migration.md) is the only
+		// embedded CSS framework. The file is built by
+		// `make css` from static/src/daisyui.css
+		// (Tailwind 4 + daisyUI 5) and committed
+		// alongside its source. The size is ~60 KB vs
+		// Bulma's 678 KB; the static test pins a 250 KB
+		// ceiling as a regression guard.
 		contentType: "text/css; charset=utf-8",
 	},
 	"htmx.min.js": {

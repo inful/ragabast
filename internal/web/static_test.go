@@ -12,26 +12,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestStaticHandler_ServesBulmaCSS pins the contract that GET
-// /static/bulma.min.css returns the Bulma CSS that ships with
-// the binary (embedded via go:embed), not a third-party CDN
-// URL. The CSS is what styles the chat, search, ingest, and
-// documents pages; if the embedded copy is missing or the
-// Content-Type is wrong, the browser refuses to apply the
-// stylesheet and the UI renders unstyled.
+// TestStaticHandler_DropsBulmaCSS pins the Phase 3 contract:
+// GET /static/bulma.min.css returns 404, not 200. The
+// migration to daisyUI is complete; the embedded Bulma
+// file is removed in the same commit that flips this test
+// from "expect 200 with bulma.io v1.0.4 stamp" to "expect
+// 404". See plans/daisyui-migration.md.
 //
-// Why we ship our own copy: the historical templates linked
-// to https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css,
-// which (a) requires the operator's browser to reach a CDN on
-// first page load, (b) forces the CSP to whitelist that
-// origin, and (c) trusts the CDN to keep serving the same
-// bytes. Embedding the file removes all three concerns.
-//
-// We pinned to Bulma 0.9.4 for years; the upgrade to 1.0.4
-// keeps the same MIT-licensed embed contract but adds the
-// v1-era CSS-variable system and the `prefers-color-scheme:dark`
-// automatic dark theme.
-func TestStaticHandler_ServesBulmaCSS(t *testing.T) {
+// Anti-regression guard: a future contributor who
+// re-introduces the bulma.min.css <link> in a template
+// (perhaps because the page is unstyled) will see the
+// 404 in the browser dev tools. The right fix is to use
+// daisyUI classes, not to re-add Bulma.
+func TestStaticHandler_DropsBulmaCSS(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
 
@@ -39,37 +32,22 @@ func TestStaticHandler_ServesBulmaCSS(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code,
-		"the embedded bulma.min.css must be served by the static handler")
-
-	ct := w.Header().Get("Content-Type")
-	require.True(t, strings.HasPrefix(ct, "text/css"),
-		"bulma.min.css Content-Type must start with text/css (got %q)", ct)
-
-	body := w.Body.Bytes()
-	require.NotEmpty(t, body, "bulma.min.css body must not be empty")
-	// Bulma stamps a license header at the top of the
-	// minified bundle. A missing or wrong-version payload
-	// would fail this sanity check, surfacing the regression
-	// immediately. The version stamp changed in 1.0
-	// (`bulma.io v0.9.4` → `bulma.io v1.0.4`) — keep this
-	// aligned with the embedded file.
-	require.Contains(t, string(body), "bulma.io v1.0.4",
-		"served CSS must be the actual Bulma library (missing version stamp)")
+	require.Equal(t, http.StatusNotFound, w.Code,
+		"GET /static/bulma.min.css must return 404 in Phase 3 — Bulma is removed; daisyUI is the only embedded CSS framework")
 }
 
 // TestStaticHandler_ServesDaisyUICSS pins the contract that
 // GET /static/daisyui.min.css returns the DaisyUI CSS that
 // ships with the binary (embedded via go:embed), not a
-// third-party CDN URL. Phase 1 of the Bulma -> DaisyUI
-// migration; both files ship side-by-side until Phase 3
-// drops Bulma. See plans/daisyui-migration.md.
+// third-party CDN URL. Phase 3 of the Bulma -> DaisyUI
+// migration (see plans/daisyui-migration.md) drops the
+// Bulma half of the side-by-side; daisyui.min.css is now
+// the only embedded CSS framework.
 //
 // The file is what styles the chat, search, and documents
-// pages once Phase 2 swaps the class names; if the embedded
-// copy is missing or the Content-Type is wrong, the browser
-// refuses to apply the stylesheet and the UI renders
-// unstyled.
+// pages; if the embedded copy is missing or the
+// Content-Type is wrong, the browser refuses to apply
+// the stylesheet and the UI renders unstyled.
 //
 // The size assertion guards against a Tailwind config
 // regression that re-includes all utilities and blows the
@@ -245,7 +223,7 @@ func TestStaticHandler_SetsCacheControl(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/bulma.min.css", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/daisyui.min.css", nil)
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 
@@ -278,7 +256,7 @@ func TestStaticHandler_ETagHonoredOnIfNoneMatch(t *testing.T) {
 	s := NewServer(cfg, &fakeService{})
 
 	// First request: capture the ETag header.
-	first := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/bulma.min.css", nil)
+	first := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/daisyui.min.css", nil)
 	w1 := httptest.NewRecorder()
 	s.router.ServeHTTP(w1, first)
 	require.Equal(t, http.StatusOK, w1.Code)
@@ -288,7 +266,7 @@ func TestStaticHandler_ETagHonoredOnIfNoneMatch(t *testing.T) {
 
 	// Second request with If-None-Match: should return 304
 	// with no body.
-	second := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/bulma.min.css", nil)
+	second := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/daisyui.min.css", nil)
 	second.Header.Set("If-None-Match", etag)
 	w2 := httptest.NewRecorder()
 	s.router.ServeHTTP(w2, second)
@@ -314,21 +292,22 @@ func TestStaticHandler_StaticAssetsInBinaryVerify(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/bulma.min.css", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/daisyui.min.css", nil)
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	// Bulma 1.0.4 selectors we know exist in the build. Each
-	// is unique enough that a truncated or wrong-version file
-	// will fail the assertion. Together they form a fingerprint
-	// that survives minification (which only strips whitespace
-	// and renames local identifiers).
-	for _, selector := range []string{".button", ".input", ".navbar"} {
+	// DaisyUI 5 / Tailwind 4 selectors we know exist in
+	// the build. Each is unique enough that a truncated
+	// or wrong-version file will fail the assertion.
+	// Together they form a fingerprint that survives
+	// minification (which only strips whitespace and
+	// renames local identifiers).
+	for _, selector := range []string{".btn", ".input", ".navbar"} {
 		require.Contains(t, body, selector,
-			"served CSS must contain the %s selector (Bulma 1.0.4)", selector)
+			"served CSS must contain the %s selector (daisyUI 5 / Tailwind 4)", selector)
 	}
 }
 
@@ -344,7 +323,7 @@ func TestStaticHandler_NoCDNURLsLeak(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
 
-	for _, asset := range []string{"/static/bulma.min.css", "/static/htmx.min.js"} {
+	for _, asset := range []string{"/static/daisyui.min.css", "/static/htmx.min.js"} {
 		t.Run(path.Base(asset), func(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, asset, nil)
 			w := httptest.NewRecorder()
@@ -365,12 +344,11 @@ func TestStaticHandler_NoCDNURLsLeak(t *testing.T) {
 
 // TestStaticHandler_TemplatesReferenceBundledAssets pins the
 // rendering contract: every HTML page the server emits MUST
-// load Bulma from /static/bulma.min.css and htmx from
+// load daisyUI from /static/daisyui.min.css and htmx from
 // /static/htmx.min.js — never from a CDN. The pages that
 // matter are the chat landing page (rendered through the
 // fallback because chat.html is not in the embedded template
-// set), the search page, the ingest page, the ingest-success
-// page, and the documents page.
+// set), the search page, and the documents page.
 //
 // Both the embedded-template path and the fallback-renderer
 // path are covered here because they live in different files
@@ -411,8 +389,8 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 
 			// The embedded template MUST reference /static/, not
 			// the old CDN URL.
-			require.Contains(t, body, `href="/static/bulma.min.css`,
-				"%s must load Bulma from the embedded /static/bulma.min.css", p.path)
+			require.Contains(t, body, `href="/static/daisyui.min.css`,
+				"%s must load daisyUI from the embedded /static/daisyui.min.css", p.path)
 			require.NotContains(t, body, "cdn.jsdelivr.net",
 				"%s must not reference cdn.jsdelivr.net", p.path)
 
@@ -442,8 +420,8 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
 
-		require.Contains(t, body, `href="/static/bulma.min.css`,
-			"chat fallback must load Bulma from /static/bulma.min.css")
+		require.Contains(t, body, `href="/static/daisyui.min.css`,
+			"chat fallback must load daisyUI from /static/daisyui.min.css")
 		require.Contains(t, body, `src="/static/htmx.min.js`,
 			"chat fallback must load htmx from /static/htmx.min.js")
 		require.NotContains(t, body, "cdn.jsdelivr.net",
@@ -462,8 +440,8 @@ func TestStaticHandler_TemplatesReferenceBundledAssets(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
 
-		require.Contains(t, body, `href="/static/bulma.min.css`,
-			"documents fallback must load Bulma from /static/bulma.min.css")
+		require.Contains(t, body, `href="/static/daisyui.min.css`,
+			"documents fallback must load daisyUI from /static/daisyui.min.css")
 		require.NotContains(t, body, "cdn.jsdelivr.net",
 			"documents fallback must not reference cdn.jsdelivr.net")
 	})
@@ -809,7 +787,6 @@ func TestLoginTemplate_UsesTailwindUtilities(t *testing.T) {
 // asset gets a compile-time reminder to register it.
 func TestStaticAssets_AllowListIsExact(t *testing.T) {
 	expected := []string{
-		"bulma.min.css",
 		"chat.css",
 		"chat.js",
 		"daisyui.min.css",

@@ -190,9 +190,9 @@ func parseFallback(name, body string, funcs template.FuncMap) *template.Template
 // (/api/ingest, /api/ingest/raw, /api/ingest/file) so the
 // link was no longer pointing at a resource.
 //
-// Bulma navbar markup keeps the visual language consistent
+// daisyUI navbar markup keeps the visual language consistent
 // with the rest of the page chrome (chat-message, search,
-// search-results partials all use bulma classes too).
+// search-results partials all use daisyUI classes too).
 //
 // Phase 2f of the Bulma -> DaisyUI migration: the navbar
 // pattern moves from Bulma's navbar-brand / navbar-menu /
@@ -281,7 +281,6 @@ const chatFallbackBody = `<!DOCTYPE html>
 <head>
 	<title>{{ .Title }}</title>
 	<meta name="htmx-config" content='{"allowEval":false}'>
-	<link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
 	<link rel="stylesheet" href="{{ asset "daisyui.min.css" }}">
 	<link rel="stylesheet" href="{{ asset "chat.css" }}">
 	<script src="{{ asset "htmx.min.js" }}" defer></script>
@@ -354,7 +353,6 @@ const documentsFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
     <title>{{ .Title }}</title>
-    <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
     <link rel="stylesheet" href="{{ asset "daisyui.min.css" }}">
     <link rel="stylesheet" href="{{ asset "chat.css" }}">
     <script src="{{ asset "htmx.min.js" }}" defer></script>
