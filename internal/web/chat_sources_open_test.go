@@ -100,8 +100,8 @@ func TestHandleChatMessage_SourcesPanelInsideAssistantReply(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	assistantBoxOpen := strings.Index(body, `<div class="box">`)
-	require.GreaterOrEqual(t, assistantBoxOpen, 0, "assistant box must be present")
+	assistantBoxOpen := strings.Index(body, `<div class="card">`)
+	require.GreaterOrEqual(t, assistantBoxOpen, 0, "assistant box must be present (Phase 2g: was `<div class=\"box\">` under Bulma, now `<div class=\"card\">` under daisyUI)")
 
 	assistantContentIdx := strings.Index(body, "Assistant")
 	require.Greater(t, assistantContentIdx, assistantBoxOpen,

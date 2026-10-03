@@ -108,6 +108,57 @@ func TestDarkMode_AssistantReplyBoxNoLightBackground(t *testing.T) {
 		"the assistant reply box must not carry has-background-light - it stays white in dark mode (v0.11.4 follow-on)")
 }
 
+// TestChatMessageFragment_UsesDaisyUIComponents pins the
+// post-migration shape of the chat message fragment
+// (Phase 2g of the Bulma -> DaisyUI migration; see
+// plans/daisyui-migration.md). The fragment is rendered
+// as the htmx response body for POST /chat/message and
+// swapped into #chat-messages on the chat landing page.
+// The parent page already loads daisyui.min.css
+// (Phase 2f), so the fragment inherits the daisyUI
+// stylesheet and doesn't need its own <link>.
+//
+// The Bulma 'box' surfaces (user message, assistant
+// reply) become daisyUI 'card'. Bulma's 'content'
+// typography reset (which set margins on h1/h2/p/ul/ol
+// inside the reply) becomes daisyUI's 'prose'. The
+// 'has-text-weight-semibold' on the You/Assistant
+// headings becomes 'font-semibold'.
+func TestChatMessageFragment_UsesDaisyUIComponents(t *testing.T) {
+	cfg := config.DefaultConfig()
+	svc := &fakeService{
+		queryAnswer: "Here is what I found.",
+	}
+	s := NewServer(cfg, svc)
+
+	form := "message=what+does+adr-001+say"
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/chat/message", strings.NewReader(form))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	// The user/assistant message boxes use daisyUI's
+	// `card` (was Bulma's `box`).
+	require.Regexp(t, `<div[^>]*\bclass="[^"]*\bcard\b`, body,
+		"the chat-message fragment must use daisyUI's `card` class for the user/assistant message surfaces")
+
+	// The chat-turn wrapper uses daisyUI's `prose` for
+	// typography (was Bulma's `content`).
+	require.Regexp(t, `\bclass="prose chat-turn"`, body,
+		"the chat-turn wrapper must use daisyUI's `prose` class for typography")
+
+	// Anti-regression: no Bulma class names remain on
+	// the fragment.
+	require.NotRegexp(t, `class="box"`, body,
+		"the chat-message fragment must not use Bulma's `box` (daisyUI's `card` is the equivalent)")
+	require.NotRegexp(t, `class="content chat-turn"`, body,
+		"the chat-turn wrapper must not use Bulma's `content` class (daisyUI's `prose` is the equivalent)")
+}
+
 // TestDarkMode_TurnDividerUsesAdaptiveVariable pins the
 // chat turn divider to use a daisyUI CSS variable rather than
 // a hardcoded grey. chat.css used to declare

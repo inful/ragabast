@@ -28,6 +28,16 @@
     extension) → document_id. Using the helper keeps the
     fallback chain in sync with the inline-link text in
     service.InlineSourceLinks.
+
+    Phase 2g of the Bulma -> DaisyUI migration: the
+    user/assistant message boxes move from Bulma's `box`
+    to daisyUI's `card`; the chat-turn typography wrapper
+    moves from Bulma's `content` to daisyUI's `prose`; the
+    You/Assistant heading weight moves from
+    `has-text-weight-semibold` to `font-semibold`. The
+    fragment does NOT carry its own <link> tag — daisyUI
+    styling is inherited from the parent /chat landing
+    page, which loads daisyui.min.css in Phase 2f.
 -->
 
 <div hx-swap-oob="delete" id="chat-messages-placeholder"></div>
@@ -43,34 +53,38 @@
     #chat-messages container (in fallback_renderers.go)
     handles screen-reader announcements.
 -->
-<div class="content chat-turn">
-    <div class="box">
-        <p class="has-text-weight-semibold">You</p>
-        <pre class="chat-msg">{{ .User }}</pre>
+<div class="prose chat-turn">
+    <div class="card">
+        <div class="card-body">
+            <p class="font-semibold">You</p>
+            <pre class="chat-msg">{{ .User }}</pre>
+        </div>
     </div>
-    <div class="box">
-        <p class="has-text-weight-semibold">Assistant</p>
-        <div class="chat-msg content">{{ .AnswerHTML }}</div>
-        {{ if .Sources }}
-        {{ range .SourcesByKind }}
-        <details class="mt-2" open>
-            <summary>{{ .Kind.DisplayName }} ({{ len .Sources }})</summary>
-            <ol class="mt-2">
-                {{ range .Sources }}
-                <li>
-                    {{ .DisplayLabel }}
-                    ({{ if .CitationURL }}
-                        <a href="{{ .CitationURL }}" target="_blank" rel="noopener">direct link</a>
-                    {{ else }}
-                        <code>{{ .DocumentID }}</code>
-                    {{ end }})
-                    — similarity {{ printf "%.2f" .Similarity }}
-                </li>
-                {{ end }}
-            </ol>
-        </details>
-        {{ end }}
-        {{ end }}
+    <div class="card">
+        <div class="card-body">
+            <p class="font-semibold">Assistant</p>
+            <div class="chat-msg prose">{{ .AnswerHTML }}</div>
+            {{ if .Sources }}
+            {{ range .SourcesByKind }}
+            <details class="mt-2" open>
+                <summary>{{ .Kind.DisplayName }} ({{ len .Sources }})</summary>
+                <ol class="mt-2">
+                    {{ range .Sources }}
+                    <li>
+                        {{ .DisplayLabel }}
+                        ({{ if .CitationURL }}
+                            <a href="{{ .CitationURL }}" target="_blank" rel="noopener">direct link</a>
+                        {{ else }}
+                            <code>{{ .DocumentID }}</code>
+                        {{ end }})
+                        — similarity {{ printf "%.2f" .Similarity }}
+                    </li>
+                    {{ end }}
+                </ol>
+            </details>
+            {{ end }}
+            {{ end }}
+        </div>
     </div>
 </div>
 <hr class="chat-turn-divider">
