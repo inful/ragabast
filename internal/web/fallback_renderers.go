@@ -349,15 +349,16 @@ const documentsFallbackBody = `<!DOCTYPE html>
 <head>
     <title>{{ .Title }}</title>
     <link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
+    <link rel="stylesheet" href="{{ asset "daisyui.min.css" }}">
     <link rel="stylesheet" href="{{ asset "chat.css" }}">
     <script src="{{ asset "htmx.min.js" }}" defer></script>
     <script src="{{ asset "chat.js" }}" defer></script>
 </head>
-<body class="container mt-4">
+<body class="container mx-auto mt-4">
     {{ template "header" .Header }}
-    <h1 class="title">Ingested Documents</h1>
+    <h1 class="text-2xl font-semibold">Ingested Documents</h1>
     {{ if .Documents }}
-    <table class="table is-fullwidth is-striped">
+    <table class="table table-zebra w-full">
         <thead><tr><th scope="col">Title</th><th scope="col">ID</th><th scope="col">Tags</th><th scope="col">Category</th><th scope="col">Chunks</th><th scope="col">Ingested</th><th scope="col"></th></tr></thead>
         <tbody>
         {{ range .Documents }}
@@ -366,25 +367,25 @@ const documentsFallbackBody = `<!DOCTYPE html>
                 <td><code>{{ .ID }}</code></td>
                 <td>
                     {{- range .Tags }}
-                    <span class="tag is-info">{{ . }}</span>
+                    <span class="badge badge-info">{{ . }}</span>
                     {{- end }}
                 </td>
                 <td>{{ .Category }}</td>
                 <td>{{ .Chunks }}</td>
                 <td>
                     {{- if .IngestedAt.IsZero }}
-                    <span class="has-text-grey">unknown</span>
+                    <span class="text-base-content/60">unknown</span>
                     {{- else }}
                     <time datetime="{{ .IngestedAt.Format "2006-01-02T15:04:05Z07:00" }}">{{ .IngestedAt.Format "2006-01-02 15:04 UTC" }}</time>
                     {{- end }}
                 </td>
                 <td>
-                    <form method="post" action="/documents/{{ .ID }}/delete" style="display:inline">
+                    <form method="post" action="/documents/{{ .ID }}/delete" class="inline-flex items-center gap-2">
                         <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
-                        <label class="checkbox is-small">
-                            <input type="checkbox" name="confirm" value="1" required> confirm
+                        <label class="flex items-center gap-1 text-sm">
+                            <input type="checkbox" name="confirm" value="1" required class="checkbox checkbox-sm"> confirm
                         </label>
-                        <button class="button is-small is-danger" type="submit">Delete</button>
+                        <button class="btn btn-sm btn-error" type="submit">Delete</button>
                     </form>
                 </td>
             </tr>
@@ -392,20 +393,20 @@ const documentsFallbackBody = `<!DOCTYPE html>
         </tbody>
     </table>
     {{ else }}
-    <div class="notification">
+    <div class="alert">
         No documents ingested yet. Submit one through <code>POST /api/ingest</code> to add some.
     </div>
     {{ end }}
 
     {{ if .Total }}
-    <p class="has-text-grey mt-4">
+    <p class="text-base-content/60 mt-4">
         Showing {{ .StartShowing }}–{{ .EndShowing }} of {{ .Total }}
         (page size {{ .Limit }}).
         {{ if gt .PrevOffset -1 }}
-        <a class="button is-small ml-2" href="/documents?limit={{ .Limit }}&offset={{ .PrevOffset }}">Previous</a>
+        <a class="btn btn-sm ml-2" href="/documents?limit={{ .Limit }}&offset={{ .PrevOffset }}">Previous</a>
         {{ end }}
         {{ if gt .NextOffset -1 }}
-        <a class="button is-small ml-2" href="/documents?limit={{ .Limit }}&offset={{ .NextOffset }}">Next</a>
+        <a class="btn btn-sm ml-2" href="/documents?limit={{ .Limit }}&offset={{ .NextOffset }}">Next</a>
         {{ end }}
     </p>
     {{ end }}
