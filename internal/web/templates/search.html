@@ -102,5 +102,15 @@
         bar in sync so browser back navigates between searches.
     -->
     <div id="search-results"></div>
+
+    <!--
+        Toast container. Phase 1.1 of plans/ux-overhaul.md:
+        chat.js's showToast() helper injects daisyUI alert
+        children into this element on demand. Markup is
+        identical across every full page; see
+        chatFallbackBody for the rationale on the placement
+        modifier and z-index.
+    -->
+    <div id="toast-container" class="toast toast-top toast-end z-50" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>

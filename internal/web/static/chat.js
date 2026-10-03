@@ -31,6 +31,77 @@
 (function () {
   'use strict';
 
+  // ----------------------------------------------------------------
+  // Toast notification helper (Phase 1.1 of plans/ux-overhaul.md).
+  // ----------------------------------------------------------------
+  // showToast(message, type, ttlMs) appends a daisyUI alert
+  // into the page's #toast-container. The container is
+  // rendered empty by every full page; this helper is the
+  // only consumer. Toasts auto-dismiss after ttlMs (default
+  // 4000ms; matches daisyUI's docs and every other product
+  // a new operator has used).
+  //
+  // type is one of 'success', 'error', 'warning', 'info' —
+  // the daisyUI alert-{type} variants. Invalid types fall
+  // back to 'info' rather than throwing, so a forgotten
+  // enum value renders a quiet informational toast instead
+  // of breaking the form.
+  //
+  // The helper is exposed on window so per-page handlers
+  // (Phase 4 documents delete, Phase 5 login error, etc.)
+  // can call it without needing their own wiring.
+  function showToast(message, type, ttlMs) {
+    var container = document.getElementById('toast-container');
+    if (!container) {
+      // The page forgot to render the container (login
+      // page in Phase 5, before its wire-up lands).
+      // Fail quiet rather than throw — the user's
+      // primary action is what matters; a missing toast
+      // is a degraded UX, not a broken page.
+      return;
+    }
+
+    // Defensive default: the daisyUI docs use 4000ms;
+    // any product a new operator has used (GitHub,
+    // GitLab, Linear, Slack) uses the same. A TTL of
+    // 0 would render the toast for one frame and
+    // dismiss it, which is the bug we're avoiding.
+    var DEFAULT_TTL_MS = 4000;
+    var ttl = typeof ttlMs === 'number' && ttlMs > 0 ? ttlMs : DEFAULT_TTL_MS;
+
+    // Whitelist the type so an attacker who controls
+    // the input (a future server-rendered error
+    // message) can't smuggle in arbitrary class names.
+    var ALLOWED = ['success', 'error', 'warning', 'info'];
+    var safeType = ALLOWED.indexOf(type) === -1 ? 'info' : type;
+
+    var alert = document.createElement('div');
+    alert.className = 'alert alert-' + safeType;
+    alert.setAttribute('role', 'status');
+    // textContent (not innerHTML) so the message is
+    // escaped — defense against the same XSS that the
+    // html/template auto-escape buys us on the server.
+    alert.textContent = String(message);
+    container.appendChild(alert);
+
+    setTimeout(function () {
+      // Remove the node after the TTL. If the user
+      // dismissed it manually (Phase 6 wires a
+      // close button on the alert), the parent may
+      // already not contain the node — that's a
+      // no-op rather than an error.
+      if (alert.parentNode) {
+        alert.parentNode.removeChild(alert);
+      }
+    }, ttl);
+  }
+
+  // Expose showToast on window for the per-page callers.
+  // The window.* prefix makes it clear in DevTools and
+  // matches the same pattern as the openModal/closeModal
+  // helpers added in Phase 1.2.
+  window.showToast = showToast;
+
   function ready(fn) {
     // defer puts the script execution after the HTML is
     // parsed, so document.getElementById is enough — no

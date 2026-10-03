@@ -334,6 +334,24 @@ const chatFallbackBody = `<!DOCTYPE html>
 			</div>
 		</div>
 	</form>
+
+	<!--
+		Toast container. Phase 1.1 of plans/ux-overhaul.md:
+		chat.js's showToast() helper injects daisyUI alert
+		children into this element on demand (e.g. a
+		send-error toast). The container is rendered empty
+		and pinned to the top-right of the viewport via
+		toast-top toast-end; the daisyUI "toast" class
+		itself sets position: fixed so the stack does
+		not scroll with the page. z-50 layers the toasts
+		above the navbar (z-10) and any modal that opens
+		later (modals are usually z-100 in daisyUI; if a
+		future phase introduces a modal with custom
+		stacking, raise this z-index). The container is
+		the last child of <body> by convention so the
+		visually-fixed stack sits over everything else.
+	-->
+	<div id="toast-container" class="toast toast-top toast-end z-50" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>`
 
@@ -414,6 +432,15 @@ const documentsFallbackBody = `<!DOCTYPE html>
         {{ end }}
     </p>
     {{ end }}
+
+    <!--
+        Toast container. Phase 1.1 of plans/ux-overhaul.md:
+        surfaces success / error feedback for the per-row
+        delete form. See chatFallbackBody for the rationale
+        on the placement modifier + z-index; the markup is
+        identical across every full page.
+    -->
+    <div id="toast-container" class="toast toast-top toast-end z-50" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>`
 
