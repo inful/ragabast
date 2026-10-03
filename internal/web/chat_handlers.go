@@ -37,22 +37,6 @@ func chatTopK(r *http.Request) int {
 	return v
 }
 
-// parseSourceKindsForm reads the chat form's optional
-// `source_kinds` field (a comma-separated list of kinds) and
-// returns the recognized entries. Empty input or input that
-// contains no recognized kinds returns nil, which the caller
-// interprets as "no filter / all sources".
-//
-// Why drop unknown kinds rather than error: a future SourceKind
-// (e.g. "redmine") arriving via the form before this handler
-// knows about it would otherwise 400 the chat. Silently dropping
-// keeps the chat endpoint available and means the worst case for
-// a new kind is "operator doesn't get the new kind in the filter
-// until we ship code" — a one-deploy delay, not an outage.
-//
-// The wire values are the SourceKind constants verbatim
-// ("docbuilder", "gitlab"); matching is case-sensitive to keep
-// the contract simple.
 // parseSourceKindsForm reads the chat form's source-kind
 // selection and returns the recognized entries. Handles both
 // the multi-checkbox form (each kind as a separate form value)
