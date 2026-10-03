@@ -216,7 +216,7 @@ func parseFallback(name, body string, funcs template.FuncMap) *template.Template
 // single-user open-access install (AuthEnabled=false).
 const pageHeaderFallbackBody = `
 {{ define "header" -}}
-<nav class="navbar bg-base-100 shadow-sm" role="navigation" aria-label="main navigation">
+<nav class="navbar bg-base-100 shadow-sm sticky top-0 z-10" role="navigation" aria-label="main navigation">
   <div class="navbar-start">
     <a class="btn btn-ghost text-xl" href="/">ragabast</a>
   </div>
@@ -286,7 +286,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<script src="{{ asset "htmx.min.js" }}" defer></script>
 	<script src="{{ asset "chat.js" }}" defer></script>
 </head>
-<body class="container mx-auto mt-4">
+<body class="container mx-auto mt-4 pt-16">
 	{{ template "header" .Header }}
 	<h1 class="text-2xl font-semibold">Chat</h1>
 	<p class="text-base text-base-content/70 mb-4">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
