@@ -295,6 +295,31 @@ const chatFallbackBody = `<!DOCTYPE html>
 		<div class="card-body">
 			<div class="prose" id="chat-messages-placeholder">
 				<p class="text-base-content/60">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
+				<!--
+					Skeleton placeholders. Phase 1.3 of
+					plans/ux-overhaul.md: the daisyUI
+					skeleton class is established here
+					as the canonical loading-state
+					placeholder. Two narrow bars under
+					the orienting copy suggest "the log
+					will fill with content" without
+					showing data that isn't there. The
+					aria-hidden attribute keeps them
+					out of the screen-reader tree; the
+					orienting <p> above already conveys
+					the page's purpose, and the
+					announcing text on aria-live=polite
+					on #chat-messages would otherwise
+					narrate the visual shimmer.
+					Phase 4 wires the actual loading
+					flow (hide these when the chat
+					starts; show a richer skeleton when
+					a request is in flight).
+				-->
+				<div class="space-y-2 mt-4" aria-hidden="true">
+					<div class="skeleton h-4 w-3/4"></div>
+					<div class="skeleton h-4 w-1/2"></div>
+				</div>
 			</div>
 		</div>
 		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
