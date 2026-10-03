@@ -109,18 +109,26 @@ func TestDarkMode_AssistantReplyBoxNoLightBackground(t *testing.T) {
 }
 
 // TestDarkMode_TurnDividerUsesAdaptiveVariable pins the
-// chat turn divider to use a Bulma CSS variable rather than
+// chat turn divider to use a daisyUI CSS variable rather than
 // a hardcoded grey. chat.css used to declare
 // `border-top: 1px solid hsl(0 0% 86%)`, which is fine in
 // light mode but reads as a glaring light line on the dark
-// page in dark mode. `var(--bulma-border-weak)` tracks the
-// scheme: 86% in light mode, ~21% in dark mode.
+// page in dark mode. `var(--color-base-300)` is daisyUI's
+// theme-aware "subtle border" token (the equivalent of the
+// pre-migration `var(--bulma-border-weak)`); the OS-driven
+// `prefers-color-scheme: dark` flip re-themes the value
+// alongside the rest of the daisyUI palette.
+//
+// Phase 2b of the Bulma -> DaisyUI migration swapped the
+// variable; see plans/daisyui-migration.md. The test name
+// stays the same so any external references (CI badges,
+// code-search hits) continue to resolve.
 func TestDarkMode_TurnDividerUsesAdaptiveVariable(t *testing.T) {
 	css := readStaticAsset(t, "/static/chat.css")
 	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
 
-	assert.Regexp(t, `\.chat-turn-divider\s*\{[^}]*border-top:\s*1px solid var\(--bulma-border-weak\)`, css,
-		".chat-turn-divider must use var(--bulma-border-weak) so the divider color adapts to prefers-color-scheme")
+	assert.Regexp(t, `\.chat-turn-divider\s*\{[^}]*border-top:\s*1px solid var\(--color-base-300\)`, css,
+		".chat-turn-divider must use var(--color-base-300) so the divider color adapts to prefers-color-scheme")
 	assert.NotRegexp(t, `\.chat-turn-divider\s*\{[^}]*hsl\(0\s+0%\s+86%\)`, css,
 		".chat-turn-divider must not hardcode a light-mode grey - that color is glaring in dark mode (v0.11.4 follow-on)")
 }

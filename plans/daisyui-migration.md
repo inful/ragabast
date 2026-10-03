@@ -72,9 +72,20 @@ After migration:
   project pulls them via npm at build time and ships the
   compiled output under the same MIT terms. `THIRD_PARTY_LICENSES.md`
   is updated to add Tailwind CSS and DaisyUI entries.
-- **No visual redesign.** The migration is a 1:1 class swap;
-  spacing, color, and component choices match today. Any visual
-  redesign is a follow-up.
+- **No arbitrary visual regression, but daisyUI-idiomatic
+  improvements are encouraged.** A 1:1 visual match is NOT
+  the goal. Where daisyUI has a more idiomatic pattern (e.g.
+  a `card` instead of a flat `box` for result surfaces; a
+  `fieldset` instead of Bulma's `field/control` wrapper
+  soup; daisyUI's default dark theme instead of a
+  hardcoded GitHub-style palette on the login page), use
+  the daisyUI pattern. The visual may shift slightly as a
+  result, and that is expected. What is NOT acceptable: a
+  visual change that isn't justified by daisyUI
+  affordances — e.g. a random color change, a regression
+  in spacing, a component that no longer matches the page
+  intent. The visual verification checklist below catches
+  the latter; the former is by design.
 
 ## Architecture decision: pre-compiled CSS, committed, CI-checked
 
@@ -668,8 +679,14 @@ The migration is complete when:
    verification — a contributor would do this once to
    confirm the check actually fires).
 8. The visual verification checklist above is complete;
-   every page renders identically in light and dark mode
-   to the pre-migration screenshots.
+   every page renders sensibly in light and dark mode. The
+   visual may shift slightly from the pre-migration
+   screenshots where daisyUI's idiomatic patterns
+   supersede the Bulma-era design (e.g. daisyUI's default
+   card has a header/body split; daisyUI's navbar has a
+   different visual weight). The check is for
+   "functionally correct and not regressed" — not "byte-
+   identical to the Bulma-era screenshots".
 9. `THIRD_PARTY_LICENSES.md` lists Tailwind CSS and DaisyUI
    with the correct license / source links; no Bulma entry.
 10. `Dockerfile` and `.goreleaser.yml` are unchanged
