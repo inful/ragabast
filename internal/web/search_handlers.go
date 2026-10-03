@@ -79,6 +79,14 @@ func (s *Server) handleSearchPage(w http.ResponseWriter, r *http.Request) {
 		"SelectedKinds": []string(nil),
 		"CsrfToken":     CsrfTokenFromContext(r.Context()),
 		"Header":        s.pageHeaderFromContext(r),
+		// Phase 3.4 of plans/ux-overhaul.md: the result
+		// count field is a <select> rather than an
+		// <input type="number">. We pin the default
+		// value here (5) so the first-render select
+		// shows "5" as selected. A subsequent
+		// submit-redirect cycle can carry a previous
+		// value via this field.
+		"TopK": 5,
 	})
 }
 
