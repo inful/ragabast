@@ -102,6 +102,78 @@
   // helpers added in Phase 1.2.
   window.showToast = showToast;
 
+  // ----------------------------------------------------------------
+  // Modal helpers (Phase 1.2 of plans/ux-overhaul.md).
+  // ----------------------------------------------------------------
+  // openModal(id) and closeModal(id) wrap the native
+  // <dialog>.showModal() / <dialog>.close() browser APIs
+  // so per-page flows (Phase 4 documents delete
+  // confirmation, future flows) can open a daisyUI modal
+  // with a one-liner rather than re-implementing the
+  // lookup + showModal / close calls in every consumer.
+  //
+  // Pattern:
+  //
+  //   <button data-modal-open="confirm-delete-{{.ID}}">Delete</button>
+  //   <dialog id="confirm-delete-{{.ID}}" class="modal">
+  //     <div class="modal-box">…</div>
+  //   </dialog>
+  //
+  //   // in chat.js (this file)
+  //   document.addEventListener('click', function (e) {
+  //     var trigger = e.target.closest('[data-modal-open]');
+  //     if (trigger) {
+  //       openModal(trigger.getAttribute('data-modal-open'));
+  //     }
+  //   });
+  //
+  // The <dialog> element is the recommended daisyUI modal
+  // pattern (SKILL.md) over the popover API for two
+  // reasons: (a) the browser handles focus management and
+  // ESC-to-close for free, and (b) the daisyUI
+  // .modal-box / .modal-action / .modal-backdrop
+  // classes are all designed around the <dialog>
+  // element. Phase 4 (documents delete) is the first
+  // real consumer.
+  function openModal(id) {
+    var dlg = document.getElementById(id);
+    if (!dlg) {
+      // Fail quiet rather than throw — a missing
+      // modal is a developer error, but the user's
+      // primary action (the click) already fired
+      // and the page should not break.
+      return;
+    }
+    // showModal() opens the dialog as a modal —
+    // backdrop, focus trap, ESC-to-close. The daisyUI
+    // CSS keyframes fade the modal-box in on open.
+    if (typeof dlg.showModal === 'function') {
+      dlg.showModal();
+    }
+  }
+
+  function closeModal(id) {
+    var dlg = document.getElementById(id);
+    if (!dlg) {
+      return;
+    }
+    // close() dismisses the dialog and fires a
+    // 'close' event. The form inside the modal
+    // can also dismiss itself by submitting with
+    // formmethod="dialog" — that path goes
+    // through the browser's built-in dialog
+    // close logic without needing this helper.
+    if (typeof dlg.close === 'function') {
+      dlg.close();
+    }
+  }
+
+  // Expose on window so per-page event handlers
+  // (Phase 4, Phase 5) can call them without
+  // their own module pattern.
+  window.openModal = openModal;
+  window.closeModal = closeModal;
+
   function ready(fn) {
     // defer puts the script execution after the HTML is
     // parsed, so document.getElementById is enough — no
