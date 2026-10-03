@@ -68,14 +68,15 @@ pre.chat-msg {
  * request tagged with hx-indicator is in flight. The
  * .htmx-request class is added/removed by htmx automatically.
  *
- * Issue #92: the indicator is what tells the user the LLM is
- * generating, which (a) gives explicit feedback that the click
- * registered and (b) prevents the user from submitting a second
- * message while the first is in flight (htmx's
- * hx-disabled-elt blocks the input + button, but a small visual
- * affordance reinforces the disabled state). Styled as a
- * prominent spinner + label rather than a small is-light tag so
- * the affordance reads at a glance. */
+ * Phase 2.3 of plans/ux-overhaul.md: the in-flight
+ * affordance is daisyUI's visual-only loading component
+ * (rendered in fallback_renderers.go's chat form). The
+ * component ships its own animation in the embedded
+ * daisyui.min.css, so chat.css no longer defines a
+ * custom keyframe rule — the daisyUI component is the
+ * single source of truth for the visual. The visibility
+ * cascade below is unchanged: hidden by default,
+ * revealed when htmx adds .htmx-request. */
 .htmx-indicator {
   display: none;
 }
@@ -83,24 +84,6 @@ pre.chat-msg {
 .htmx-request.htmx-indicator {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  color: #4a4a4a;
-  font-style: italic;
-}
-
-.htmx-request.htmx-indicator::before {
-  content: "";
-  display: inline-block;
-  width: 1rem;
-  height: 1rem;
-  border: 2px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  animation: chat-indicator-spin 0.8s linear infinite;
-}
-
-@keyframes chat-indicator-spin {
-  to { transform: rotate(360deg); }
 }
 
 /* Jump-to-latest button (issue #88): pinned to the

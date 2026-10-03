@@ -234,9 +234,6 @@ const pageHeaderFallbackBody = `
   mark follows the link's text color in both themes
   via fill="currentColor". The path is a simple
   speech-bubble shape (ragabast is a chat product).
-  A future redesign of the mark is fine; the
-  contract is "the brand bar has an SVG mark next to
-  the text".
 -->
 <nav class="navbar bg-base-100 shadow-sm sticky top-0 z-10" role="navigation" aria-label="main navigation">
   <div class="navbar-start">
@@ -313,43 +310,40 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<script src="{{ asset "htmx.min.js" }}" defer></script>
 	<script src="{{ asset "chat.js" }}" defer></script>
 </head>
-<body class="container mx-auto mt-4">
+<body class="container mx-auto mt-4 pt-16">
 	{{ template "header" .Header }}
 	<h1 class="text-2xl font-semibold">Chat</h1>
 	<p class="text-base text-base-content/70 mb-4">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
 
 	<div id="chat-messages" class="card chat-log" role="log" aria-live="polite" aria-label="Chat transcript">
 		<div class="card-body">
-			<div class="prose" id="chat-messages-placeholder">
-				<p class="text-base-content/60">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
+			<div class="prose flex flex-col items-center text-center" id="chat-messages-placeholder">
 				<!--
-					Skeleton placeholders. Phase 1.3 of
-					plans/ux-overhaul.md: the daisyUI
-					skeleton class is established here
-					as the canonical loading-state
-					placeholder. Two narrow bars under
-					the orienting copy suggest "the log
-					will fill with content" without
-					showing data that isn't there. The
-					aria-hidden attribute keeps them
-					out of the screen-reader tree; the
-					orienting <p> above already conveys
-					the page's purpose, and the
-					announcing text on aria-live=polite
-					on #chat-messages would otherwise
-					narrate the visual shimmer.
-					Phase 4 wires the actual loading
-					flow (hide these when the chat
-					starts; show a richer skeleton when
-					a request is in flight).
+					Phase 2.1 of plans/ux-overhaul.md: the
+					empty state is the largest new-user
+					onboarding win in the SPEC. Three
+					clickable suggested prompts turn "type
+					something" into a discoverable choice.
 				-->
-				<div class="space-y-2 mt-4" aria-hidden="true">
-					<div class="skeleton h-4 w-3/4"></div>
-					<div class="skeleton h-4 w-1/2"></div>
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="mb-3 size-12 opacity-50" aria-hidden="true">
+					<path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/>
+				</svg>
+				<p class="m-0 mb-4 text-base-content/60">What would you like to know?</p>
+				<div class="flex flex-col gap-2 w-full max-w-md">
+					<button class="btn btn-ghost btn-block justify-start" data-suggested-prompt="What does ADR-001 say about authentication?">
+						<span class="opacity-60 mr-2" aria-hidden="true">🔍</span>What does ADR-001 say about authentication?
+					</button>
+					<button class="btn btn-ghost btn-block justify-start" data-suggested-prompt="Summarize the migration plan">
+						<span class="opacity-60 mr-2" aria-hidden="true">🔍</span>Summarize the migration plan
+					</button>
+					<button class="btn btn-ghost btn-block justify-start" data-suggested-prompt="Find issues tagged &#34;security&#34; in GitLab">
+						<span class="opacity-60 mr-2" aria-hidden="true">🔍</span>Find issues tagged &#34;security&#34; in GitLab
+					</button>
 				</div>
+				<p class="m-0 mt-3 text-xs text-base-content/60">Press <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Enter</kbd> to send</p>
 			</div>
 		</div>
-		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
+		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message" data-tooltip="Jump to latest message">Jump to latest ↓</button>
 	</div>
 
 	<form id="chat-form" class="card mt-4" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input">
@@ -359,7 +353,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 			<fieldset class="fieldset">
 				<legend class="fieldset-legend">Message</legend>
 				<textarea id="chat-input" class="textarea w-full" name="message" rows="2" placeholder="Ask a question..." required></textarea>
-				<p class="label">Press <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Enter</kbd> (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
+				<p class="label">Press Ctrl+Enter (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
 			</fieldset>
 			<fieldset class="fieldset">
 				<legend class="fieldset-legend">Sources</legend>
@@ -381,7 +375,13 @@ const chatFallbackBody = `<!DOCTYPE html>
 			<div class="flex items-center gap-2">
 				<button id="chat-send" class="btn btn-primary" type="submit">Send</button>
 				<div class="htmx-indicator" id="chat-indicator">
-					<span class="badge">Thinking…</span>
+					<!--
+						Phase 2.3 of plans/ux-overhaul.md: the
+						in-flight indicator is now a daisyUI
+						visual-only component (the standard
+						"three pulsing dots" pattern).
+					-->
+					<span class="loading loading-dots loading-md" aria-label="Assistant is responding"></span>
 				</div>
 			</div>
 		</div>
@@ -390,18 +390,11 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<!--
 		Toast container. Phase 1.1 of plans/ux-overhaul.md:
 		chat.js's showToast() helper injects daisyUI alert
-		children into this element on demand (e.g. a
-		send-error toast). The container is rendered empty
-		and pinned to the top-right of the viewport via
-		toast-top toast-end; the daisyUI "toast" class
-		itself sets position: fixed so the stack does
-		not scroll with the page. z-50 layers the toasts
-		above the navbar (z-10) and any modal that opens
-		later (modals are usually z-100 in daisyUI; if a
-		future phase introduces a modal with custom
-		stacking, raise this z-index). The container is
-		the last child of <body> by convention so the
-		visually-fixed stack sits over everything else.
+		children into this element on demand. The
+		container is rendered empty and pinned to the
+		top-right of the viewport via toast-top toast-end;
+		the daisyUI toast class itself sets position:
+		fixed so the stack does not scroll with the page.
 	-->
 	<div id="toast-container" class="toast toast-top toast-end z-50" aria-live="polite" aria-atomic="true"></div>
 </body>
@@ -433,6 +426,21 @@ const documentsFallbackBody = `<!DOCTYPE html>
     <h1 class="text-2xl font-semibold">Ingested Documents</h1>
     {{ if .Documents }}
     <input type="search" name="q" value="{{ .Filter }}" placeholder="Filter by title, ID, tag, or category" class="input input-bordered w-full max-w-sm mb-4" autocomplete="off" hx-get="/documents" hx-trigger="input changed delay:200ms" hx-target="#documents-table" hx-push-url="true" hx-swap="outerHTML" hx-indicator="#documents-loading">
+
+    <!--
+        htmx loading indicator (Phase 6.4). The
+        hx-indicator attribute on the filter input
+        points here; daisyUI's htmx integration
+        auto-toggles the .htmx-request class on
+        this element while a request is in flight.
+        Inside, two skeleton bars give the operator
+        a visual "the table is reloading" cue that
+        doesn't make them wait in suspense.
+    -->
+    <div id="documents-loading" class="htmx-indicator space-y-2 my-4" aria-hidden="true">
+        <div class="skeleton h-4 w-3/4"></div>
+        <div class="skeleton h-4 w-1/2"></div>
+    </div>
 
     <table class="table table-zebra w-full" id="documents-table">
         <thead><tr><th scope="col">Title</th><th scope="col">ID</th><th scope="col">Tags</th><th scope="col">Category</th><th scope="col">Chunks</th><th scope="col">Ingested</th><th scope="col"></th></tr></thead>
@@ -481,7 +489,7 @@ const documentsFallbackBody = `<!DOCTYPE html>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="mb-3 size-12 opacity-50" aria-hidden="true">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm-1 7V3.5L18.5 9H13Z"/>
         </svg>
-        <p class="m-0">No documents ingested yet.</p>
+        <p class="m-0">Nothing here yet.</p>
         <p class="m-0 text-sm">
             Submit one through <code>POST /api/ingest</code> or
             <a href="/docs#/operations/ingest" class="link link-primary font-medium">read the ingest guide →</a>
@@ -505,10 +513,9 @@ const documentsFallbackBody = `<!DOCTYPE html>
 
     <!--
         Toast container. Phase 1.1 of plans/ux-overhaul.md:
-        surfaces success / error feedback for the per-row
-        delete form. See chatFallbackBody for the rationale
-        on the placement modifier + z-index; the markup is
-        identical across every full page.
+        chat.js's showToast() helper injects daisyUI alert
+        children into this element on demand (e.g. a
+        "Document deleted" toast on a successful delete).
     -->
     <div id="toast-container" class="toast toast-top toast-end z-50" aria-live="polite" aria-atomic="true"></div>
 </body>

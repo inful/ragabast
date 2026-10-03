@@ -43,8 +43,8 @@ func TestDocumentsFallback_RendersTagsAsChips(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
 
-		assert.Contains(t, body, "No documents ingested yet.",
-			"empty corpus must surface a friendly empty state")
+		assert.Contains(t, body, "Nothing here yet.",
+			"empty corpus must surface the Phase 6.1 copy (Nothing here yet.)")
 		assert.NotContains(t, body, "[",
 			"empty state must not leak Go's default slice formatting")
 	})

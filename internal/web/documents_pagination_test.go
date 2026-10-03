@@ -68,8 +68,8 @@ func TestDocumentsPage_EmptyCorpus(t *testing.T) {
 	s.router.ServeHTTP(w, req)
 
 	body := w.Body.String()
-	require.Contains(t, body, "No documents ingested yet",
-		"empty state must render the placeholder")
+	require.Contains(t, body, "Nothing here yet",
+		"empty state must surface the Phase 6.1 copy (Nothing here yet.)")
 	require.NotContains(t, body, "Showing",
 		"empty state must NOT render pagination summary")
 }

@@ -79,8 +79,8 @@ func TestDocuments_EmptyStateHasCTA(t *testing.T) {
 	body := w.Body.String()
 
 	// The empty-state alert must render.
-	assert.Contains(t, body, "No documents ingested yet.",
-		"empty corpus must surface a friendly empty state")
+	assert.Contains(t, body, "Nothing here yet",
+		"empty corpus must surface the Phase 6.1 copy (Nothing here yet.)")
 
 	// The CTA link must point at the ingest guide.
 	// Per the SPEC: <a href="/docs#/operations/ingest"

@@ -6,83 +6,155 @@
     too. This template does NOT do any markdown rendering of
     its own.
 
-    When the LLM retrieval returned sources, we render a
-    collapsible <details> block listing each source. The
-    DocbuilderURL field on each source (populated by the
-    service layer when ragabast.docbuilder_base_url is
-    configured) is used as the primary "direct link" entry;
-    when that field is empty, we fall back to the
-    document_id chip so the user can still see what was
-    cited.
+    Phase 2.2 of plans/ux-overhaul.md: the message surfaces
+    move from daisyUI's generic `card` to daisyUI's
+    purpose-built `chat` component. The chat component is
+    purpose-built for chat UIs (avatar on the appropriate
+    side, name + timestamp header, chat-bubble for the
+    message, chat-footer for the action bar). Compare to
+    the pre-Phase-2.2 design where every message was a flat
+    card with no avatar, no timestamp, no action bar — the
+    standard pattern for chat UIs (Linear, Notion, Claude.ai,
+    ChatGPT) is now applied here.
 
-    The sources disclosure renders open by default so the
-    citations the system worked to surface are immediately
-    visible — a small "N sources" line was easy to miss
-    entirely. The disclosure is placed inside the assistant's
-    reply box so it visually attaches to the message it
-    justifies, rather than floating between the reply and
-    the input form.
+    Layout:
 
-    The source label comes from SearchResult.DisplayLabel,
-    which prefers title → filename (basename without
-    extension) → document_id. Using the helper keeps the
-    fallback chain in sync with the inline-link text in
-    service.InlineSourceLinks.
+      <div class="chat chat-start">            <- operator (left in LTR)
+        <div class="chat-image avatar">         <- round initial-circle
+        <div class="chat-header">                <- "You · 23:00"
+        <div class="chat-bubble chat-bubble-primary">
+          {{ .User }}                            <- operator message
+        </div>
+      </div>
 
-    Phase 2g of the Bulma -> DaisyUI migration: the
-    user/assistant message boxes move from Bulma's `box`
-    to daisyUI's `card`; the chat-turn typography wrapper
-    moves from Bulma's `content` to daisyUI's `prose`; the
-    You/Assistant heading weight moves from
-    `has-text-weight-semibold` to `font-semibold`. The
-    fragment does NOT carry its own <link> tag — daisyUI
-    styling is inherited from the parent /chat landing
-    page, which loads daisyui.min.css in Phase 2f.
+      <div class="chat chat-end group">          <- assistant (right in LTR)
+        <div class="chat-image avatar">         <- group = action-bar hover target
+        <div class="chat-header">
+        <div class="chat-bubble">                 <- default (neutral) color
+          {{ .AnswerHTML }}                      <- assistant reply (safe HTML)
+          {{ if .Sources }}
+          <div class="flex flex-wrap gap-1 mt-2">  <- inline source badges
+            {{ range .Sources }}
+            <a class="badge badge-info badge-sm">     <- inline citation
+            {{ end }}
+          </div>
+          {{ end }}
+        </div>
+        <div class="chat-footer opacity-0 group-hover:opacity-100">  <- action bar
+          <button data-action="copy">Copy</button>
+          <button data-action="regenerate">↻</button>
+          <span class="badge" data-tooltip="...">N sources</span>
+        </div>
+      </div>
+
+    Sources render as inline badge chips rather than the
+    pre-Phase-2.2 <details><summary>...</summary>...</details>
+    block. The SPEC calls out that "synthesis data was easy
+    to miss entirely" with the collapsed disclosure; inline
+    badges are immediately visible and don't compete with
+    the reply text for attention. The DocbuilderURL field
+    (when set) is the primary "direct link" entry; without
+    it, the badge falls back to the document_id tooltip.
+
+    The action bar uses group-hover to fade in on hover
+    rather than being always visible. daisyUI's chat
+    component supports the group-hover pattern out of the
+    box; the wrapper carries the `group` class so the
+    chat-footer's `group-hover:opacity-100` works.
+
+    The chat-msg class (defined in chat.css) styles the
+    message text — word-break, overflow-wrap, code-block
+    padding — and is preserved from the pre-Phase-2.2
+    design so the typography contract doesn't regress.
 -->
 
 <div hx-swap-oob="delete" id="chat-messages-placeholder"></div>
 
-<!--
-    One chat turn wraps the user question and the assistant
-    reply in a single .chat-turn container so multi-turn
-    sessions are easy to scan. The <hr> divider sits
-    between turns, not within one — a 1px subtle line that
-    gives the eye an anchor without competing with the
-    message boxes. Aria: the wrapper carries no role of its
-    own; the role="log" + aria-live="polite" on the parent
-    #chat-messages container (in fallback_renderers.go)
-    handles screen-reader announcements.
--->
 <div class="prose chat-turn">
-    <div class="card">
-        <div class="card-body">
-            <p class="font-semibold">You</p>
+    <!--
+        Operator message. chat-start puts the bubble on
+        the start edge (left in LTR); the chat-image
+        (with the avatar) sits on the same side. The
+        bubble uses chat-bubble-primary (the daisyUI
+        primary color) so the operator's message
+        stands out from the assistant's neutral
+        bubble.
+    -->
+    <div class="chat chat-start">
+        <div class="chat-image avatar">
+            <div class="w-10 rounded-full bg-primary text-primary-content grid place-items-center" aria-hidden="true">
+                <span class="font-semibold">Y</span>
+            </div>
+        </div>
+        <div class="chat-header text-xs opacity-60">
+            You · <time datetime="{{ .Timestamp }}">just now</time>
+        </div>
+        <div class="chat-bubble chat-bubble-primary">
             <pre class="chat-msg">{{ .User }}</pre>
         </div>
     </div>
-    <div class="card">
-        <div class="card-body">
-            <p class="font-semibold">Assistant</p>
+
+    <!--
+        Assistant message. chat-end puts the bubble on
+        the end edge (right in LTR). The wrapper
+        carries `group` so the chat-footer's
+        `group-hover:opacity-100` fades the action
+        bar in on hover — the standard chat-product
+        pattern (Claude.ai, Notion AI, ChatGPT all
+        do this).
+    -->
+    <div class="chat chat-end group">
+        <div class="chat-image avatar">
+            <div class="w-10 rounded-full bg-secondary text-secondary-content grid place-items-center" aria-hidden="true">
+                <span class="font-semibold">A</span>
+            </div>
+        </div>
+        <div class="chat-header text-xs opacity-60">
+            Assistant · <time datetime="{{ .Timestamp }}">just now</time>
+        </div>
+        <div class="chat-bubble">
             <div class="chat-msg prose">{{ .AnswerHTML }}</div>
             {{ if .Sources }}
-            {{ range .SourcesByKind }}
-            <details class="mt-2" open>
-                <summary>{{ .Kind.DisplayName }} ({{ len .Sources }})</summary>
-                <ol class="mt-2">
-                    {{ range .Sources }}
-                    <li>
-                        {{ .DisplayLabel }}
-                        ({{ if .CitationURL }}
-                            <a href="{{ .CitationURL }}" target="_blank" rel="noopener">direct link</a>
-                        {{ else }}
-                            <code>{{ .DocumentID }}</code>
-                        {{ end }})
-                        — similarity {{ printf "%.2f" .Similarity }}
-                    </li>
-                    {{ end }}
-                </ol>
-            </details>
+            <!--
+                Source citations as inline badge chips.
+                Each badge links to the source's
+                citation URL (or, when the URL is
+                empty, the document_id is surfaced
+                via the daisyUI tooltip pattern). The
+                daisyUI pattern (per SKILL.md) uses
+                hover:badge-primary for the
+                "interactive" affordance — the badge
+                brightens on hover so the operator
+                knows it's clickable.
+            -->
+            <div class="flex flex-wrap gap-1 mt-2">
+                {{ range .Sources }}
+                <a href="{{ if .CitationURL }}{{ .CitationURL }}{{ else }}#{{ .DocumentID }}{{ end }}" target="_blank" rel="noopener"
+                   class="badge badge-info badge-sm hover:badge-primary"
+                   data-tooltip="{{ .DocumentID }}">
+                    {{ .DisplayLabel }}
+                </a>
+                {{ end }}
+            </div>
             {{ end }}
+        </div>
+        <!--
+            Action bar. chat.js wires the buttons via
+            delegated click handlers on the chat
+            fragment; the markup just declares the
+            hooks. The copy button copies the
+            assistant's reply text to the clipboard;
+            the regenerate button is a future
+            enhancement (Phase 6 or a follow-on).
+            The "N sources" badge uses the daisyUI
+            data-tooltip pattern (no JS required —
+            daisyUI's tooltip component is CSS-only).
+        -->
+        <div class="chat-footer mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button class="btn btn-ghost btn-xs" data-action="copy">Copy</button>
+            <button class="btn btn-ghost btn-xs" data-action="regenerate">↻</button>
+            {{ if .Sources }}
+            <span class="badge badge-info badge-sm" data-tooltip="Chunks cited in this reply">{{ len .Sources }} sources</span>
             {{ end }}
         </div>
     </div>

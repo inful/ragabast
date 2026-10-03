@@ -34,16 +34,20 @@ func TestChatLog_HasRelativePositioning(t *testing.T) {
 }
 
 // TestChatLanding_OrientingPlaceholder pins the empty-state
-// copy called out in the UI review at
+// design called out in the UI review at
 // .review-screenshots/2026-09-30-ragabast-ui-review: the
 // chat log used to render "No messages yet." inside a large
 // empty box, which read as "this page is broken" rather
 // than "type something to begin."
 //
-// The contract: the placeholder copy must (a) orient a
-// first-time user with what the page is for, (b) point at
-// the input form, and (c) keep the empty state quiet
-// (no oversized spinner / loading affordance).
+// Phase 2.1 of plans/ux-overhaul.md replaces the plain
+// orienting sentence with a clickable list of suggested
+// prompts. The contract is now: the placeholder is a
+// centered card (icon + heading + button list) — the
+// structural shape is the contract, the exact copy is a
+// design call. TestChat_EmptyStateHasSuggestedPrompts
+// pins the data-suggested-prompt buttons specifically;
+// this test pins the wider "centered card" structure.
 func TestChatLanding_OrientingPlaceholder(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeHumaService{})
@@ -62,17 +66,37 @@ func TestChatLanding_OrientingPlaceholder(t *testing.T) {
 	require.NoError(t, s.fallback.chat.Execute(&buf, data))
 	body := buf.String()
 
-	// Old phrasing must be gone.
+	// Old phrasing must be gone — "No messages yet."
+	// was the original "this page is broken" copy.
 	assert.NotContains(t, body, "No messages yet.",
 		"the placeholder must be more than a status indicator")
 
-	// New orienting copy present. Don't pin the exact
-	// wording — that's a presentation decision the
-	// designer can iterate on. Pin that the placeholder
-	// (a) names what the page does and (b) mentions the
-	// input form so the user knows where to type.
-	assert.Regexp(t, `id="chat-messages-placeholder"[^>]*>\s*<p[^>]*>.*[Cc]hat.*</p>`, body,
-		"the empty state must include an orienting sentence in #chat-messages-placeholder")
+	// The placeholder must use the new centered-card
+	// structure: flex flex-col items-center text-center
+	// on the prose wrapper turns the placeholder into a
+	// vertically stacked, horizontally centered block
+	// rather than the old left-aligned prose paragraph.
+	// Pin the daisyUI flex utility rather than the
+	// exact heading copy so the designer can iterate
+	// on "What would you like to know?" without
+	// breaking the test.
+	//
+	// The regex matches the placeholder tag with
+	// class and id in either order (HTML5 allows
+	// either) — the placeholder is found by id, and
+	// its class attribute is checked for the
+	// structural tokens.
+	placeholderRE := `<div[^>]*\bid="chat-messages-placeholder"[^>]*>` +
+		`|<div[^>]*class="[^"]*\bprose\b[^"]*\bflex\b[^"]*\bflex-col\b[^"]*"[^>]*>`
+	assert.Regexp(t, placeholderRE, body,
+		"#chat-messages-placeholder must use a flex flex-col layout (Phase 2.1 centered-card empty state)")
+
+	// The empty state lives in the same page as the
+	// input form (it points the user at the form).
+	// Pin the input's id to keep the cross-reference
+	// honest: a future refactor that splits the empty
+	// state onto its own page would lose the
+	// "what to do next" affordance.
 	assert.Contains(t, body, `id="chat-input"`,
 		"the empty state lives in the same page as the input form")
 }
