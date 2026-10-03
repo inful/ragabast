@@ -35,6 +35,15 @@
   themes: light --default, dark --prefersdark;
   include: button, input, select, textarea, checkbox, label,
            navbar, card, alert, badge, table, fieldset, divider,
-           loading, join, indicator, status;
+           loading, join, indicator, status,
+           /* Phase 1 of plans/ux-overhaul.md: cross-cutting
+            * infrastructure (toast + modal + skeleton + kbd).
+            * Each component was added to the include list at
+            * the same time the template that uses it was
+            * rewritten; future phases (chat, search, documents,
+            * login) can extend this list with their per-page
+            * components (e.g. chat, dropdown, tooltip) as
+            * they're adopted. */
+           kbd, toast, modal, skeleton;
   logs: false;
 }

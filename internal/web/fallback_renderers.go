@@ -295,6 +295,31 @@ const chatFallbackBody = `<!DOCTYPE html>
 		<div class="card-body">
 			<div class="prose" id="chat-messages-placeholder">
 				<p class="text-base-content/60">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
+				<!--
+					Skeleton placeholders. Phase 1.3 of
+					plans/ux-overhaul.md: the daisyUI
+					skeleton class is established here
+					as the canonical loading-state
+					placeholder. Two narrow bars under
+					the orienting copy suggest "the log
+					will fill with content" without
+					showing data that isn't there. The
+					aria-hidden attribute keeps them
+					out of the screen-reader tree; the
+					orienting <p> above already conveys
+					the page's purpose, and the
+					announcing text on aria-live=polite
+					on #chat-messages would otherwise
+					narrate the visual shimmer.
+					Phase 4 wires the actual loading
+					flow (hide these when the chat
+					starts; show a richer skeleton when
+					a request is in flight).
+				-->
+				<div class="space-y-2 mt-4" aria-hidden="true">
+					<div class="skeleton h-4 w-3/4"></div>
+					<div class="skeleton h-4 w-1/2"></div>
+				</div>
 			</div>
 		</div>
 		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
@@ -307,7 +332,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 			<fieldset class="fieldset">
 				<legend class="fieldset-legend">Message</legend>
 				<textarea id="chat-input" class="textarea w-full" name="message" rows="2" placeholder="Ask a question..." required></textarea>
-				<p class="label">Press Ctrl+Enter (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
+				<p class="label">Press <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Enter</kbd> (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
 			</fieldset>
 			<fieldset class="fieldset">
 				<legend class="fieldset-legend">Sources</legend>
@@ -334,6 +359,24 @@ const chatFallbackBody = `<!DOCTYPE html>
 			</div>
 		</div>
 	</form>
+
+	<!--
+		Toast container. Phase 1.1 of plans/ux-overhaul.md:
+		chat.js's showToast() helper injects daisyUI alert
+		children into this element on demand (e.g. a
+		send-error toast). The container is rendered empty
+		and pinned to the top-right of the viewport via
+		toast-top toast-end; the daisyUI "toast" class
+		itself sets position: fixed so the stack does
+		not scroll with the page. z-50 layers the toasts
+		above the navbar (z-10) and any modal that opens
+		later (modals are usually z-100 in daisyUI; if a
+		future phase introduces a modal with custom
+		stacking, raise this z-index). The container is
+		the last child of <body> by convention so the
+		visually-fixed stack sits over everything else.
+	-->
+	<div id="toast-container" class="toast toast-top toast-end z-50" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>`
 
@@ -414,6 +457,15 @@ const documentsFallbackBody = `<!DOCTYPE html>
         {{ end }}
     </p>
     {{ end }}
+
+    <!--
+        Toast container. Phase 1.1 of plans/ux-overhaul.md:
+        surfaces success / error feedback for the per-row
+        delete form. See chatFallbackBody for the rationale
+        on the placement modifier + z-index; the markup is
+        identical across every full page.
+    -->
+    <div id="toast-container" class="toast toast-top toast-end z-50" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>`
 
