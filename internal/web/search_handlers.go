@@ -94,7 +94,7 @@ func (s *Server) handleSearchSubmit(w http.ResponseWriter, r *http.Request) {
 		// 400 + plain text: htmx by default does not swap 4xx
 		// responses, so a 400 here would leave the form looking
 		// unchanged after a programmatic submit (curl, tests).
-		// A 200 with a Bulma notification gives htmx something
+		// A 200 with a daisyUI alert gives htmx something
 		// to swap into #search-results and gives the user a
 		// visible reason nothing happened. The form's HTML
 		// `required` attribute on the query input still blocks

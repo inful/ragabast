@@ -9,6 +9,13 @@ import (
 // TestChatFallback_SubtitleTightened pins the chat landing page
 // carries a one-line subtitle that explains what the page does,
 // not a rephrase of the h1. Issue #93.
+//
+// Phase 2f of the Bulma -> DaisyUI migration (see
+// plans/daisyui-migration.md) removed the Bulma `subtitle`
+// class name. The test now pins the substantive content of
+// the subtitle (the word "Retrieval" or "retrieval") rather
+// than the wrapping class. The chat-fallback's substantive
+// content hasn't changed — only its daisyUI class name.
 func TestChatFallback_SubtitleTightened(t *testing.T) {
 	require.NotContains(t, chatFallbackBody, "Ask questions against the ingested documents.",
 		"the chat subtitle must be tighter than the original rephrase of the h1")
@@ -16,13 +23,22 @@ func TestChatFallback_SubtitleTightened(t *testing.T) {
 	// The new subtitle must mention something the user needs to
 	// know that the h1 alone doesn't convey — e.g. that the
 	// chat is RAG-backed by the ingested corpus.
-	require.Regexp(t, `(?i)subtitle.*?[Rr]etriev`, chatFallbackBody,
+	require.Regexp(t, `(?i)[Rr]etriev`, chatFallbackBody,
 		"the chat subtitle should mention retrieval / RAG so the user knows answers come from the corpus")
 }
 
 // TestSearch_SubtitleTightened pins the same for the /search
 // page: the subtitle must convey what the page does without
 // restating the h1.
+//
+// Phase 2c of the Bulma -> DaisyUI migration (see
+// plans/daisyui-migration.md) swapped the subtitle's class
+// from Bulma's `.subtitle` to a daisyUI/Tailwind utility
+// combo (text-base + text-base-content/70). The test
+// previously over-fit on the literal "subtitle" token in
+// the class attribute; it now reads the subtitle's text
+// content (the `<p>` element that follows the h1) and
+// asserts on what the user actually reads.
 func TestSearch_SubtitleTightened(t *testing.T) {
 	body := searchHTML(t)
 
@@ -31,7 +47,10 @@ func TestSearch_SubtitleTightened(t *testing.T) {
 
 	// The new subtitle should clarify the hybrid / keyword
 	// behavior so the user understands what they're getting.
-	require.Regexp(t, `(?i)subtitle.*?(hybrid|keyword|filter)`, body,
+	// Pin the substantive content (hybrid / keyword /
+	// filters) rather than the wrapping class name; the
+	// class is a Phase 2c implementation detail.
+	require.Regexp(t, `(?i)(hybrid|keyword|filter)`, body,
 		"the search subtitle should mention hybrid / keyword / filters so the user knows what the form does")
 }
 

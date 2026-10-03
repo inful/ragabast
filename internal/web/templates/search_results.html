@@ -5,6 +5,11 @@
     <head>, <body>, or htmx <script> tag — those would render inside
     the target div and break the page.
 
+    daisyUI styling: the parent /search page already loads
+    daisyui.min.css (Phase 2c). The fragment uses daisyUI's
+    component classes (badge, card, alert) and Tailwind utilities
+    directly; no <link> tag here, no per-fragment CSS.
+
     Direct (non-htmx) POSTers see only this fragment without the
     surrounding chrome; they can use the "New Search" link to
     navigate back to the form. The primary UX is the htmx-driven
@@ -13,45 +18,38 @@
 
 {{ if .Filters }}
 {{ if or .Filters.Tag .Filters.Category .Filters.DocumentID }}
-<div class="tags mb-3">
-    {{ if .Filters.Tag }}<span class="tag is-info">tag: {{ .Filters.Tag }}</span>{{ end }}
-    {{ if .Filters.Category }}<span class="tag is-info">category: {{ .Filters.Category }}</span>{{ end }}
-    {{ if .Filters.DocumentID }}<span class="tag is-info">doc: {{ .Filters.DocumentID }}</span>{{ end }}
+<div class="mb-3 flex flex-wrap gap-2">
+    {{ if .Filters.Tag }}<span class="badge badge-info">tag: {{ .Filters.Tag }}</span>{{ end }}
+    {{ if .Filters.Category }}<span class="badge badge-info">category: {{ .Filters.Category }}</span>{{ end }}
+    {{ if .Filters.DocumentID }}<span class="badge badge-info">doc: {{ .Filters.DocumentID }}</span>{{ end }}
 </div>
 {{ end }}
 {{ end }}
 
-<div class="level mb-4">
-    <div class="level-left">
-        <div class="level-item">
-            <span class="has-text-weight-semibold">Query:</span>
-            <code class="ml-2">{{ .Query }}</code>
-        </div>
+<div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+    <div class="font-semibold">
+        Query: <code class="ml-2">{{ .Query }}</code>
     </div>
-    <div class="level-right">
-        <div class="level-item">
-            <a href="/search" class="button is-small">New Search</a>
-        </div>
-    </div>
+    <a href="/search" class="btn btn-sm">New Search</a>
 </div>
 
 {{ if .Results }}
-<div class="columns is-multiline">
+<div class="flex flex-col gap-4">
     {{ range .Results }}
-    <div class="column is-full">
-        <div class="box">
-            <h4 class="title is-5">
+    <div class="card">
+        <div class="card-body">
+            <h4 class="card-title text-xl">
                 {{ .DisplayLabel }}
             </h4>
-            <p class="subtitle is-6">
+            <p class="text-sm text-base-content/70">
                 Document:
                 <code>{{ .DocumentID }}</code>
                 &middot; Similarity: <strong>{{ printf "%.3f" .Similarity }}</strong>
             </p>
-            <div class="content">
+            <div class="prose">
                 {{ .ContentHTML }}
             </div>
-            <p class="is-size-7">
+            <p class="text-xs">
                 Path: <code>{{ .HeaderPath }}</code> (Level {{ .Level }})
                 {{ if or .CitationURL .DocumentURLs }}
                 &middot;
@@ -71,7 +69,7 @@
     {{ end }}
 </div>
 {{ else }}
-<div class="notification is-warning">
+<div class="alert alert-warning">
     No results found for this query.
 </div>
 {{ end }}

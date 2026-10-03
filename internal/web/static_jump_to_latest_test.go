@@ -46,8 +46,8 @@ func TestChatAssets_JumpToLatestHelper(t *testing.T) {
 func TestChatFallback_IncludesJumpToLatest(t *testing.T) {
 	require.Contains(t, chatFallbackBody, `id="jump-to-latest"`,
 		"the chat landing page must render a jump-to-latest button so long sessions have a way back to the tail")
-	require.Contains(t, chatFallbackBody, `class="button is-small jump-to-latest`,
-		"the button must carry the .jump-to-latest class so chat.css can position it bottom-right and toggle visibility")
+	require.Contains(t, chatFallbackBody, `class="btn btn-sm jump-to-latest`,
+		"the button must carry the .jump-to-latest class so chat.css can position it bottom-right and toggle visibility (Phase 2f swapped `button is-small` for `btn btn-sm`)")
 }
 
 // TestChatCSS_JumpToLatestStyles pins the CSS surface: the button

@@ -61,7 +61,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	require.Contains(t, csp, "default-src 'self'")
 	require.Contains(t, csp, "frame-ancestors 'none'")
 	require.Contains(t, csp, "base-uri 'self'")
-	// script-src and style-src must be 'self' only — Bulma
+	// script-src and style-src must be 'self' only — daisyUI
 	// and htmx ship embedded via go:embed. Any third-party
 	// origin in the CSP is a regression against the bundled
 	// asset contract. The single /docs carve-out is tested
@@ -69,7 +69,7 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 	require.NotContains(t, csp, "https://unpkg.com",
 		"CSP must not whitelist unpkg.com for app routes (htmx is now embedded)")
 	require.NotContains(t, csp, "cdn.jsdelivr.net",
-		"CSP must not whitelist cdn.jsdelivr.net for app routes (Bulma is now embedded)")
+		"CSP must not whitelist cdn.jsdelivr.net for app routes (daisyUI is now embedded)")
 }
 
 // TestSecurityHeaders_DocsPageAllowsUnpkg pins the one carve-

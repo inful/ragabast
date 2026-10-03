@@ -36,15 +36,15 @@ import (
 //     default-src 'self'; script-src 'self'; style-src 'self';
 //     img-src 'self' data:; frame-ancestors 'none';
 //     base-uri 'self'; form-action 'self'.
-//     Strictly self-hosted: Bulma (CSS) and htmx (JS) ship
+//     Strictly self-hosted: daisyUI (CSS) and htmx (JS) ship
 //     inside the binary via go:embed and are served from
 //     /static/*. The historical build whitelisted
 //     https://unpkg.com (htmx) and https://cdn.jsdelivr.net
-//     (Bulma); bundling those assets lets the CSP drop
-//     those origins entirely, which is strictly more
-//     secure. Adding a new external origin means updating
-//     this CSP AND adding an SRI hash to the <link>/<script>
-//     tag in the template that loads it.
+//     (the pre-migration Bulma CSS); bundling those assets
+//     lets the CSP drop those origins entirely, which is
+//     strictly more secure. Adding a new external origin
+//     means updating this CSP AND adding an SRI hash to
+//     the <link>/<script> tag in the template that loads it.
 //
 //     The Huma-rendered OpenAPI viewer at /docs is the
 //     single exception: Stoplight Elements loads its
@@ -95,7 +95,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 // constant so the tests can reference the exact policy string
 // and any future contributor can grep for it.
 //
-// The policy is strictly self-hosted: Bulma (CSS) and htmx
+// The policy is strictly self-hosted: daisyUI (CSS) and htmx
 // (JS) ship inside the binary via go:embed and are served
 // from /static/*. No external host needs to be reachable for
 // the page chrome to load.

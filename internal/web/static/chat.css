@@ -129,11 +129,25 @@ pre.chat-msg {
  * weight is intentionally light — the message boxes are
  * the primary reading units; the divider just gives the
  * eye an anchor when scanning a long session. margin-block
- * keeps the rhythm consistent with Bulma's default box
- * spacing. */
+ * keeps the rhythm consistent with the surrounding card
+ * spacing.
+ *
+ * Phase 2b of the Bulma -> DaisyUI migration: the border
+ * color moved from `var(--bulma-border-weak)` (Bulma's
+ * "weak" grey, ~86% in light mode, ~21% in dark mode) to
+ * daisyUI's equivalent, `var(--color-base-300)` — the
+ * "subtle border" token that daisyUI's theme system
+ * re-themes automatically when `prefers-color-scheme: dark`
+ * flips. The chat page is still loaded with bulma.min.css
+ * in this transition phase (Phase 2f migrates it to
+ * daisyui.min.css); the variable will resolve once the
+ * daisyUI stylesheet is loaded alongside. The visual
+ * difference between the two values is intentional and
+ * the new daisyUI value is preferred per the migration's
+ * "adopt daisyUI idioms" guidance. */
 .chat-turn-divider {
   border: 0;
-  border-top: 1px solid var(--bulma-border-weak);
+  border-top: 1px solid var(--color-base-300);
   margin-block: 1.25rem;
   margin-inline: 0;
 }

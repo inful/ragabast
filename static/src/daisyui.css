@@ -1,0 +1,40 @@
+/* daisyui.css — Tailwind CSS + daisyUI entry point.
+ *
+ * This file is the SOURCE for the embedded
+ * internal/web/static/daisyui.min.css. The build is run by
+ * `make css` (which calls `npx @tailwindcss/cli` with the
+ * --minify flag); the resulting minified CSS is committed
+ * to the repo and shipped via go:embed alongside the rest
+ * of internal/web/static/*.
+ *
+ * The Tailwind 4 `@source` directive below tells the CLI
+ * which files to scan for utility-class usage. Tailwind
+ * tree-shakes utilities that aren't referenced from these
+ * files, so the compiled CSS only carries the classes
+ * actually used by the templates and fallback renderers.
+ *
+ * The daisyUI `@plugin` block enables only the components
+ * the UI uses today (plus a small set reserved for likely
+ * future use). Enabling the full set would roughly double
+ * the bundle size for no current benefit; the include list
+ * is a deliberate trade-off between "ship everything" and
+ * "add a new line every time we adopt a new component".
+ *
+ * Theme: light is the default; dark flips automatically
+ * via prefers-color-scheme. This mirrors the behavior of
+ * the previous Bulma 1.0.4 build so no user-facing change
+ * is introduced by the migration.
+ */
+
+@import "tailwindcss";
+
+@source "../../internal/web/templates/*.html";
+@source "../../internal/web/fallback_renderers.go";
+
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+  include: button, input, select, textarea, checkbox, label,
+           navbar, card, alert, badge, table, fieldset, divider,
+           loading, join, indicator, status;
+  logs: false;
+}

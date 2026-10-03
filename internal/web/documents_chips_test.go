@@ -83,11 +83,14 @@ func TestDocumentsFallback_RendersTagsAsChips(t *testing.T) {
 		require.NoError(t, s.fallback.documents.Execute(&buf, data))
 		body := buf.String()
 
-		// Each tag rendered as its own chip.
-		assert.Contains(t, body, `<span class="tag is-info">alpha</span>`,
-			"first tag must render as a Bulma chip")
-		assert.Contains(t, body, `<span class="tag is-info">beta</span>`,
-			"second tag must render as a Bulma chip")
+		// Each tag rendered as its own chip. Phase 2e of
+		// the Bulma -> DaisyUI migration (see
+		// plans/daisyui-migration.md) swapped Bulma's
+		// `tag is-info` for daisyUI's `badge badge-info`.
+		assert.Contains(t, body, `<span class="badge badge-info">alpha</span>`,
+			"first tag must render as a daisyUI badge")
+		assert.Contains(t, body, `<span class="badge badge-info">beta</span>`,
+			"second tag must render as a daisyUI badge")
 
 		// Order preserved: alpha appears before beta.
 		assert.Less(t, strings.Index(body, "alpha"), strings.Index(body, "beta"),
@@ -252,4 +255,84 @@ func TestDocumentsFallback_MissingIngestedRendersFallback(t *testing.T) {
 
 	assert.NotContains(t, body, "0001",
 		"the Ingested cell must not render Go's zero-value timestamp literal \"0001-01-01\" — show a placeholder instead")
+}
+
+// TestDocumentsFallback_UsesDaisyUIComponents pins the
+// post-migration shape of the /documents page (Phase 2e of
+// the Bulma -> DaisyUI migration; see
+// plans/daisyui-migration.md). The page moves from
+// Bulma's component classes to daisyUI's idiomatic
+// equivalents: the tag chips become badges, the table
+// becomes daisyUI's table-zebra, the delete button
+// becomes btn btn-error, the empty-state becomes alert.
+//
+// The page also gains a <link> to daisyui.min.css so the
+// new class names are actually styled. Bulma stays
+// loaded until Phase 3 (the navbar partial still uses
+// Bulma).
+func TestDocumentsFallback_UsesDaisyUIComponents(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeHumaService{})
+	require.NotNil(t, s.fallback.documents, "documents fallback template must be parsed")
+
+	data := documentsFallbackData{
+		Title: "Ingested Documents",
+		Header: pageHeaderData{
+			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
+		},
+		Total:        1,
+		StartShowing: 1,
+		EndShowing:   1,
+		Limit:        25,
+		PrevOffset:   -1,
+		NextOffset:   -1,
+		Documents: []documentsFallbackRow{
+			{
+				ID:           "doc-1",
+				DisplayLabel: "Doc One",
+				Tags:         []string{"alpha"},
+				Category:     "Reference",
+				Chunks:       3,
+			},
+		},
+	}
+
+	var buf strings.Builder
+	require.NoError(t, s.fallback.documents.Execute(&buf, data))
+	body := buf.String()
+
+	// daisyUI components used in the page.
+	require.Contains(t, body, `daisyui.min.css`,
+		"the documents page must load daisyui.min.css so the new daisyUI class names are actually styled (Phase 2e)")
+
+	// The table uses daisyUI's `table table-zebra w-full`
+	// (was Bulma's `table is-fullwidth is-striped`).
+	require.Regexp(t, `<table[^>]*\bclass="[^"]*\btable-zebra\b`, body,
+		"the documents table must use daisyUI's `table-zebra` class")
+	require.Regexp(t, `<table[^>]*\bclass="[^"]*\bw-full\b`, body,
+		"the documents table must use daisyUI's `w-full` utility")
+
+	// The delete button uses daisyUI's `btn btn-sm
+	// btn-error` (was Bulma's `button is-small
+	// is-danger`).
+	require.Regexp(t, `<button[^>]*\bclass="[^"]*\bbtn-error\b`, body,
+		"the delete button must use daisyUI's `btn-error` class")
+	require.Regexp(t, `<button[^>]*\bclass="[^"]*\bbtn-sm\b`, body,
+		"the delete button must use daisyUI's `btn-sm` size")
+
+	// The confirm checkbox uses daisyUI's `checkbox
+	// checkbox-sm` (was Bulma's `checkbox is-small`).
+	require.Regexp(t, `<input[^>]*type="checkbox"[^>]*\bclass="[^"]*\bcheckbox\b`, body,
+		"the confirm checkbox must use daisyUI's `checkbox` class")
+
+	// Anti-regression: no Bulma class names remain on
+	// the page (the navbar still uses Bulma but is
+	// covered by the header partial, not the
+	// documentsFallbackBody).
+	require.NotRegexp(t, `class="table is-fullwidth is-striped"`, body,
+		"the documents page must not use Bulma's `table is-fullwidth is-striped` (daisyUI's `table table-zebra w-full` is the equivalent)")
+	require.NotRegexp(t, `class="button is-small is-danger"`, body,
+		"the delete button must not use Bulma's `button is-small is-danger` (daisyUI's `btn btn-sm btn-error` is the equivalent)")
+	require.NotRegexp(t, `class="checkbox is-small"`, body,
+		"the confirm checkbox must not use Bulma's `checkbox is-small` (daisyUI's `checkbox checkbox-sm` is the equivalent)")
 }

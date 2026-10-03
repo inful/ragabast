@@ -93,3 +93,32 @@ jobs:
         with:
           version: v2.13.2
           args: --timeout=5m
+
+  # css-check: verifies the committed daisyui.min.css
+  # artifact is current. Catches the case where a
+  # contributor edits a template (or the daisyUI config
+  # in static/src/daisyui.css) without re-running
+  # `make css`. Phase 0 of the Bulma -> DaisyUI
+  # migration; see plans/daisyui-migration.md.
+  #
+  # Runs Node 20 (pinned via .nvmrc) and the Makefile's
+  # css-check target, which rebuilds the CSS in a temp
+  # copy and diffs against the committed file. The job
+  # is independent of the test and lint jobs so a Node
+  # failure does not mask a Go failure (or vice versa).
+  css-check:
+    name: css-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Verify CSS is up to date
+        run: make css-check

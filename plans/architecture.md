@@ -1,7 +1,7 @@
 # RAG/LLM System Architecture
 
 > Snapshot of the code as it actually exists — OpenAI-compatible HTTP providers,
-> `Service`-shaped core, `chromem-go` storage, HUMA v2 API, HTMX/Bulma web UI.
+> `Service`-shaped core, `chromem-go` storage, HUMA v2 API, HTMX/daisyUI web UI.
 > This document is a map; it is not a plan.
 
 ## System Overview
@@ -292,7 +292,8 @@ graph TB
   | GET | `/mcp` | MCP streamable-HTTP transport (opt-in via `server.mcp_http_enabled`) |
   | GET | `/static/*` | CSS / assets |
 
-- Rendered with `html/template`; styling is Bulma. `renderChatMarkdownToSafeHTML`
+- Rendered with `html/template`; styling is daisyUI (Tailwind CSS 4 +
+  daisyUI 5, embedded as a single minified stylesheet). `renderChatMarkdownToSafeHTML`
   sanitizes LLM output before injection. Server-side errors are logged
   in full but returned to the client as a generic 500.
 

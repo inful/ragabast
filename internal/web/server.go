@@ -395,8 +395,8 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 	}
 
 	// Register the `asset` template function so every page
-	// can write `{{ asset "bulma.min.css" }}` and get back
-	// "/static/bulma.min.css?v=<sha>". The FuncMap is applied
+	// can write `{{ asset "daisyui.min.css" }}` and get back
+	// "/static/daisyui.min.css?v=<sha>". The FuncMap is applied
 	// to both the embedded-template branch and the fallback
 	// Go-string templates so a single helper covers every
 	// page-rendering path.

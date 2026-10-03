@@ -23,7 +23,7 @@
 //	but `immutable` tells the browser to skip revalidation
 //	entirely until max-age expires. So when an operator
 //	replaces the binary in place (v0.11.2 → v0.11.3), the
-//	browser keeps serving v0.11.2's bulma.min.css for up to
+//	browser keeps serving v0.11.2's daisyui.min.css for up to
 //	a year because the URL hasn't changed.
 //
 //	Templates that render the page put the asset URL in an

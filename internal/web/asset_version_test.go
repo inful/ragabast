@@ -100,10 +100,10 @@ func TestAssetURL_KnownAndUnknownNames(t *testing.T) {
 	s := NewServer(cfg, &fakeHumaService{})
 
 	// Known name → versioned URL.
-	got := AssetURL("bulma.min.css")
-	require.Contains(t, got, "/static/bulma.min.css?v=",
+	got := AssetURL("daisyui.min.css")
+	require.Contains(t, got, "/static/daisyui.min.css?v=",
 		"known asset must get the versioned URL")
-	v, ok := s.assetVersions["bulma.min.css"]
+	v, ok := s.assetVersions["daisyui.min.css"]
 	require.True(t, ok)
 	require.Contains(t, got, v,
 		"the ?v= query must be the recorded SHA-256 for the asset")
@@ -126,7 +126,7 @@ func TestStaticHandler_ETagStillSet(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})
 
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/bulma.min.css", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/static/daisyui.min.css", nil)
 	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 

@@ -67,18 +67,19 @@ archives:
       - LICENSE
       - README.md
       - config.example.yml
-      # Bulma (MIT) and htmx (BSD-2-Clause) are embedded in
-      # the binary via go:embed; their license texts must
-      # ship with every redistribution to satisfy the
-      # upstream terms. BSD-2 specifically requires the
-      # copyright notice to appear in "the documentation
-      # and/or other materials provided with the
-      # distribution" — for a binary tarball that means
-      # either a NOTICE file alongside the binary or the
-      # notice itself in /usr/share/doc inside the Docker
-      # image. The Dockerfile copies this file into the
-      # image; the archive file list ships it next to the
-      # binary in the tarball.
+      # Tailwind CSS and daisyUI (both MIT) and htmx
+      # (BSD-2-Clause) are embedded in the binary via
+      # go:embed; their license texts must ship with
+      # every redistribution to satisfy the upstream
+      # terms. BSD-2 specifically requires the copyright
+      # notice to appear in "the documentation and/or
+      # other materials provided with the distribution" —
+      # for a binary tarball that means either a NOTICE
+      # file alongside the binary or the notice itself
+      # in /usr/share/doc inside the Docker image. The
+      # Dockerfile copies this file into the image; the
+      # archive file list ships it next to the binary in
+      # the tarball.
       - THIRD_PARTY_LICENSES.md
     format_overrides:
       - goos: windows

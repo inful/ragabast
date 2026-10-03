@@ -258,6 +258,13 @@ func openSessionAsFresh(t *testing.T, s *Server) *httptest.ResponseRecorder {
 // visit would be ambiguous between "I selected nothing" and
 // "I haven't been here before"; pre-checking all is unambiguous
 // (no filter = all sources).
+//
+// Phase 2f of the Bulma -> DaisyUI migration: the source-
+// kind label's class moved from Bulma's `checkbox source-
+// kind-option` to daisyUI's `flex items-center gap-2
+// cursor-pointer`. The test now pins the source-kind-emoji
+// child span (a stable hook on the rendered markup) instead
+// of the now-removed custom class.
 func TestChatForm_FirstGETAllChecked(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Paths.TemplatesDir = ""
@@ -266,8 +273,8 @@ func TestChatForm_FirstGETAllChecked(t *testing.T) {
 
 	_, get := openSession(t, s)
 	body := get.Body.String()
-	require.Contains(t, body, "source-kind-option",
-		"the form must render the multi-select")
+	require.Contains(t, body, "source-kind-emoji",
+		"the form must render the multi-select (each option carries a source-kind-emoji child span)")
 	// Both known kinds must be checked on first visit.
 	require.True(t, isChecked(body, "gitlab"))
 	require.True(t, isChecked(body, "docbuilder"))

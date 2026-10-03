@@ -1,6 +1,12 @@
 # If you prefer the allow list template instead of the deny list, see community template:
 # https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
 #
+# Node.js dependencies for the CSS build (Phase 0 of the
+# Bulma → DaisyUI migration). The committed CSS artifact lives
+# at internal/web/static/daisyui.min.css and IS shipped; only
+# the build-tooling node_modules/ is ignored.
+node_modules/
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -39,7 +45,9 @@ config.yaml
 .cursor/
 .gemini/
 .pi/
+.agents/
 .rules
+skills-lock.json
 ragabast
 data/vectors
 .tokensave

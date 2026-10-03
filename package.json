@@ -1,0 +1,18 @@
+{
+  "name": "ragabast-css",
+  "version": "0.0.0",
+  "private": true,
+  "description": "CSS build for the embedded daisyui.min.css (Bulma -> DaisyUI migration, Phase 0).",
+  "scripts": {
+    "build:css": "tailwindcss -i ./static/src/daisyui.css -o ./internal/web/static/daisyui.min.css --minify"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.14",
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.1.14"
+  },
+  "//": "Allow @parcel/watcher to run its native postinstall script. Without this, npm 11+ prints a warning on every install. @parcel/watcher is a transitive dep of @tailwindcss/cli and is required for Tailwind's file-watcher mode (we use it via npx during 'make css', not at runtime).",
+  "onlyBuiltDependencies": [
+    "@parcel/watcher"
+  ]
+}
