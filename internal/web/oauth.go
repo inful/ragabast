@@ -444,9 +444,21 @@ func (h *oauthHandlers) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Sort for stable ordering across restarts.
 	sortLoginProviders(providers)
 
+	// Phase 5.2 of plans/ux-overhaul.md: the OAuth
+	// callback redirects to /auth/login?error=... on
+	// failure. The login page surfaces the error as
+	// an alert alert-error. We read the value as-is
+	// (whitelisted to a small set below); arbitrary
+	// user input never reaches the page.
+	errorCode := strings.TrimSpace(r.URL.Query().Get("error"))
+	if !isAllowedLoginError(errorCode) {
+		errorCode = ""
+	}
+
 	data := map[string]any{
 		"Providers":  providers,
 		"SessionTTL": formatSessionTTL(h.cfg.SessionTTL),
+		"Error":      errorCode,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -475,6 +487,33 @@ func providerDisplayName(p config.OAuthProvider) string {
 	default:
 		return p.Name
 	}
+}
+
+// allowedLoginErrors is the set of error codes the login
+// page renders as alerts. We whitelist the codes so an
+// arbitrary ?error=foo doesn't end up reflected in the
+// HTML (the template only matches on these strings, but
+// the whitelist is defense in depth).
+//
+// Phase 5.2 of plans/ux-overhaul.md surfaces OAuth
+// callback failures here. New codes are added when a
+// new failure mode is introduced; the empty string
+// means "no error" (a clean /auth/login load).
+var allowedLoginErrors = map[string]struct{}{
+	"":                     {},
+	"oauth_failed":         {},
+	"oauth_state_mismatch": {},
+	"oauth_denied":         {},
+	"session_expired":      {},
+}
+
+// isAllowedLoginError reports whether the given error
+// code is in the allow-list. Empty is always allowed
+// (the clean-load case).
+func isAllowedLoginError(code string) bool {
+	_, ok := allowedLoginErrors[code]
+
+	return ok
 }
 
 // formatSessionTTL renders the configured TTL in a
@@ -595,18 +634,24 @@ func (h *oauthHandlers) handleProviderCallback(w http.ResponseWriter, r *http.Re
 
 	flow := h.flows.Pop(state)
 	if flow == nil {
-		http.Error(w, "state expired or unknown", http.StatusForbidden)
+		// Phase 5.2 of plans/ux-overhaul.md: redirect
+		// to the login page with a whitelisted error
+		// code rather than rendering a raw HTTP
+		// error. The login page surfaces the error
+		// as an alert alert-error so the user knows
+		// what happened.
+		http.Redirect(w, r, "/auth/login?error=oauth_state_mismatch", http.StatusFound)
 
 		return
 	}
 	if flow.providerName != providerName {
-		http.Error(w, "provider mismatch", http.StatusForbidden)
+		http.Redirect(w, r, "/auth/login?error=oauth_state_mismatch", http.StatusFound)
 
 		return
 	}
 
 	if code == "" {
-		http.Error(w, "missing authorization code", http.StatusBadRequest)
+		http.Redirect(w, r, "/auth/login?error=oauth_failed", http.StatusFound)
 
 		return
 	}

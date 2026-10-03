@@ -1,4 +1,35 @@
 {{define "login.html"}}<!doctype html>
+<!--
+    Phase 5 of plans/ux-overhaul.md (login overhaul):
+    the OAuth login chooser adds four pieces of UX that
+    the pre-Phase-5 design lacked:
+
+      5.1 — Provider logos: each link renders an inline
+            SVG next to the text (GitHub Octocat, GitLab
+            Tanuki, or a generic person mark for OIDC).
+            Without the visual mark, "Sign in with
+            GitHub" reads as a CLI prompt, not a real
+            auth page. Every modern auth UI (Auth0,
+            Clerk, WorkOS) uses this pattern.
+
+      5.2 — Error state: ?error=oauth_failed (or one
+            of the other whitelisted codes) renders an
+            alert alert-error with a human-readable
+            message. The handler (see oauth.go) whitelists
+            the error code so an arbitrary ?error=foo
+            never reaches the page.
+
+      5.3 — Help link: "Having trouble signing in? Contact
+            your administrator" below the chooser. The
+            mailto: address is a placeholder; a real
+            install would read this from config.
+
+      5.4 — Brand mark: the pageHeaderFallbackBody
+            partial (in fallback_renderers.go) renders
+            a small SVG mark next to the "ragabast" text
+            in the brand bar. This page renders the
+            partial via {{ template "header" .Header }}.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -12,17 +43,46 @@
   <main class="max-w-md w-full p-8">
     <h1 class="m-0 mb-1 text-xl font-semibold">Sign in to ragabast</h1>
     <p class="m-0 mb-6 text-[0.9rem] text-[#8b949e]">Choose an identity provider to continue.</p>
+
+    {{ if .Error }}
+    <div id="login-error" class="alert alert-error mb-4" role="alert" aria-live="assertive">
+      <span>{{ if eq .Error "oauth_failed" }}Sign-in failed. Please try again or contact your administrator.{{ end }}{{ if eq .Error "oauth_state_mismatch" }}Your sign-in session expired before completing. Please try again.{{ end }}{{ if eq .Error "oauth_denied" }}You denied the sign-in request. Please try again if this was a mistake.{{ end }}{{ if eq .Error "session_expired" }}Your session expired. Please sign in again.{{ end }}</span>
+    </div>
+    {{ end }}
+
     <ul class="m-0 mb-6 grid list-none gap-2 p-0">
       {{range .Providers}}
       <li>
         <a href="/auth/{{.Name}}/login{{if .Next}}?next={{.Next}}{{end}}"
-           class="block border border-[#30363d] bg-[#161b22] px-4 py-3 rounded-md font-medium text-[#e6edf3] no-underline transition-colors duration-150 hover:border-[#58a6ff] focus:border-[#58a6ff] focus:outline-none">
-          Sign in with {{.DisplayName}}
+           class="flex items-center gap-3 border border-[#30363d] bg-[#161b22] px-4 py-3 rounded-md font-medium text-[#e6edf3] no-underline transition-colors duration-150 hover:border-[#58a6ff] focus:border-[#58a6ff] focus:outline-none">
+          <span class="size-5 shrink-0" aria-hidden="true">
+            {{ if eq .DisplayName "GitHub" }}
+            <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.29-.01-1.06-.02-2.08-3.2.7-3.87-1.54-3.87-1.54-.52-1.32-1.27-1.67-1.27-1.67-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.24 3.34.95.1-.74.4-1.24.72-1.53-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.18-3.09-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.18.92-.26 1.9-.39 2.88-.39.98 0 1.96.13 2.88.39 2.19-1.49 3.15-1.18 3.15-1.18.62 1.58.23 2.75.11 3.04.74.8 1.18 1.83 1.18 3.09 0 4.43-2.7 5.41-5.27 5.69.41.36.78 1.06.78 2.13 0 1.54-.01 2.78-.01 3.16 0 .31.21.68.8.56C20.71 21.39 24 17.08 24 12 24 5.65 18.35.5 12 .5Z"/>
+            </svg>
+            {{ end }}
+            {{ if eq .DisplayName "GitLab" }}
+            <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M23.6 11.6 19.7 2.4c-.3-.7-1.3-.7-1.6 0L14.1 11.6H9.9L5.9 2.4c-.3-.7-1.3-.7-1.6 0L.4 11.6c-.3.7 0 1.5.7 1.9l11.5 5.5 11.5-5.5c.7-.4 1-1.2.5-1.9Z"/>
+            </svg>
+            {{ end }}
+            {{ if and (ne .DisplayName "GitHub") (ne .DisplayName "GitLab") }}
+            <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10Zm0 2c-3.34 0-10 1.67-10 5v3h20v-3c0-3.33-6.66-5-10-5Z"/>
+            </svg>
+            {{ end }}
+          </span>
+          <span>Sign in with {{.DisplayName}}</span>
         </a>
       </li>
       {{end}}
     </ul>
-    <p class="m-0 mt-4 text-center text-[0.8rem] text-[#6e7681]">Sessions are in-memory and last {{.SessionTTL}}.</p>
+    <p class="m-0 mb-4 text-center text-[0.8rem] text-[#6e7681]">Sessions are in-memory and last {{.SessionTTL}}.</p>
+
+    <p class="m-0 text-center text-[0.8rem] text-[#7d8590]">
+      Having trouble signing in?
+      <a href="mailto:admin@example.com" class="link link-hover:link-primary">Contact your administrator</a>
+    </p>
   </main>
 </body>
 </html>
