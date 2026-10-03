@@ -307,7 +307,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 			<fieldset class="fieldset">
 				<legend class="fieldset-legend">Message</legend>
 				<textarea id="chat-input" class="textarea w-full" name="message" rows="2" placeholder="Ask a question..." required></textarea>
-				<p class="label">Press Ctrl+Enter (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
+				<p class="label">Press <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Enter</kbd> (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
 			</fieldset>
 			<fieldset class="fieldset">
 				<legend class="fieldset-legend">Sources</legend>

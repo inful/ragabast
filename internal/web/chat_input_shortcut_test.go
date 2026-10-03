@@ -98,6 +98,65 @@ func TestChatLanding_PlaceholderHintsKeyboardShortcut(t *testing.T) {
 	// key and the submit verb so a future "let's redesign
 	// the hint" pass doesn't quietly lose the discovery
 	// affordance.
-	assert.Regexp(t, `(?i)<p[^>]*>[^<]*[Ee]nter[^<]*[Ss]end[^<]*</p>`, body,
+	//
+	// Phase 1.4 of plans/ux-overhaul.md: the Ctrl/Enter
+	// key names are now wrapped in <kbd> elements (the
+	// daisyUI keycap pattern), so the regex must tolerate
+	// tag tokens between the words — previously a plain
+	// "Press Ctrl+Enter to send" was a single text run,
+	// and now the same phrase is broken up by the inner
+	// kbd tags. The structural contract (Enter + send in
+	// the same paragraph) is unchanged.
+	assert.Regexp(t, `(?i)<p[^>]*>(?:[^<]|<[^>]+>)*[Ee]nter(?:[^<]|<[^>]+>)*[Ss]end(?:[^<]|<[^>]+>)*</p>`, body,
 		"the chat form must include a paragraph that names Enter as the submit key")
+}
+
+// TestChatLanding_KeyboardShortcutUsesKbd pins the Phase 1.4
+// contract from plans/ux-overhaul.md: the chat form's
+// keyboard-shortcut hint wraps the Ctrl and Enter key names
+// in daisyUI's <kbd> element. The base class "kbd" gives the
+// key names the visual weight of a keycap (GitHub / GitLab /
+// Linear / every modern editor pattern); without it the words
+// "Ctrl" and "Enter" blend into the surrounding sentence and
+// operators skim past them.
+//
+// The size modifier kbd-sm keeps the kbd on the same line as
+// the surrounding sentence rather than dominating it. The
+// exact modifier name (kbd-xs / kbd-sm / kbd-md) is a design
+// call; the regex tolerates any of them.
+func TestChatLanding_KeyboardShortcutUsesKbd(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeHumaService{})
+	s.templates = nil
+
+	data := chatFallbackData{
+		Title:     "Chat",
+		CsrfToken: "",
+		SessionID: "session-test",
+		Header: pageHeaderData{
+			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
+		},
+	}
+
+	var buf strings.Builder
+	require.NoError(t, s.fallback.chat.Execute(&buf, data))
+	body := buf.String()
+
+	// The kbd element with the daisyUI base class must be
+	// present. The regex matches a class attribute that
+	// contains "kbd" as a whole word — tolerates both the
+	// bare "kbd" class and the "kbd kbd-sm" combination the
+	// template uses. A literal `class="kbd"` substring
+	// would not match the latter; the regex is the more
+	// flexible contract.
+	require.Regexp(t, `class="[^"]*\bkbd\b[^"]*"`, body,
+		"the chat form's keyboard-shortcut hint must use daisyUI's kbd class so the keys get the keycap visual weight")
+
+	// "Ctrl" and "Enter" must each be wrapped in their own
+	// <kbd> — that is the standard pattern (and it matches
+	// the daisyUI docs example).
+	assert.Regexp(t, `<kbd[^>]*>\s*Ctrl\s*</kbd>`, body,
+		"the Ctrl key in the chat-form shortcut hint must render as <kbd>Ctrl</kbd>")
+	assert.Regexp(t, `<kbd[^>]*>\s*Enter\s*</kbd>`, body,
+		"the Enter key in the chat-form shortcut hint must render as <kbd>Enter</kbd>")
 }
