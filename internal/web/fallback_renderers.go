@@ -293,8 +293,55 @@ const chatFallbackBody = `<!DOCTYPE html>
 
 	<div id="chat-messages" class="card chat-log" role="log" aria-live="polite" aria-label="Chat transcript">
 		<div class="card-body">
-			<div class="prose" id="chat-messages-placeholder">
-				<p class="text-base-content/60">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
+			<div class="prose flex flex-col items-center text-center" id="chat-messages-placeholder">
+				<!--
+					Phase 2.1 of plans/ux-overhaul.md: the
+					empty state is the largest new-user
+					onboarding win in the SPEC. New
+					operators do not know what to ask;
+					a description ("Type a question
+					below") is not a call to action.
+					Three clickable suggested prompts
+					turn "type something" into a
+					discoverable choice.
+
+					The center-aligned card with icon +
+					heading + button list is the
+					standard daisyUI empty-state pattern
+					(Linear, Notion, Claude.ai, ChatGPT
+					all use it). The buttons are
+					btn-ghost + btn-block so they read
+					as quiet selectors, not bright CTAs
+					that compete with the Send button.
+
+					chat.js installs a delegated click
+					handler on the placeholder (Phase 2.5
+					of plans/ux-overhaul.md wires the
+					more complex behavior, but the
+					simple version ships here: a
+					[click handler] reads
+					data-suggested-prompt, sets the
+					textarea value, focuses the
+					textarea, and removes the
+					placeholder so the next submit
+					clears the field).
+				-->
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="mb-3 size-12 opacity-50" aria-hidden="true">
+					<path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"/>
+				</svg>
+				<p class="m-0 mb-4 text-base-content/60">What would you like to know?</p>
+				<div class="flex flex-col gap-2 w-full max-w-md">
+					<button class="btn btn-ghost btn-block justify-start" data-suggested-prompt="What does ADR-001 say about authentication?">
+						<span class="opacity-60 mr-2" aria-hidden="true">🔍</span>What does ADR-001 say about authentication?
+					</button>
+					<button class="btn btn-ghost btn-block justify-start" data-suggested-prompt="Summarize the migration plan">
+						<span class="opacity-60 mr-2" aria-hidden="true">🔍</span>Summarize the migration plan
+					</button>
+					<button class="btn btn-ghost btn-block justify-start" data-suggested-prompt="Find issues tagged &#34;security&#34; in GitLab">
+						<span class="opacity-60 mr-2" aria-hidden="true">🔍</span>Find issues tagged &#34;security&#34; in GitLab
+					</button>
+				</div>
+				<p class="m-0 mt-3 text-xs text-base-content/60">Press <kbd class="kbd kbd-sm">Ctrl</kbd> + <kbd class="kbd kbd-sm">Enter</kbd> to send</p>
 			</div>
 		</div>
 		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>

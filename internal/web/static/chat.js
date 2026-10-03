@@ -57,6 +57,68 @@
     var sendBtn = document.getElementById('chat-send');
     var input = document.getElementById('chat-input');
 
+    // Phase 2.1 of plans/ux-overhaul.md: the empty
+    // state placeholder carries clickable suggested
+    // prompts. A delegated click handler on the
+    // placeholder (rather than a per-button listener)
+    // keeps the wiring alive even after the
+    // placeholder is removed and a new one is
+    // created. The handler:
+    //
+    //   1. Finds the closest [data-suggested-prompt]
+    //      button (the delegated selector).
+    //   2. Copies the prompt text into the chat
+    //      textarea.
+    //   3. Focuses the textarea (so the operator
+    //      can edit before sending, or just hit
+    //      Enter).
+    //   4. Removes the placeholder from the DOM
+    //      (the htmx swap-out flow expects the
+    //      placeholder to be absent before the
+    //      first message arrives; if the operator
+    //      just sends the suggested prompt as-is,
+    //      the swap-out happens naturally on the
+    //      chat-message response).
+    //
+    // The handler is installed only if the placeholder
+    // exists, so the login page (which doesn't carry
+    // the suggested-prompts card) is unaffected.
+    var placeholder = document.getElementById('chat-messages-placeholder');
+    if (placeholder && input) {
+      placeholder.addEventListener('click', function (e) {
+        var target = e.target;
+        // The data-suggested-prompt attribute may
+        // sit on the button itself or on a child
+        // element (the 🔍 emoji <span> is inside
+        // the button). Walk up the DOM to find the
+        // button.
+        while (target && target !== placeholder) {
+          if (target.dataset && target.dataset.suggestedPrompt) {
+            break;
+          }
+          target = target.parentNode;
+        }
+        if (!target || !target.dataset || !target.dataset.suggestedPrompt) {
+          return;
+        }
+        input.value = target.dataset.suggestedPrompt;
+        input.focus();
+        // Remove the placeholder from the DOM. The
+        // htmx swap-out in chat_message.html targets
+        // the placeholder by id, so it must be
+        // absent before the first message lands.
+        // (Submitting the form does not remove the
+        // placeholder; the swap-out on the first
+        // response does. Removing it on click is a
+        // UX win — the user has "picked" a
+        // suggestion and the empty-state chrome
+        // should get out of the way.)
+        if (placeholder.parentNode) {
+          placeholder.parentNode.removeChild(placeholder);
+        }
+      });
+    }
+
     // Keyboard submit shortcut: Ctrl+Enter (Windows / Linux)
     // and Cmd+Enter (macOS) submit the chat form. Plain Enter
     // is intentionally left alone — the textarea default of
