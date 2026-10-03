@@ -67,6 +67,13 @@ func TestChatAssets_KeyboardSubmitHandler(t *testing.T) {
 // The test pins the substantive content ("Enter" plus "send")
 // rather than the exact wording so the designer can iterate
 // on phrasing without breaking the contract.
+//
+// Phase 2f of the Bulma -> DaisyUI migration: the hint
+// paragraph's class moved from Bulma's `help` to daisyUI's
+// `label` (the daisyUI label component is the daisyUI
+// equivalent of Bulma's help-text styling). The test
+// regex pins the substantive content, not the wrapping
+// class.
 func TestChatLanding_PlaceholderHintsKeyboardShortcut(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeHumaService{})
@@ -86,9 +93,11 @@ func TestChatLanding_PlaceholderHintsKeyboardShortcut(t *testing.T) {
 	body := buf.String()
 
 	// A help hint near the textarea. Don't pin the exact
-	// text — pin that a help block mentions the Enter key
-	// and the submit verb so a future "let's redesign the
-	// hint" pass doesn't quietly lose the discovery affordance.
-	assert.Regexp(t, `(?i)<p[^>]*\bclass="[^"]*\bhelp\b[^"]*"[^>]*>[^<]*[Ee]nter[^<]*[Ss]end[^<]*</p>`, body,
-		"the chat form must include a Bulma .help paragraph that names Enter as the submit key")
+	// class name (was Bulma's `help`, now daisyUI's
+	// `label`); pin that a paragraph mentions the Enter
+	// key and the submit verb so a future "let's redesign
+	// the hint" pass doesn't quietly lose the discovery
+	// affordance.
+	assert.Regexp(t, `(?i)<p[^>]*>[^<]*[Ee]nter[^<]*[Ss]end[^<]*</p>`, body,
+		"the chat form must include a paragraph that names Enter as the submit key")
 }

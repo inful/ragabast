@@ -79,18 +79,21 @@ func TestChatLanding_OrientingPlaceholder(t *testing.T) {
 
 // TestChatLanding_SendButtonUsesPrimaryAction pins the
 // color-grammar contract: the chat landing page's primary
-// call-to-action must use Bulma's `is-primary` color
-// modifier, not `is-warning`.
+// call-to-action must use daisyUI's `btn-primary` color
+// modifier, not `btn-warning`.
 //
-// Why: yellow is reserved in the Bulma / Bootstrap /
+// Why: yellow is reserved in the daisyUI / Bootstrap /
 // Material idioms for *caution* signals ("your changes are
 // unsaved", "this API key is about to be revoked"). Using
 // it for the Send button drowns every future warning
 // surface in the same UI, and a first-time operator's eye
-// reads the yellow as a hazard, not a CTA. The fix in
-// this repo was to flip is-warning → is-primary on the
-// rendered button; this test pins the change so a future
-// "let's try a different accent" doesn't quietly regress.
+// reads the yellow as a hazard, not a CTA.
+//
+// Phase 2f of the Bulma -> DaisyUI migration (see
+// plans/daisyui-migration.md) flipped the class from
+// `button is-primary` to `btn btn-primary`. The test
+// name and intent stay the same; the sentinel is
+// updated.
 func TestChatLanding_SendButtonUsesPrimaryAction(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeHumaService{})
@@ -109,10 +112,10 @@ func TestChatLanding_SendButtonUsesPrimaryAction(t *testing.T) {
 	require.NoError(t, s.fallback.chat.Execute(&buf, data))
 	body := buf.String()
 
-	assert.Contains(t, body, `id="chat-send" class="button is-primary"`,
-		"the Send button must render with class=\"button is-primary\" — yellow (is-warning) reads as a hazard, not a CTA")
-	assert.NotContains(t, body, `id="chat-send" class="button is-warning"`,
-		"the Send button must NOT render with class=\"button is-warning\" — yellow is reserved for caution surfaces")
+	assert.Contains(t, body, `id="chat-send" class="btn btn-primary"`,
+		"the Send button must render with class=\"btn btn-primary\" — yellow (btn-warning) reads as a hazard, not a CTA")
+	assert.NotContains(t, body, `id="chat-send" class="btn btn-warning"`,
+		"the Send button must NOT render with class=\"btn btn-warning\" — yellow is reserved for caution surfaces")
 }
 
 // TestChatLanding_AriaLiveOnMessageLog pins the

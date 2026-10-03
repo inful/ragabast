@@ -9,6 +9,13 @@ import (
 // TestChatFallback_SubtitleTightened pins the chat landing page
 // carries a one-line subtitle that explains what the page does,
 // not a rephrase of the h1. Issue #93.
+//
+// Phase 2f of the Bulma -> DaisyUI migration (see
+// plans/daisyui-migration.md) removed the Bulma `subtitle`
+// class name. The test now pins the substantive content of
+// the subtitle (the word "Retrieval" or "retrieval") rather
+// than the wrapping class. The chat-fallback's substantive
+// content hasn't changed — only its daisyUI class name.
 func TestChatFallback_SubtitleTightened(t *testing.T) {
 	require.NotContains(t, chatFallbackBody, "Ask questions against the ingested documents.",
 		"the chat subtitle must be tighter than the original rephrase of the h1")
@@ -16,7 +23,7 @@ func TestChatFallback_SubtitleTightened(t *testing.T) {
 	// The new subtitle must mention something the user needs to
 	// know that the h1 alone doesn't convey — e.g. that the
 	// chat is RAG-backed by the ingested corpus.
-	require.Regexp(t, `(?i)subtitle.*?[Rr]etriev`, chatFallbackBody,
+	require.Regexp(t, `(?i)[Rr]etriev`, chatFallbackBody,
 		"the chat subtitle should mention retrieval / RAG so the user knows answers come from the corpus")
 }
 

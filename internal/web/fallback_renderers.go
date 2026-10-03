@@ -194,6 +194,17 @@ func parseFallback(name, body string, funcs template.FuncMap) *template.Template
 // with the rest of the page chrome (chat-message, search,
 // search-results partials all use bulma classes too).
 //
+// Phase 2f of the Bulma -> DaisyUI migration: the navbar
+// pattern moves from Bulma's navbar-brand / navbar-menu /
+// navbar-item to daisyUI's navbar / navbar-start /
+// navbar-end. daisyUI doesn't have a "menu" concept —
+// the nav items just sit as flex children of
+// navbar-start / navbar-end. The nav-item buttons use
+// daisyUI's `btn btn-ghost` so they pick up the same
+// hover/active treatment as the rest of the app's
+// buttons. The brand text uses `text-xl` for the
+// pre-migration `is-size-4` size.
+//
 // CSRF: the sign-out form carries a csrf_token hidden field.
 // The csrf middleware sets the matching cookie on every
 // response; on submit, the middleware compares the form
@@ -205,31 +216,25 @@ func parseFallback(name, body string, funcs template.FuncMap) *template.Template
 // single-user open-access install (AuthEnabled=false).
 const pageHeaderFallbackBody = `
 {{ define "header" -}}
-<nav class="navbar" role="navigation" aria-label="main navigation">
-  <div class="navbar-brand">
-    <a class="navbar-item" href="/">ragabast</a>
+<nav class="navbar bg-base-100 shadow-sm" role="navigation" aria-label="main navigation">
+  <div class="navbar-start">
+    <a class="btn btn-ghost text-xl" href="/">ragabast</a>
   </div>
-  <div class="navbar-menu is-active">
-    <div class="navbar-start">
-      <a class="navbar-item" href="/">Chat</a>
-      <a class="navbar-item" href="/search">Search</a>
-      <a class="navbar-item" href="/documents">Documents</a>
-    </div>
-    <div class="navbar-end">
-      {{- if .AuthEnabled }}
-      {{- if .SignedIn }}
-      <span class="navbar-item has-text-grey">{{ .DisplayName }}</span>
-      <div class="navbar-item">
-        <form method="post" action="/auth/logout">
-          <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
-          <button class="button is-small" type="submit">Sign out</button>
-        </form>
-      </div>
-      {{- else if .ShowSignIn }}
-      <a class="navbar-item" href="{{ .SignInURL }}">Sign in</a>
-      {{- end }}
-      {{- end }}
-    </div>
+  <div class="navbar-end gap-1">
+    <a class="btn btn-ghost btn-sm" href="/">Chat</a>
+    <a class="btn btn-ghost btn-sm" href="/search">Search</a>
+    <a class="btn btn-ghost btn-sm" href="/documents">Documents</a>
+    {{- if .AuthEnabled }}
+    {{- if .SignedIn }}
+    <span class="text-base-content/60 px-2">{{ .DisplayName }}</span>
+    <form method="post" action="/auth/logout">
+      <input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
+      <button class="btn btn-sm" type="submit">Sign out</button>
+    </form>
+    {{- else if .ShowSignIn }}
+    <a class="btn btn-ghost btn-sm" href="{{ .SignInURL }}">Sign in</a>
+    {{- end }}
+    {{- end }}
   </div>
 </nav>
 {{- end -}}
@@ -277,55 +282,56 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<title>{{ .Title }}</title>
 	<meta name="htmx-config" content='{"allowEval":false}'>
 	<link rel="stylesheet" href="{{ asset "bulma.min.css" }}">
+	<link rel="stylesheet" href="{{ asset "daisyui.min.css" }}">
 	<link rel="stylesheet" href="{{ asset "chat.css" }}">
 	<script src="{{ asset "htmx.min.js" }}" defer></script>
 	<script src="{{ asset "chat.js" }}" defer></script>
 </head>
-<body class="container mt-4">
+<body class="container mx-auto mt-4">
 	{{ template "header" .Header }}
-	<h1 class="title">Chat</h1>
-	<p class="subtitle">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
+	<h1 class="text-2xl font-semibold">Chat</h1>
+	<p class="text-base text-base-content/70 mb-4">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
 
-	<div id="chat-messages" class="box chat-log" role="log" aria-live="polite" aria-label="Chat transcript">
-		<div class="content" id="chat-messages-placeholder">
-			<p class="has-text-grey">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
+	<div id="chat-messages" class="card chat-log" role="log" aria-live="polite" aria-label="Chat transcript">
+		<div class="card-body">
+			<div class="prose" id="chat-messages-placeholder">
+				<p class="text-base-content/60">Chat with your ingested documents. Type a question below; each reply cites the chunks it was grounded on.</p>
+			</div>
 		</div>
-		<button id="jump-to-latest" class="button is-small jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
+		<button id="jump-to-latest" class="btn btn-sm jump-to-latest" type="button" aria-label="Jump to latest message">Jump to latest ↓</button>
 	</div>
 
-	<form id="chat-form" class="box" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input">
+	<form id="chat-form" class="card mt-4" hx-post="/chat/message" hx-target="#chat-messages" hx-swap="beforeend" hx-indicator="#chat-indicator" hx-disabled-elt="#chat-send, #chat-input">
 		<input type="hidden" name="csrf_token" value="{{ .CsrfToken }}">
 		<input type="hidden" name="session_id" value="{{ .SessionID }}">
-		<div class="field">
-			<label class="label">Message</label>
-			<div class="control">
-				<textarea id="chat-input" class="textarea" name="message" rows="2" placeholder="Ask a question..." required></textarea>
-			</div>
-			<p class="help">Press Ctrl+Enter (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
-		</div>
-		<div class="field">
-			<label class="label">Sources</label>
-			<div class="control">
-				{{ $selected := .SelectedKinds }}
-				{{ range .SourceKinds }}
-				{{ $kind := . }}
-				<label class="checkbox source-kind-option">
-					<input type="checkbox" name="source_kinds" value="{{ $kind }}"
-						{{ if eq (len $selected) 0 }}checked{{ end }}
-						{{ range $selected }}{{ if eq . $kind }}checked{{ end }}{{ end }}>
-					<span class="source-kind-emoji">{{ $kind.InlineSourceIcon }}</span>
-					<span class="source-kind-name">{{ $kind.DisplayName }}</span>
-				</label>
-				{{ end }}
-			</div>
-			<p class="help">Empty selection = all sources. Your choice persists across messages in this session; unchecking all boxes does NOT clear the stored default.</p>
-		</div>
-		<div class="field is-grouped">
-			<div class="control">
-				<button id="chat-send" class="button is-primary" type="submit">Send</button>
-			</div>
-			<div class="control htmx-indicator" id="chat-indicator">
-				<span class="tag">Thinking…</span>
+		<div class="card-body space-y-4">
+			<fieldset class="fieldset">
+				<legend class="fieldset-legend">Message</legend>
+				<textarea id="chat-input" class="textarea w-full" name="message" rows="2" placeholder="Ask a question..." required></textarea>
+				<p class="label">Press Ctrl+Enter (Cmd+Enter on macOS) to send. Enter inserts a newline.</p>
+			</fieldset>
+			<fieldset class="fieldset">
+				<legend class="fieldset-legend">Sources</legend>
+				<div class="flex flex-col gap-2">
+					{{ $selected := .SelectedKinds }}
+					{{ range .SourceKinds }}
+					{{ $kind := . }}
+					<label class="flex items-center gap-2 cursor-pointer">
+						<input type="checkbox" name="source_kinds" value="{{ $kind }}" class="checkbox checkbox-sm"
+							{{ if eq (len $selected) 0 }}checked{{ end }}
+							{{ range $selected }}{{ if eq . $kind }}checked{{ end }}{{ end }}>
+						<span class="source-kind-emoji">{{ $kind.InlineSourceIcon }}</span>
+						<span class="source-kind-name">{{ $kind.DisplayName }}</span>
+					</label>
+					{{ end }}
+				</div>
+				<p class="label">Empty selection = all sources. Your choice persists across messages in this session; unchecking all boxes does NOT clear the stored default.</p>
+			</fieldset>
+			<div class="flex items-center gap-2">
+				<button id="chat-send" class="btn btn-primary" type="submit">Send</button>
+				<div class="htmx-indicator" id="chat-indicator">
+					<span class="badge">Thinking…</span>
+				</div>
 			</div>
 		</div>
 	</form>
