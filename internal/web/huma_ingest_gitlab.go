@@ -59,13 +59,6 @@ func registerIngestGitLabIssueOperation(api huma.API, svc serviceAPI, limiter *I
 		RawBody []byte `contentType:"*/*" required:"true"`
 	},
 	) (*gitlabIssueIngestResponse, error) {
-		if !acquireIngestSlot(limiter) {
-			return nil, huma.ErrorWithHeaders(huma.Error429TooManyRequests("ingest busy"), limiter.RetryAfterHeader())
-		}
-		if limiter != nil {
-			defer limiter.Release()
-		}
-
 		// Decode the envelope ourselves — the internal/gitlab
 		// package owns the full wire shape (including fields we
 		// drop on the floor). Huma can't introspect
@@ -100,9 +93,16 @@ func registerIngestGitLabIssueOperation(api huma.API, svc serviceAPI, limiter *I
 		// protects /api/ingest/raw; reusing it here keeps the
 		// operator's "what's the biggest request I can send"
 		// answer uniform across the two endpoints.
-		if sizeErr := checkIngestSize(len(md), maxDocumentBytes); sizeErr != nil {
-			return nil, sizeErr
+		//
+		// withIngestGuard bundles the limiter acquire/release
+		// with the size check so the four-line preamble
+		// shared by every ingest endpoint shrinks to a
+		// single call.
+		release, err := withIngestGuard(limiter, maxDocumentBytes, len(md))
+		if err != nil {
+			return nil, err
 		}
+		defer release()
 
 		// Operational feedback: the operator needs to know when
 		// the sender's notes array had system records filtered

@@ -39,20 +39,15 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		Path:        "/api/ingest",
 		Summary:     "Ingest a docbuilder document",
 	}, func(ctx context.Context, input *struct{ Body ingestRequestBody }) (*struct{ Body ingestResponseBody }, error) {
-		if !acquireIngestSlot(limiter) {
-			return nil, huma.ErrorWithHeaders(huma.Error429TooManyRequests("ingest busy"), limiter.RetryAfterHeader())
-		}
-		if limiter != nil {
-			defer limiter.Release()
-		}
-
 		content := strings.TrimSpace(input.Body.Content)
 		if content == "" {
 			return nil, huma.Error400BadRequest("content is required")
 		}
-		if err := checkIngestSize(len(content), maxDocumentBytes); err != nil {
+		release, err := withIngestGuard(limiter, maxDocumentBytes, len(content))
+		if err != nil {
 			return nil, err
 		}
+		defer release()
 
 		doc, err := svc.IngestDocument(ctx, content)
 		if err != nil {
@@ -76,19 +71,14 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		RawBody []byte `contentType:"text/markdown" required:"true"`
 	},
 	) (*struct{ Body ingestResponseBody }, error) {
-		if !acquireIngestSlot(limiter) {
-			return nil, huma.ErrorWithHeaders(huma.Error429TooManyRequests("ingest busy"), limiter.RetryAfterHeader())
-		}
-		if limiter != nil {
-			defer limiter.Release()
-		}
-
 		if len(bytes.TrimSpace(input.RawBody)) == 0 {
 			return nil, huma.Error400BadRequest("request body is required")
 		}
-		if err := checkIngestSize(len(input.RawBody), maxDocumentBytes); err != nil {
+		release, err := withIngestGuard(limiter, maxDocumentBytes, len(input.RawBody))
+		if err != nil {
 			return nil, err
 		}
+		defer release()
 
 		doc, err := svc.IngestDocument(ctx, string(input.RawBody))
 		if err != nil {
@@ -114,13 +104,6 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		}]
 	},
 	) (*struct{ Body ingestResponseBody }, error) {
-		if !acquireIngestSlot(limiter) {
-			return nil, huma.ErrorWithHeaders(huma.Error429TooManyRequests("ingest busy"), limiter.RetryAfterHeader())
-		}
-		if limiter != nil {
-			defer limiter.Release()
-		}
-
 		form := input.RawBody.Data()
 		b, err := io.ReadAll(form.File)
 		if err != nil {
@@ -130,9 +113,11 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		if len(bytes.TrimSpace(b)) == 0 {
 			return nil, huma.Error400BadRequest("file is empty")
 		}
-		if sizeErr := checkIngestSize(len(b), maxDocumentBytes); sizeErr != nil {
-			return nil, sizeErr
+		release, err := withIngestGuard(limiter, maxDocumentBytes, len(b))
+		if err != nil {
+			return nil, err
 		}
+		defer release()
 
 		doc, err := svc.IngestDocument(ctx, string(b))
 		if err != nil {
