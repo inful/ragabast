@@ -94,314 +94,45 @@ func internalError(w http.ResponseWriter, r *http.Request, op string, err error)
 }
 
 // NewServer creates a new web server.
+//
+// The constructor is intentionally a thin orchestrator: each
+// step that used to live inline (middleware chain, OAuth
+// init, template loading, async ingest queue, asset FuncMap)
+// is its own method on *Server. The order matters:
+//
+//  1. initOAuth — populates s.sessions and s.oauthHandlers.
+//     The auth middleware (next step) needs s.sessions and
+//     s.oauthHandlers.cookieName, so OAuth init must come
+//     first.
+//  2. installMiddleware — assembles the chi router's
+//     middleware chain. Reads s.sessions and
+//     s.oauthHandlers.cookieName.
+//  3. loadTemplates — populates s.templates from the
+//     operator-supplied dir or the embedded FS.
+//  4. initIngestQueue — populates s.ingestQueue (or leaves
+//     it nil when async ingest is disabled).
+//  5. installAssetFuncs — wires the `asset` template
+//     function onto s.templates and parses the fallback
+//     Go-string pages into s.fallback.
+//  6. registerRoutes — mounts every chi and Huma route.
+//
+// Each step has a focused test in server_*_test.go; the
+// existing integration tests (auth_routes_test.go,
+// health_full_test.go, etc.) cover the end-to-end paths.
 func NewServer(cfg *config.Config, svc serviceAPI) *Server {
-	router := chi.NewRouter()
-
-	// securityHeadersMiddleware runs first so the defense
-	// headers land on every response — including error
-	// responses from middleware deeper in the chain.
-	router.Use(securityHeadersMiddleware)
-	// requestIDMiddleware runs second so every downstream
-	// middleware, log line, and handler can read the ID via
-	// RequestIDFromContext. Placing it before the access
-	// logger and recoverer means panic logs and access lines
-	// are correlated; placing it after securityHeaders
-	// keeps the defense-header layer dependency-free.
-	router.Use(requestIDMiddleware())
-	// redactAccessLogMiddleware MUST run before
-	// middleware.Logger so chi sees the rewritten URL when
-	// it formats the access line. The middleware mutates
-	// r.URL.RawQuery in place (replacing values for known
-	// sensitive keys with "[REDACTED]") so the operator
-	// query/messages/text fields never land in the log.
-	router.Use(redactAccessLogMiddleware)
-	router.Use(middleware.Logger)
-	router.Use(middleware.Recoverer)
-	router.Use(middleware.RealIP)
-	// clientIPMiddleware runs immediately after chi's RealIP
-	// so r.RemoteAddr has already been rewritten from
-	// X-Forwarded-For / X-Real-IP headers. The middleware
-	// extracts the host portion and stores it on the
-	// request context; downstream callers (audit log,
-	// rate-limit) read it via ClientIPFromContext.
-	router.Use(clientIPMiddleware())
-	router.Use(maxBytesReaderMiddleware)
-	router.Use(middleware.Timeout(60 * time.Second))
-
-	// CORS runs before auth so OPTIONS preflight requests do
-	// not require a bearer token (browsers do not send
-	// credentials on preflight). The new allow-list middleware
-	// replaces the previous wildcard-or-nothing behavior.
-	if cfg.Server.EnableCORS {
-		router.Use(corsMiddleware(cfg.Server.CORSOrigins))
-	}
-
-	// OAuth / session-cookie auth. The session store
-	// and oauthHandlers are constructed only when at
-	// least one provider is configured; both are nil in
-	// the historical single-user / bearer-token install
-	// so the existing auth path keeps working.
-	var (
-		sessions      *sessionStore
-		oauthHandlers *oauthHandlers
-	)
-	if len(cfg.Auth.Providers) > 0 {
-		// sessionTTL zero → sessions live forever
-		// (in-memory, until restart). Default to 12h
-		// when the operator hasn't set one.
-		ttl := cfg.Auth.SessionTTL
-		if ttl == 0 {
-			ttl = 12 * time.Hour
-		}
-		sessions = newSessionStore(ttl)
-
-		// Cookie name: the operator can override via
-		// cfg.Auth.CookieName (or AUTH_COOKIE_NAME env);
-		// empty means "use the default" so writer and
-		// reader stay in sync. Without this default,
-		// setSessionCookie would set the cookie as ""
-		// (which browsers reject silently) and
-		// readSessionCookie would never match.
-		cookieName := cfg.Auth.CookieName
-		if cookieName == "" {
-			cookieName = "ragabast_session"
-		}
-
-		serverBase := deriveServerBase(cfg)
-		oh, err := newOAuthHandlers(cfg, serverBase, sessions)
-		if err != nil {
-			log.Printf("web: failed to initialize OAuth providers: %v; starting without session auth", err)
-		} else {
-			// Override the cookie name on the oauthHandlers
-			// struct so callback handlers write the same
-			// cookie the middleware reads.
-			oh.cookieName = cookieName
-			oauthHandlers = oh
-		}
-	}
-
-	// Auth runs last so the body-size limit, security
-	// headers, CORS preflight, and request logging all apply
-	// to auth-failed requests too. With auth_token empty
-	// (the default) the middleware is a no-op so the
-	// single-user local install keeps working.
-	// EffectiveAuthTokens merges the singular AuthToken
-	// (backward-compatible shortcut) with the modern
-	// AuthTokens list, deduping by Value. NewServer is the
-	// only call site for authMiddleware — keep it that way
-	// so the security boundary is easy to audit.
-	cookieName := ""
-	if oauthHandlers != nil {
-		cookieName = oauthHandlers.cookieName
-	}
-	router.Use(authMiddleware(cfg.Server.EffectiveAuthTokens(), sessions, cookieName))
-
-	// csrfMiddleware runs after auth so a Bearer-auth POST
-	// (which cannot be made cross-origin by a browser) skips
-	// the CSRF check entirely. It runs before the rate
-	// limiter so a CSRF-failed flood still consumes bucket
-	// tokens — a defense-in-depth choice that keeps a
-	// malicious page from probing token guesses with no
-	// rate-limit cost.
-	// csrfMiddleware is auth-aware: when EffectiveAuthTokens
-	// is empty (the default local-dev install), CSRF is
-	// also bypassed because there is nothing to CSRF.
-	// When auth is configured, CSRF runs after auth so a
-	// Bearer-auth POST (which cannot be made cross-origin
-	// by a browser) skips the CSRF check entirely.
-	router.Use(csrfMiddleware(cfg.Server.EffectiveAuthTokens()))
-
-	// Rate-limit middleware for the LLM-backed endpoints. The
-	// middleware is path-aware (see rate_limit.go) and a no-op
-	// for any non-LLM URL prefix; it is installed at the
-	// chain level so it covers both the Huma-mounted
-	// endpoints and the form-mounted endpoints without
-	// wrapping each route individually. The limiter is
-	// constructed below in the Server literal so it can be
-	// referenced from the route handlers too.
-	rateLimiter := newLLMRateLimiter(cfg.Server.RateLimitPerMinute, cfg.Server.RateLimitBurst)
-	router.Use(rateLimiter.llmPathMiddleware)
-
-	// Load templates in this order of precedence:
-	//   1. cfg.Paths.TemplatesDir, if set (operator override via
-	//      yaml / env TEMPLATES_DIR; intended for shipping a custom
-	//      template set without rebuilding the binary)
-	//   2. The embedded templatesFS (compile-time embed; default
-	//      for the published Docker image, which has no templates/
-	//      on disk)
-	//
-	// Both branches parse into the same *template.Template, so
-	// the rest of the package doesn't care which path served the
-	// templates.
-	var templates *template.Template
-	var err error
-	switch {
-	case cfg.Paths.TemplatesDir != "":
-		templates, err = template.ParseGlob(filepath.Join(cfg.Paths.TemplatesDir, "*.html"))
-		if err != nil {
-			log.Printf("web: failed to load templates from %s: %v; falling back to embedded templates", cfg.Paths.TemplatesDir, err)
-			templates, err = template.ParseFS(templatesFS, "templates/*.html")
-		}
-	default:
-		templates, err = template.ParseFS(templatesFS, "templates/*.html")
-	}
-	// If the templates carried `{{ asset "..." }}` calls
-	// (every embedded template does; see the cache-busting
-	// contract in asset_version.go), the parser needs the
-	// `asset` function in its FuncMap before ParseFS runs.
-	// Without it, html/template fails the parse on the missing
-	// function and the operator gets a page that renders
-	// only the navbar.
-	//
-	// The trick: re-parse via template.New("base").Funcs(...).
-	// ParseFS(...) which bakes the FuncMap into the receiver
-	// template at parse time. The `asset` helper reads from
-	// the package-level assetVersionsMap (populated by init()
-	// in asset_version.go). We do this in both branches
-	// (operator-supplied and embedded) so the FuncMap applies
-	// regardless of source.
-	//
-	// The receiver name "base" matters: ParseFS associates
-	// each file with its base name, and Execute runs the
-	// template whose name matches the receiver's name. We
-	// want Execute to land on the search template (the first
-	// page a typical operator hits) — but in practice the
-	// per-page render path goes through ExecuteTemplate on
-	// each named sub-template, so the receiver name is just
-	// the fallback. "base" is fine.
-	{
-		var source string
-		if cfg.Paths.TemplatesDir != "" {
-			source = cfg.Paths.TemplatesDir
-		} else {
-			source = "embedded (templates/)"
-		}
-		withFuncs, parseErr := template.New("base").Funcs(template.FuncMap{
-			"asset": AssetURL,
-		}).ParseFS(templatesFS, "templates/*.html")
-		if parseErr != nil {
-			log.Printf("web: failed to re-parse %s with asset FuncMap: %v", source, parseErr)
-			// Keep the original parse — it may have partial
-			// state that's still better than nothing, and the
-			// operator's templates will fall back to bare
-			// "base" only if the original parse failed too.
-			if templates == nil {
-				templates = template.New("base")
-			}
-		} else {
-			templates = withFuncs
-		}
-	}
-	// Register the shared `header` template block (issue #85
-	// follow-on) so embedded page templates can invoke it via
-	// {{ template "header" .Header }}. Without this the embedded
-	// templates/ (which is the default) would render with no
-	// navbar — only the fallback Go-string templates include the
-	// header today. Parse errors here are logged and ignored;
-	// the navbar missing is recoverable: a template that calls
-	// {{ template "header" }} simply no-ops if the block is
-	// missing (and the page renders fine without the nav).
-	if templates != nil {
-		if _, parseErr := templates.Parse(pageHeaderFallbackBody); parseErr != nil {
-			log.Printf("web: failed to register header block on embedded templates: %v", parseErr)
-		}
-	}
-	// The original ParseGlob / ParseFS path may have failed
-	// with a "function 'asset' not defined" error — that
-	// happens because the embedded templates use {{ asset ... }}
-	// calls but ParseFS doesn't carry our FuncMap. The
-	// re-parse above (with the FuncMap baked in) succeeds
-	// in that case, so by this point templates is non-nil
-	// and the bare "base" fallback is only reached if the
-	// re-parse ALSO failed — a true operator error that
-	// deserves the loud log.
-	if err != nil && templates == nil {
-		log.Printf("web: failed to load templates: %v", err)
-		templates = template.New("base")
-	}
-
-	// Async ingest queue. The queue is the source of truth
-	// for /api/ingest/async: submissions land here, a
-	// bounded worker pool drains it, every state transition
-	// is persisted to <cfg.Server.AsyncIngestQueueDir>. A
-	// restart re-enqueues any pending/processing jobs.
-	//
-	// Empty AsyncIngestQueueDir disables async ingest — the
-	// /api/ingest/async endpoint returns 503 in that case.
-	// The synchronous POST /api/ingest path is unaffected.
-	//
-	// The queue's IngestDocument adapter wraps the
-	// serviceAPI; we hand it svc so workers can call
-	// IngestDocument without reaching back into the
-	// web-package's internals.
-	var ingestQueue *jobs.Queue
-	// Reset the package-scope queue reference so a server
-	// constructed without async ingest sees ingest_queue.enabled
-	// = false in /api/health/full. Without this reset, a
-	// previous test that enabled the queue would leak its
-	// state into the next test's /api/health/full response.
-	globalIngestQueue = nil
-	if cfg.Server.AsyncIngestQueueDir != "" {
-		q, qerr := jobs.New(
-			cfg.Server.AsyncIngestQueueDir,
-			cfg.Server.MaxIngestDocumentBytes,
-			cfg.Server.AsyncIngestWorkers,
-		)
-		if qerr != nil {
-			log.Printf("web: failed to create ingest queue at %s: %v; async ingest disabled", cfg.Server.AsyncIngestQueueDir, qerr)
-		} else {
-			ingestQueue = q
-			// Stash the queue handle at package scope so the
-			// /api/health/full handler can read counters
-			// without crossing the serviceAPI boundary twice.
-			// Set before Start so the health handler sees the
-			// post-Start state once the cleanup loop is up.
-			globalIngestQueue = q
-			ingestQueue.Start(jobsServiceAdapter{svc: svc}, auditFunc(log.Printf))
-			// Background cleanup sweep. Operates on the same
-			// audit hook as the worker pool so the operator's
-			// log stream is unified. TTL=0 on both knobs
-			// disables cleanup entirely; StartCleanup is a
-			// no-op in that case.
-			ingestQueue.StartCleanup(
-				cfg.Server.AsyncIngestCleanupInterval,
-				cfg.Server.AsyncIngestCompletedJobTTL,
-				cfg.Server.AsyncIngestFailedJobTTL,
-				auditFunc(log.Printf),
-			)
-			log.Printf("web: async ingest queue started at %s (workers=%d, max_document_bytes=%d, cleanup_interval=%s, completed_ttl=%s, failed_ttl=%s)",
-				q.Dir(), q.Workers(), q.MaxBytes(),
-				cfg.Server.AsyncIngestCleanupInterval,
-				cfg.Server.AsyncIngestCompletedJobTTL,
-				cfg.Server.AsyncIngestFailedJobTTL)
-		}
-	}
-
 	s := &Server{
-		config:    cfg,
-		service:   svc,
-		router:    router,
-		templates: templates,
-		// Fallback templates are populated below, after
-		// assetVersions — they need the `asset` template
-		// function registered, which means we can't parse
-		// them in this struct literal (the FuncMap closure
-		// needs s.assetURL which lives on *Server).
+		config:        cfg,
+		service:       svc,
+		router:        chi.NewRouter(),
 		fallback:      &fallbackTemplates{},
-		ingestQueue:   ingestQueue,
-		oauthHandlers: oauthHandlers,
-		sessions:      sessions,
 		assetVersions: buildAssetVersions(),
 	}
 
-	// installAssetFuncs wires the `asset` template function onto
-	// both the embedded templates and the fallback Go-string
-	// templates. The function reads from s.assetVersions
-	// (populated above) and returns "/static/<name>?v=<sha>"
-	// for known assets — see installAssetFuncs for the full
-	// contract.
+	s.initOAuth()
+	s.installMiddleware()
+	s.loadTemplates()
+	s.initIngestQueue(svc)
 	s.installAssetFuncs()
-
 	s.registerRoutes()
 
 	return s
@@ -438,6 +169,450 @@ func (s *Server) installAssetFuncs() {
 	}
 	s.fallback.chat = parseFallback("chat.html", chatFallbackBody, funcs)
 	s.fallback.documents = parseFallback("documents.html", documentsFallbackBody, funcs)
+}
+
+// loadTemplates parses the page templates into s.templates.
+//
+// Precedence:
+//
+//  1. cfg.Paths.TemplatesDir, if set (operator override via
+//     yaml / env TEMPLATES_DIR; intended for shipping a custom
+//     template set without rebuilding the binary).
+//  2. The embedded templatesFS (compile-time embed; default
+//     for the published Docker image, which has no templates/
+//     on disk).
+//
+// Both branches parse into the same *template.Template, so
+// the rest of the package doesn't care which path served the
+// templates. A failure in the operator-supplied branch logs
+// and falls back to the embedded set; a failure in the
+// embedded branch logs and leaves s.templates as a bare
+// "base" template so the rest of the package can still
+// run (every page goes through serveBasicHTML → fallback
+// rendering in that case).
+//
+// Asset FuncMap trick: the embedded templates use
+// {{ asset "..." }} calls but the original ParseFS doesn't
+// carry our FuncMap. We re-parse via
+// template.New("base").Funcs(...) which bakes the FuncMap
+// into the receiver at parse time. Without this re-parse
+// html/template fails the parse on the missing function and
+// the operator gets a page that renders only the navbar.
+//
+// The receiver name "base" is mostly cosmetic: ParseFS
+// associates each file with its base name, and the per-page
+// render path goes through ExecuteTemplate on each named
+// sub-template, so the receiver name is just the fallback
+// Execute target. "base" is fine.
+//
+// Header block: the shared `header` template block is
+// registered (issue #85 follow-on) so embedded page
+// templates can invoke it via {{ template "header" .Header }}.
+// Without this the embedded templates/ (which is the default)
+// would render with no navbar — only the fallback Go-string
+// templates include the header today. Parse errors here are
+// logged and ignored; the navbar missing is recoverable
+// (a template that calls {{ template "header" }} simply
+// no-ops if the block is missing).
+//
+// Behavior contract (pinned by TestLoadTemplates_*):
+//   - cfg.Paths.TemplatesDir empty → embedded set parsed
+//     (search.html, etc. present).
+//   - cfg.Paths.TemplatesDir set to a directory with .html
+//     files → those files win over the embedded set.
+//   - cfg.Paths.TemplatesDir set to a missing/empty path →
+//     log + fall back to embedded.
+//   - Every embedded template's {{ asset ... }} call must
+//     resolve; the re-parse is what makes that work.
+//   - The shared "header" block is registered.
+func (s *Server) loadTemplates() {
+	// Load templates in this order of precedence:
+	//   1. cfg.Paths.TemplatesDir, if set
+	//   2. The embedded templatesFS
+	var templates *template.Template
+	var err error
+	switch {
+	case s.config.Paths.TemplatesDir != "":
+		templates, err = template.ParseGlob(filepath.Join(s.config.Paths.TemplatesDir, "*.html"))
+		if err != nil {
+			log.Printf("web: failed to load templates from %s: %v; falling back to embedded templates", s.config.Paths.TemplatesDir, err)
+			templates, err = template.ParseFS(templatesFS, "templates/*.html")
+		}
+	default:
+		templates, err = template.ParseFS(templatesFS, "templates/*.html")
+	}
+	// If the templates carried `{{ asset "..." }}` calls
+	// (every embedded template does; see the cache-busting
+	// contract in asset_version.go), the parser needs the
+	// `asset` function in its FuncMap before ParseFS runs.
+	// The re-parse below with the FuncMap baked in succeeds
+	// in that case; without it html/template fails the
+	// parse on the missing function.
+	{
+		var source string
+		if s.config.Paths.TemplatesDir != "" {
+			source = s.config.Paths.TemplatesDir
+		} else {
+			source = "embedded (templates/)"
+		}
+		withFuncs, parseErr := template.New("base").Funcs(template.FuncMap{
+			"asset": AssetURL,
+		}).ParseFS(templatesFS, "templates/*.html")
+		if parseErr != nil {
+			log.Printf("web: failed to re-parse %s with asset FuncMap: %v", source, parseErr)
+			// Keep the original parse — it may have partial
+			// state that's still better than nothing, and the
+			// operator's templates will fall back to bare
+			// "base" only if the original parse failed too.
+			if templates == nil {
+				templates = template.New("base")
+			}
+		} else {
+			templates = withFuncs
+		}
+	}
+	// Register the shared `header` template block (issue #85
+	// follow-on) so embedded page templates can invoke it via
+	// {{ template "header" .Header }}.
+	if templates != nil {
+		if _, parseErr := templates.Parse(pageHeaderFallbackBody); parseErr != nil {
+			log.Printf("web: failed to register header block on embedded templates: %v", parseErr)
+		}
+	}
+	// The original ParseGlob / ParseFS path may have failed
+	// with a "function 'asset' not defined" error — that
+	// happens because the embedded templates use {{ asset ... }}
+	// calls but ParseFS doesn't carry our FuncMap. The
+	// re-parse above (with the FuncMap baked in) succeeds
+	// in that case, so by this point templates is non-nil
+	// and the bare "base" fallback is only reached if the
+	// re-parse ALSO failed — a true operator error that
+	// deserves the loud log.
+	if err != nil && templates == nil {
+		log.Printf("web: failed to load templates: %v", err)
+		templates = template.New("base")
+	}
+	s.templates = templates
+}
+
+// initOAuth populates s.sessions and s.oauthHandlers when at
+// least one OAuth provider is configured. With no providers
+// configured (the historical single-user / bearer-token
+// install) both fields stay nil so the existing auth path
+// keeps working.
+//
+// When newOAuthHandlers returns an error (e.g. a provider
+// with missing required fields), s.oauthHandlers stays nil
+// but s.sessions is still constructed — the server starts
+// without session auth so other endpoints (bearer-token
+// /api/*) keep working. A loud log line names the failure.
+//
+// Cookie-name default: when Auth.CookieName is empty the
+// well-known "ragabast_session" is applied to oauthHandlers.
+// Writer (callback handlers) and reader (authMiddleware) must
+// agree on the name — a mismatch would silently break login.
+// Without the default, setSessionCookie would write "" and
+// readSessionCookie would never match.
+//
+// Session-TTL default: when Auth.SessionTTL is zero, the
+// store gets 12 hours. The 12h cap is a soft safety net
+// for the historical "sessions live forever" behavior that
+// bit operators who never set the knob.
+//
+// Behavior contract (pinned by TestInitOAuth_*):
+//   - No providers → s.sessions and s.oauthHandlers both nil.
+//   - Provider(s) + default cookie name →
+//     s.oauthHandlers.cookieName == "ragabast_session".
+//   - Provider(s) + custom cookie name → that name wins.
+//   - Provider(s) + Auth.SessionTTL == 0 → store is non-nil
+//     and a session can be minted and retrieved.
+//   - Provider with missing required fields (e.g. github
+//     without ClientSecret) → s.oauthHandlers nil,
+//     s.sessions still constructed.
+func (s *Server) initOAuth() {
+	if len(s.config.Auth.Providers) == 0 {
+		return
+	}
+
+	// sessionTTL zero → sessions live forever
+	// (in-memory, until restart). Default to 12h
+	// when the operator hasn't set one.
+	ttl := s.config.Auth.SessionTTL
+	if ttl == 0 {
+		ttl = 12 * time.Hour
+	}
+	s.sessions = newSessionStore(ttl)
+
+	// Cookie name: the operator can override via
+	// cfg.Auth.CookieName (or AUTH_COOKIE_NAME env);
+	// empty means "use the default" so writer and
+	// reader stay in sync. Without this default,
+	// setSessionCookie would set the cookie as ""
+	// (which browsers reject silently) and
+	// readSessionCookie would never match.
+	cookieName := s.config.Auth.CookieName
+	if cookieName == "" {
+		cookieName = "ragabast_session"
+	}
+
+	serverBase := deriveServerBase(s.config)
+	oh, err := newOAuthHandlers(s.config, serverBase, s.sessions)
+	if err != nil {
+		log.Printf("web: failed to initialize OAuth providers: %v; starting without session auth", err)
+		return
+	}
+	// Override the cookie name on the oauthHandlers
+	// struct so callback handlers write the same
+	// cookie the middleware reads.
+	oh.cookieName = cookieName
+	s.oauthHandlers = oh
+}
+
+// middlewareTimeout is the per-request budget the chi
+// middleware.Timeout enforces. The chi middleware cancels
+// the handler context but NOT the underlying connection;
+// only the http.Server timeouts do that. 60s is a balance:
+// short enough that a runaway prompt can't pin a worker
+// forever, long enough that legitimate LLM-backed handlers
+// (which can take tens of seconds for large-context
+// requests) finish.
+//
+// Pinned by TestInstallMiddleware_TimeoutReturns504WhenHandlerSleeps
+// to catch regressions that would silently drop or extend
+// the timeout.
+const middlewareTimeout = 60 * time.Second
+
+// installMiddleware assembles the chi router's middleware
+// chain. The ordering is significant: each comment below
+// names the reason for its position. NewServer must call
+// initOAuth BEFORE installMiddleware so the auth middleware
+// can read s.sessions and s.oauthHandlers.cookieName.
+//
+// Chain order (top to bottom = first to last to see the
+// request):
+//
+//  1. securityHeadersMiddleware — defense headers land on
+//     every response, including errors from middleware
+//     deeper in the chain.
+//  2. requestIDMiddleware — every downstream middleware,
+//     log line, and handler can read the ID via
+//     RequestIDFromContext. Placed before the access logger
+//     and recoverer so panic logs and access lines are
+//     correlated; placed after securityHeaders to keep the
+//     defense-header layer dependency-free.
+//  3. redactAccessLogMiddleware — mutates r.URL.RawQuery
+//     so chi's middleware.Logger sees redacted values for
+//     known sensitive keys (query/messages/text). MUST
+//     run before middleware.Logger.
+//  4. middleware.Logger — access log.
+//  5. middleware.Recoverer — panic-to-500.
+//  6. middleware.RealIP — rewrites r.RemoteAddr from
+//     X-Forwarded-For / X-Real-IP.
+//  7. clientIPMiddleware — extracts the host portion of
+//     r.RemoteAddr and stashes it on the request context
+//     for ClientIPFromContext.
+//  8. maxBytesReaderMiddleware — caps request body.
+//  9. middleware.Timeout — cancels the handler context
+//     after middlewareTimeout. The chi middleware does
+//     not close the connection; only the http.Server
+//     timeouts (ReadTimeout/WriteTimeout/IdleTimeout) do
+//     that.
+//  10. corsMiddleware — only when cfg.Server.EnableCORS.
+//     Runs before auth so OPTIONS preflight requests do
+//     not require a bearer token (browsers do not send
+//     credentials on preflight).
+//  11. authMiddleware — runs last so the body-size limit,
+//     security headers, CORS preflight, and request
+//     logging all apply to auth-failed requests too.
+//     With EffectiveAuthTokens empty the middleware is a
+//     no-op so the single-user local install keeps
+//     working.
+//  12. csrfMiddleware — runs after auth so a Bearer-auth
+//     POST (which cannot be made cross-origin by a
+//     browser) skips the CSRF check entirely. Runs before
+//     the rate limiter so a CSRF-failed flood still
+//     consumes bucket tokens — defense-in-depth that
+//     keeps a malicious page from probing token guesses
+//     with no rate-limit cost.
+//  13. rateLimiter.llmPathMiddleware — path-aware; only
+//     throttles requests matching llmPathPrefixes (see
+//     rate_limit.go) and passes every other request
+//     through. One middleware covers both the
+//     Huma-mounted LLM routes and the form-mounted
+//     LLM routes.
+//
+// Behavior contract (pinned by TestInstallMiddleware_*):
+//   - Security headers present on every response.
+//   - X-Request-Id generated per request, distinct between
+//     two consecutive requests.
+//   - CORS skipped when EnableCORS=false; applied
+//     (origin echoed) for allow-listed origins; rejected
+//     (not echoed) for non-allow-listed origins.
+//   - Auth gate: 401 on missing token when AuthToken set;
+//     200 on Bearer with the right token; pass-through
+//     when no tokens configured.
+//   - Timeout middleware in effect with middlewareTimeout
+//     (60s) as the budget.
+func (s *Server) installMiddleware() {
+	// securityHeadersMiddleware runs first so the defense
+	// headers land on every response — including error
+	// responses from middleware deeper in the chain.
+	s.router.Use(securityHeadersMiddleware)
+	// requestIDMiddleware runs second so every downstream
+	// middleware, log line, and handler can read the ID via
+	// RequestIDFromContext. Placing it before the access
+	// logger and recoverer means panic logs and access lines
+	// are correlated; placing it after securityHeaders
+	// keeps the defense-header layer dependency-free.
+	s.router.Use(requestIDMiddleware())
+	// redactAccessLogMiddleware MUST run before
+	// middleware.Logger so chi sees the rewritten URL when
+	// it formats the access line. The middleware mutates
+	// r.URL.RawQuery in place (replacing values for known
+	// sensitive keys with "[REDACTED]") so the operator
+	// query/messages/text fields never land in the log.
+	s.router.Use(redactAccessLogMiddleware)
+	s.router.Use(middleware.Logger)
+	s.router.Use(middleware.Recoverer)
+	s.router.Use(middleware.RealIP)
+	// clientIPMiddleware runs immediately after chi's RealIP
+	// so r.RemoteAddr has already been rewritten from
+	// X-Forwarded-For / X-Real-IP headers. The middleware
+	// extracts the host portion and stores it on the
+	// request context; downstream callers (audit log,
+	// rate-limit) read it via ClientIPFromContext.
+	s.router.Use(clientIPMiddleware())
+	s.router.Use(maxBytesReaderMiddleware)
+	s.router.Use(middleware.Timeout(middlewareTimeout))
+
+	// CORS runs before auth so OPTIONS preflight requests do
+	// not require a bearer token (browsers do not send
+	// credentials on preflight). The new allow-list middleware
+	// replaces the previous wildcard-or-nothing behavior.
+	if s.config.Server.EnableCORS {
+		s.router.Use(corsMiddleware(s.config.Server.CORSOrigins))
+	}
+
+	// Auth runs last so the body-size limit, security
+	// headers, CORS preflight, and request logging all apply
+	// to auth-failed requests too. With auth_token empty
+	// (the default) the middleware is a no-op so the
+	// single-user local install keeps working.
+	// EffectiveAuthTokens merges the singular AuthToken
+	// (backward-compatible shortcut) with the modern
+	// AuthTokens list, deduping by Value. installMiddleware
+	// is the only call site for authMiddleware — keep it
+	// that way so the security boundary is easy to audit.
+	cookieName := ""
+	if s.oauthHandlers != nil {
+		cookieName = s.oauthHandlers.cookieName
+	}
+	s.router.Use(authMiddleware(s.config.Server.EffectiveAuthTokens(), s.sessions, cookieName))
+
+	// csrfMiddleware runs after auth so a Bearer-auth POST
+	// (which cannot be made cross-origin by a browser) skips
+	// the CSRF check entirely. It runs before the rate
+	// limiter so a CSRF-failed flood still consumes bucket
+	// tokens — a defense-in-depth choice that keeps a
+	// malicious page from probing token guesses with no
+	// rate-limit cost.
+	// csrfMiddleware is auth-aware: when EffectiveAuthTokens
+	// is empty (the default local-dev install), CSRF is
+	// also bypassed because there is nothing to CSRF.
+	// When auth is configured, CSRF runs after auth so a
+	// Bearer-auth POST (which cannot be made cross-origin
+	// by a browser) skips the CSRF check entirely.
+	s.router.Use(csrfMiddleware(s.config.Server.EffectiveAuthTokens()))
+
+	// Rate-limit middleware for the LLM-backed endpoints. The
+	// middleware is path-aware (see rate_limit.go) and a no-op
+	// for any non-LLM URL prefix; it is installed at the
+	// chain level so it covers both the Huma-mounted
+	// endpoints and the form-mounted endpoints without
+	// wrapping each route individually.
+	rateLimiter := newLLMRateLimiter(s.config.Server.RateLimitPerMinute, s.config.Server.RateLimitBurst)
+	s.router.Use(rateLimiter.llmPathMiddleware)
+}
+
+// initIngestQueue populates s.ingestQueue when
+// cfg.Server.AsyncIngestQueueDir is set. The queue is the
+// source of truth for /api/ingest/async: submissions land
+// here, a bounded worker pool drains it, every state
+// transition is persisted to <AsyncIngestQueueDir>. A
+// restart re-enqueues any pending/processing jobs.
+//
+// Empty AsyncIngestQueueDir disables async ingest — the
+// /api/ingest/async endpoint returns 503 in that case. The
+// synchronous POST /api/ingest path is unaffected.
+//
+// The queue's IngestDocument adapter wraps the serviceAPI
+// (passed in as svc); we hand it svc so workers can call
+// IngestDocument without reaching back into the
+// web-package's internals.
+//
+// Package-level globalIngestQueue: set whenever a queue is
+// created, and reset to nil BEFORE the no-queue branch so
+// a previous test that enabled the queue doesn't leak its
+// state into the next test's /api/health/full response.
+// The reset is the same defensive line the original
+// NewServer carried.
+//
+// Behavior contract (pinned by TestInitIngestQueue_*):
+//   - Empty AsyncIngestQueueDir → s.ingestQueue nil,
+//     globalIngestQueue nil.
+//   - Writable AsyncIngestQueueDir → s.ingestQueue non-nil,
+//     globalIngestQueue == s.ingestQueue, workers started.
+//   - jobs.New error (e.g. dir can't be created) →
+//     s.ingestQueue nil, server doesn't panic.
+//   - Reset path: a non-nil globalIngestQueue at entry is
+//     cleared before deciding whether to create a new queue.
+func (s *Server) initIngestQueue(svc serviceAPI) {
+	// Reset the package-scope queue reference so a server
+	// constructed without async ingest sees ingest_queue.enabled
+	// = false in /api/health/full. Without this reset, a
+	// previous test that enabled the queue would leak its
+	// state into the next test's /api/health/full response.
+	globalIngestQueue = nil
+
+	if s.config.Server.AsyncIngestQueueDir == "" {
+		s.ingestQueue = nil
+		return
+	}
+
+	q, qerr := jobs.New(
+		s.config.Server.AsyncIngestQueueDir,
+		s.config.Server.MaxIngestDocumentBytes,
+		s.config.Server.AsyncIngestWorkers,
+	)
+	if qerr != nil {
+		log.Printf("web: failed to create ingest queue at %s: %v; async ingest disabled", s.config.Server.AsyncIngestQueueDir, qerr)
+		s.ingestQueue = nil
+		return
+	}
+	s.ingestQueue = q
+	// Stash the queue handle at package scope so the
+	// /api/health/full handler can read counters
+	// without crossing the serviceAPI boundary twice.
+	// Set before Start so the health handler sees the
+	// post-Start state once the cleanup loop is up.
+	globalIngestQueue = q
+	q.Start(jobsServiceAdapter{svc: svc}, auditFunc(log.Printf))
+	// Background cleanup sweep. Operates on the same
+	// audit hook as the worker pool so the operator's
+	// log stream is unified. TTL=0 on both knobs
+	// disables cleanup entirely; StartCleanup is a
+	// no-op in that case.
+	q.StartCleanup(
+		s.config.Server.AsyncIngestCleanupInterval,
+		s.config.Server.AsyncIngestCompletedJobTTL,
+		s.config.Server.AsyncIngestFailedJobTTL,
+		auditFunc(log.Printf),
+	)
+	log.Printf("web: async ingest queue started at %s (workers=%d, max_document_bytes=%d, cleanup_interval=%s, completed_ttl=%s, failed_ttl=%s)",
+		q.Dir(), q.Workers(), q.MaxBytes(),
+		s.config.Server.AsyncIngestCleanupInterval,
+		s.config.Server.AsyncIngestCompletedJobTTL,
+		s.config.Server.AsyncIngestFailedJobTTL)
 }
 
 // registerAuthRoutes wires the OAuth handlers into the
