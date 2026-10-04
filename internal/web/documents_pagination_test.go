@@ -59,6 +59,11 @@ func TestDocumentsPage_NextPageRoundTrip(t *testing.T) {
 // branch: no documents means no pagination links at
 // all (rather than "Showing 0–0 of 0"). The empty
 // placeholder is rendered by the table branch.
+//
+// Phase 6.1 of plans/ux-overhaul.md updated the
+// empty-state copy from "No documents ingested yet"
+// to "Nothing here yet." as part of the cross-cutting
+// polish pass.
 func TestDocumentsPage_EmptyCorpus(t *testing.T) {
 	cfg := config.DefaultConfig()
 	s := NewServer(cfg, &fakeService{})

@@ -43,6 +43,10 @@ func TestDocumentsFallback_RendersTagsAsChips(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		body := w.Body.String()
 
+		// Phase 6.1 updated the copy from
+		// "No documents ingested yet." to the new
+		// tone "Nothing here yet." Pin the new copy
+		// here so a future regression is caught.
 		assert.Contains(t, body, "Nothing here yet.",
 			"empty corpus must surface the Phase 6.1 copy (Nothing here yet.)")
 		assert.NotContains(t, body, "[",
