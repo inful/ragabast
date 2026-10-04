@@ -23,6 +23,11 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# Editor / scratch backups. Phase 6 of plans/ux-overhaul.md
+# accidentally committed `fallback_renderers.go.bak` and
+# `chat.js.bak`; ignore the pattern so it cannot recur.
+*.bak
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
