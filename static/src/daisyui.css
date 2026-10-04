@@ -74,6 +74,14 @@
             * component renders the round initial-circle; the
             * tooltip component surfaces hover hints for the
             * action bar's "N sources" badge. */
-           chat, avatar, tooltip;
+           chat, avatar, tooltip,
+           /* Phase 8 of plans/ux-overhaul.md (login theme
+            * follow-on): the login page's help link uses
+            * daisyUI's link component (link + link-hover +
+            * link-primary). The pre-Phase-8 design used the
+            * `link link-hover:link-primary` syntax (Tailwind
+            * v3 / daisyUI v4) which silently dropped to a
+            * raw anchor under daisyUI v5. */
+           link;
   logs: false;
 }

@@ -1293,6 +1293,7 @@ look right?" — when in doubt, screenshot it.
 | 5 — login | 0.5 day | Phase 1 |
 | 6 — cross-cutting polish | 0.5 day | Phases 1–5 |
 | 7 — prose typography | 0.5 day | Phases 2, 3 (template + CSS) |
+| 8 — login theme follow-on | 0.5 day | Phase 5 |
 
 **Total: ~5–6 working days** for a single instance, working
 top-to-bottom. Phases 2–5 can be parallelized across
@@ -1394,6 +1395,102 @@ When Phase 7 is complete, every box below must be checked:
 11. ✓ Visual verification: chat reply with a list shows
     properly indented bullet items with comfortable
     spacing, in both light and dark mode
+
+---
+
+## Phase 8 — login theme follow-on
+
+A late-arriving regression from Phase 5 (login overhaul).
+The Phase 5 changes added daisyUI utility classes to
+`templates/login.html` (`flex items-center gap-3
+border ... size-5 shrink-0 ...`) but never added
+`<link rel="stylesheet" href=".../daisyui.min.css">`
+to the login page's `<head>`. Result: every daisyUI
+utility class on the login page was a hollow contract.
+
+Concrete visible symptoms on the rendered page:
+
+1. The provider SVGs (GitHub Octocat, GitLab Tanuki)
+   rendered at intrinsic viewBox dimensions, dwarfing
+   the page — the brand mark SVG also rendered at
+   intrinsic size.
+2. The brand bar (navbar) had no flex layout because
+   `navbar` / `navbar-start` / `navbar-end` /
+   `bg-base-100` didn't apply.
+3. The provider buttons were mis-positioned because
+   `flex items-center gap-3` didn't apply.
+
+Plus a separate theme issue: the page used a
+hardcoded GitHub-dark palette (`text-[#8b949e]`,
+`bg-[#161b22]`, `border-[#30363d]`, etc.) which
+was the pre-Phase-5 design pinned via `body {
+background: #0e1116; color: #e6edf3; }` in
+`login.css`. The page rendered the same dark
+regardless of `prefers-color-scheme`.
+
+### Fix
+
+| File | What changes |
+|---|---|
+| `internal/web/templates/login.html` | Add `<link rel="stylesheet" href="{{ asset "daisyui.min.css" }}">` to `<head>`. Add `class="bg-base-100 text-base-content"` to `<body>`. Replace six hardcoded GitHub-dark tokens (`border-[#30363d]`, `bg-[#161b22]`, `text-[#e6edf3]`, `text-[#8b949e]`, `text-[#6e7681]`, `text-[#7d8590]`, plus `hover:border-[#58a6ff]` / `focus:border-[#58a6ff]` / `focus-visible:outline-[#58a6ff]`) with daisyUI theme-aware classes (`border-base-300`, `bg-base-200`, `text-base-content`, `text-base-content/70`, `text-base-content/60`, `text-base-content/50`, `hover:border-primary` / `focus:border-primary` / `focus-visible:outline-primary`). |
+| `internal/web/static/login.css` | Drop the hardcoded `body { background: #0e1116; color: #e6edf3 }` block. The body now inherits daisyUI's themed `bg-base-100` / `text-base-content` from the template. |
+| `static/src/daisyui.css` | Add `link` to the daisyUI `@plugin "daisyui" { include: ... }` list. The pre-Phase-8 template used `link link-hover:link-primary` (daisyUI v4 / Tailwind v3 syntax) which silently dropped to a raw anchor under daisyUI v5. Phase 8 also updates the template to the daisyUI v5 syntax `link link-hover link-primary`. |
+| `internal/web/static/daisyui.min.css` | Rebuilt via `make css`. Bundle grows by ~824 bytes (the `link` component). |
+| `internal/web/login_themes_test.go` (new) | Four tests pinning the contract (see below). |
+| `internal/web/static_test.go` | Two existing tests pinned the pre-Phase-8 hardcoded-palette contract; both are updated to the new theme-aware contract. `TestStaticHandler_ServesLoginCSS` flips from `require.Contains(body, "#0e1116")` to `require.NotContains(body, "#0e1116")`. `TestLoginTemplate_UsesTailwindUtilities` swaps `text-[#8b949e]` and `text-[#6e7681]` for the daisyUI equivalents. |
+
+### Tests (in `internal/web/login_themes_test.go`)
+
+1. `TestLogin_LoadsDaisyUIBundle` — pins that
+   `/auth/login` HTML carries
+   `<link rel="stylesheet" href="/static/daisyui.min.css">`.
+   Without this, every daisyUI utility class on the
+   page is a hollow contract.
+2. `TestLogin_NoHardcodedGitHubDarkTokens` — pins that
+   none of the six pre-Phase-8 hex tokens appear in the
+   rendered HTML body (comments stripped first; the
+   Go html/template engine preserves the inner text
+   of a `<!-- ... -->` comment in some cases).
+3. `TestLogin_UsesThemeAwareClasses` — positive
+   counterpart: the page carries `bg-base-100` and
+   `text-base-content` so it follows daisyUI's theme.
+4. `TestLoginCSS_NoHardcodedBodyBackground` — pins
+   that `login.css` no longer pins `body { background:
+   #0e1116; color: #e6edf3 }`. Comments stripped first.
+
+### Acceptance criteria
+
+When Phase 8 is complete, every box below must be
+checked:
+
+1. ✓ `internal/web/templates/login.html` loads
+   `daisyui.min.css`
+2. ✓ `login.html` `<body>` carries
+   `class="bg-base-100 text-base-content"`
+3. ✓ `login.html` uses no hardcoded GitHub-dark hex
+   tokens (`#30363d`, `#161b22`, `#e6edf3`, `#8b949e`,
+   `#6e7681`, `#7d8590`)
+4. ✓ `login.html` uses daisyUI theme-aware classes
+   (`bg-base-200`, `text-base-content`, `border-base-300`,
+   `text-base-content/70`, `text-base-content/60`,
+   `text-base-content/50`)
+5. ✓ `login.html` uses the daisyUI v5 link syntax
+   (`link link-hover link-primary`, not the v4
+   `link link-hover:link-primary`)
+6. ✓ `static/src/daisyui.css` `@plugin "daisyui"`
+   include list contains `link`
+7. ✓ `internal/web/static/login.css` body block does
+   NOT pin `background:` or `color:`
+8. ✓ All four new tests in `login_themes_test.go` pass
+9. ✓ The two updated tests in `static_test.go` pass
+10. ✓ All existing tests pass (`go test ./... -count=1`)
+11. ✓ `golangci-lint run` is clean
+12. ✓ `make css-check` is fresh
+13. ✓ Visual verification: provider SVGs render at 20×20,
+    navbar lays out correctly with the brand mark on the
+    left and the Chat/Search/Documents links on the right,
+    provider buttons sit inside the card with proper flex
+    alignment, in both light and dark mode
 
 ## Why this is the right next step
 

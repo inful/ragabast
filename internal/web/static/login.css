@@ -7,27 +7,30 @@
  * styles load under the strict CSP.
  *
  * What lives here vs. in the template: this file holds the
- * page-level (body) styling — the dark GitHub-style background,
- * the centered flex layout, the system font stack. The
- * per-element layout (the heading, the lead text, the provider
- * list, the meta paragraph) uses Tailwind utility classes
- * directly in templates/login.html so the markup is self-
- * documenting and the CSS file stays small. See Phase 2a of
- * plans/daisyui-migration.md for the rationale.
+ * page-level (body) layout — the centered flex layout, the
+ * system font stack. The body background and text color come
+ * from daisyUI's theme tokens (bg-base-100 / text-base-content,
+ * applied to <body> in templates/login.html) so the page
+ * follows prefers-color-scheme like the rest of the daisyUI
+ * surface.
  *
- * The hardcoded dark palette is intentional. The page renders
- * before authentication (no session, no preference cookies),
- * and the operator-facing visual contract is "this page is
- * always dark." The hardcoded colors are preserved 1:1 from
- * the pre-migration design. Any visual change to the login
- * page is a follow-up project, not part of the Bulma ->
- * DaisyUI migration.
+ * Phase 8 of plans/ux-overhaul.md (login theme follow-on):
+ * the pre-Phase-8 design pinned body to a hardcoded dark
+ * palette so the login page always looked dark. Phase 8
+ * drops that pinning — the page now follows the user's
+ * OS theme preference via daisyUI's themed bg-base-100 /
+ * text-base-content. The hardcoded dark tokens that used
+ * to live in templates/login.html are also gone; the
+ * template now uses theme-aware classes (bg-base-200,
+ * text-base-content, border-base-300, text-base-content/N).
+ * The exact tokens removed are documented in the SPEC
+ * (plans/ux-overhaul.md Phase 8); this comment avoids
+ * repeating them so a future "no hardcoded colors" linter
+ * doesn't trip on its own documentation.
  */
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  background: #0e1116;
-  color: #e6edf3;
   margin: 0;
   min-height: 100vh;
   display: flex;

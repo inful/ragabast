@@ -665,18 +665,19 @@ func TestStaticHandler_ServesLoginCSS(t *testing.T) {
 		"/static/login.css Content-Type must start with text/css (got %q)", ct)
 	require.NotEmpty(t, w.Body.Bytes(), "/static/login.css body must not be empty")
 	body := w.Body.String()
-	// Sanity: the hardcoded dark-theme background must be
-	// present. Phase 2a of the Bulma -> DaisyUI migration
-	// slimmed login.css to just the body styling; the
-	// per-element layout moved to Tailwind utility classes
-	// in templates/login.html. The dark GitHub-style
-	// palette is the new core contract — a future
-	// contributor who removes the hardcoded colors
-	// (e.g. to "use daisyUI semantic tokens") would
-	// regress the visual to whatever daisyUI's default
-	// dark theme looks like. See plans/daisyui-migration.md.
-	require.Contains(t, body, "#0e1116",
-		"login.css must carry the hardcoded dark background color (the login page is intentionally always dark)")
+	// Sanity: login.css must NOT pin the body to a
+	// hardcoded dark background. Phase 8 of the UX
+	// overhaul (login theme follow-on) made the login
+	// page theme-aware — body background + text color
+	// come from daisyUI's bg-base-100 / text-base-content
+	// (applied to <body> in templates/login.html). login.css
+	// retains the page-level layout (centered flex, font
+	// stack, etc.) but defers all color to daisyUI's theme.
+	// A future contributor re-adding `background: #0e1116`
+	// would re-pin the page to dark regardless of the user's
+	// prefers-color-scheme and regress Phase 8.
+	require.NotContains(t, body, "#0e1116",
+		"login.css must not hardcode the dark page background — body color comes from daisyUI's bg-base-100 / text-base-content (Phase 8 login theme follow-on)")
 }
 
 // TestLoginTemplate_NoInlineStyle pins that login.html does
@@ -727,6 +728,13 @@ func TestLoginTemplate_NoInlineStyle(t *testing.T) {
 // styling (page chrome) that lives outside the per-element
 // layout.
 //
+// Phase 8 of plans/ux-overhaul.md (login theme follow-on)
+// replaced the page's hardcoded dark palette
+// (text-[#8b949e], text-[#6e7681], etc.) with daisyUI's
+// theme-aware classes (text-base-content/70,
+// text-base-content/60, ...) so the page follows
+// prefers-color-scheme.
+//
 // The page intentionally uses a hardcoded dark GitHub-style
 // palette — the design predates the migration, the page
 // renders before authentication (no session, no preference
@@ -757,11 +765,13 @@ func TestLoginTemplate_UsesTailwindUtilities(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	body := w.Body.String()
 
-	// Lead paragraph carries the muted color via Tailwind
-	// arbitrary value syntax. The literal class string
-	// pins the post-migration shape.
-	require.Contains(t, body, `text-[#8b949e]`,
-		"the lead paragraph must use a Tailwind arbitrary-value class for the muted color (post-migration contract)")
+	// Lead paragraph carries the muted color via daisyUI's
+	// theme-aware opacity modifier (text-base-content/70).
+	// The literal class string pins the post-Phase-8 shape;
+	// a future contributor reverting to a hardcoded
+	// Tailwind arbitrary value would regress the theme.
+	require.Contains(t, body, `text-base-content/70`,
+		"the lead paragraph must use a daisyUI theme-aware muted color (Phase 8 login theme follow-on)")
 
 	// Provider list uses the Tailwind grid utility for
 	// vertical spacing. We assert on the two classes
@@ -773,9 +783,9 @@ func TestLoginTemplate_UsesTailwindUtilities(t *testing.T) {
 		"the providers list must use the Tailwind gap-2 utility class")
 
 	// Meta paragraph carries the smaller muted color via
-	// Tailwind arbitrary value syntax.
-	require.Contains(t, body, `text-[#6e7681]`,
-		"the meta paragraph must use a Tailwind arbitrary-value class for the muted color")
+	// daisyUI's theme-aware opacity modifier.
+	require.Contains(t, body, `text-base-content/60`,
+		"the meta paragraph must use a daisyUI theme-aware muted color (Phase 8)")
 }
 
 // TestStaticAssets_AllowListIsExact pins that the staticAssets
