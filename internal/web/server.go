@@ -394,24 +394,50 @@ func NewServer(cfg *config.Config, svc serviceAPI) *Server {
 		assetVersions: buildAssetVersions(),
 	}
 
-	// Register the `asset` template function so every page
-	// can write `{{ asset "daisyui.min.css" }}` and get back
-	// "/static/daisyui.min.css?v=<sha>". The FuncMap is applied
-	// to both the embedded-template branch and the fallback
-	// Go-string templates so a single helper covers every
-	// page-rendering path.
-	funcs := template.FuncMap{
-		"asset": s.assetURL,
-	}
-	if templates != nil {
-		s.templates = templates.Funcs(funcs)
-	}
-	s.fallback.chat = parseFallback("chat.html", chatFallbackBody, funcs)
-	s.fallback.documents = parseFallback("documents.html", documentsFallbackBody, funcs)
+	// installAssetFuncs wires the `asset` template function onto
+	// both the embedded templates and the fallback Go-string
+	// templates. The function reads from s.assetVersions
+	// (populated above) and returns "/static/<name>?v=<sha>"
+	// for known assets — see installAssetFuncs for the full
+	// contract.
+	s.installAssetFuncs()
 
 	s.registerRoutes()
 
 	return s
+}
+
+// installAssetFuncs registers the `asset` template function so
+// every page can write `{{ asset "daisyui.min.css" }}` and get
+// back "/static/daisyui.min.css?v=<sha>". The FuncMap is
+// applied to both the embedded-template branch and the fallback
+// Go-string templates so a single helper covers every
+// page-rendering path.
+//
+// Behavior contract (pinned by TestInstallAssetFuncs_*):
+//   - s.templates (when non-nil) gains the FuncMap. A nil
+//     templates is left nil — the asset function won't be
+//     available, but no panic; serveBasicHTML routes around
+//     the missing template anyway.
+//   - s.fallback.chat and s.fallback.documents are always
+//     populated (parseFallback is never given an empty body).
+//   - Unknown asset names resolve to the unversioned URL
+//     "/static/<name>" — the static handler's permissive
+//     fallback serves the same unversioned file. The typo-
+//     tolerance is intentional: a missing-asset panic would
+//     take down the page.
+//   - The function is deterministic: two calls with the same
+//     name return the same URL. assetVersions is keyed by name
+//     and never mutates after NewServer returns.
+func (s *Server) installAssetFuncs() {
+	funcs := template.FuncMap{
+		"asset": s.assetURL,
+	}
+	if s.templates != nil {
+		s.templates = s.templates.Funcs(funcs)
+	}
+	s.fallback.chat = parseFallback("chat.html", chatFallbackBody, funcs)
+	s.fallback.documents = parseFallback("documents.html", documentsFallbackBody, funcs)
 }
 
 // registerAuthRoutes wires the OAuth handlers into the
