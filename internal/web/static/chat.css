@@ -64,6 +64,21 @@ pre.chat-msg {
   word-break: break-word;
 }
 
+/*
+ * Phase 7 of plans/ux-overhaul.md (prose typography follow-on).
+ * The @tailwindcss/typography plugin sets `.prose` body text to
+ * `--tw-prose-body` (a hardcoded gray in the plugin default).
+ * Inside the chat-bubble that gray would override the bubble's
+ * own themed color, leaving every assistant reply visually gray
+ * instead of theme-aware. Scoping `color: inherit` to
+ * `.chat-msg.prose` keeps the override surgical: only chat
+ * bubbles lose it; search-result chunks and the landing
+ * placeholder keep the plugin's intended body color.
+ */
+.chat-msg.prose {
+  color: inherit;
+}
+
 /* htmx loading indicator: hidden by default, visible while a
  * request tagged with hx-indicator is in flight. The
  * .htmx-request class is added/removed by htmx automatically.

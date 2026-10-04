@@ -31,6 +31,33 @@
 @source "../../internal/web/templates/*.html";
 @source "../../internal/web/fallback_renderers.go";
 
+/*
+ * Phase 7 of plans/ux-overhaul.md (prose typography follow-on).
+ *
+ * Without @tailwindcss/typography the .prose class is a hollow
+ * contract: goldmark correctly renders lists / paragraphs /
+ * headings / code blocks as <ul>/<p>/<h*>/<pre>, but the
+ * typography plugin that styles them was never installed, so
+ * the chat assistant reply rendered with raw browser defaults
+ * (40px left margin on lists, tiny bullet character, no
+ * spacing between items, no line-height harmony with
+ * surrounding prose).
+ *
+ * Loading the plugin via @plugin (Tailwind v4 CSS-first
+ * config) emits the typography rules inside the existing
+ * tree-shaken daisyui.min.css bundle. The chat-message
+ * fragment already carries `class="chat-msg prose"` on the
+ * assistant reply; this single @plugin line lights that up.
+ *
+ * Size modifiers (prose-sm, prose-lg, ...) are picked per
+ * surface in the templates; the chat assistant reply uses
+ * prose-sm (14px) so the body text fits the chat-bubble
+ * scale; search-result chunks and the landing placeholder
+ * use the default prose-base (16px) which is more article-
+ * shaped.
+ */
+@plugin "@tailwindcss/typography";
+
 @plugin "daisyui" {
   themes: light --default, dark --prefersdark;
   include: button, input, select, textarea, checkbox, label,

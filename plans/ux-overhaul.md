@@ -1292,10 +1292,108 @@ look right?" — when in doubt, screenshot it.
 | 4 — documents | 1 day | Phase 1 |
 | 5 — login | 0.5 day | Phase 1 |
 | 6 — cross-cutting polish | 0.5 day | Phases 1–5 |
+| 7 — prose typography | 0.5 day | Phases 2, 3 (template + CSS) |
 
 **Total: ~5–6 working days** for a single instance, working
 top-to-bottom. Phases 2–5 can be parallelized across
 instances; the dependency is only on Phase 1.
+
+---
+
+## Phase 7 — prose typography follow-on
+
+A late-arriving regression: the markdown the LLM emits has
+been correctly rendered as `<ul>`/`<ol>`/`<li>`/`<p>`/`<h*>`/`<pre>`
+since the original markdown pipeline (goldmark + GFM) was
+introduced, but the supporting typography plugin
+(`@tailwindcss/typography`) was never installed. The chat
+assistant reply, the search-result chunk bodies, and the
+landing placeholder all carry `class="prose"` as the
+contract for "render markdown-shaped content with proper
+typography" — but the `.prose` selectors in the shipped
+bundle were empty, so the browser fell back to UA defaults.
+
+Concretely, this showed up as:
+
+- Lists rendering with raw browser defaults — 40px left
+  margin, a small bullet character, no spacing between
+  items, no line-height harmony with surrounding text.
+- Paragraphs not getting vertical rhythm (each `<p>` flush
+  against the next, no margin-block).
+- Headings (`<h2>`, `<h3>`) inheriting the body text size,
+  not the typography plugin's larger scale.
+- Code blocks not getting the plugin's background color
+  or padding.
+
+The Bulma 1.x era had its own `.content` reset that shipped
+the same rules; the daisyUI migration swapped that for
+`.prose` but the typography plugin install step was missed.
+
+### Files
+
+| File | What changes |
+|---|---|
+| `package.json` | Add `@tailwindcss/typography` to `devDependencies`. |
+| `static/src/daisyui.css` | Add `@plugin "@tailwindcss/typography";` after `@source` and before `@plugin "daisyui"`. |
+| `internal/web/templates/chat_message.html` | Apply `prose prose-sm` (instead of just `prose`) to the assistant's reply `<div class="chat-msg">`. prose-sm (0.875rem / 14px) is chat-appropriate; prose-base (1rem / 16px) is too large inside the chat-bubble. |
+| `internal/web/static/chat.css` | Add a scoped override: `.chat-msg.prose { color: inherit }`. The plugin defaults `.prose` body text to `--tw-prose-body` (a hardcoded gray); inside a chat-bubble that gray overrides the bubble's themed color. The override keeps the plugin's intent everywhere else (search results, landing) but restores the chat-bubble color where it matters. |
+| `internal/web/static/daisyui.min.css` | Rebuilt via `make css`. Bundle grows by ~24 KB (85 KB → 110 KB), still under the 200 KB Phase 7 budget and the 250 KB existing `static_test.go` budget. |
+| `internal/web/chat_prose_test.go` (new) | Six tests pinning the contract (described below). |
+
+### Tests (in `internal/web/chat_prose_test.go`)
+
+1. `TestChatMessageFragment_AssistantReplyUsesProseSm` —
+   pins that the assistant reply `<div>` carries
+   `chat-msg prose prose-sm`. The size modifier is the
+   load-bearing visual contract.
+2. `TestChatMessageFragment_OperatorMessagePlainText` —
+   pins that the operator message stays inside
+   `<pre class="chat-msg">` (no `prose`, no markdown). The
+   operator types raw text; only the assistant reply is
+   markdown-rendered.
+3. `TestChatMessageFragment_HandlesListAndParagraphMarkdown`
+   — pins that the chat handler end-to-end renders
+   `- one` / `- two` markdown as `<ul><li>one</li><li>two</li></ul>`
+   and wraps a paragraph in `<p>...</p>`. The search-side
+   `TestHandleSearchSubmit_RendersLists` covers the
+   renderer; this pins the chat handler uses it.
+4. `TestChatMessageFragment_HandlesHeadingAndCodeBlock` —
+   same shape of pin for `## heading` and fenced
+   ```code blocks```.
+5. `TestShippedCSS_TypographyPluginLoaded` — pins that
+   the shipped `daisyui.min.css` contains the plugin's
+   `.prose :where(ul|ol|p|h2|h3|pre|code):not(...)` selectors.
+   Without this the prose class is a hollow contract.
+6. `TestShippedCSS_ChatMsgProseInheritsColor` — pins that
+   `chat.css` carries `.chat-msg.prose { color: inherit }`.
+7. `TestShippedCSS_BundleSizeBudgetReasonable` — tighter
+   Phase-7-specific bundle budget: 200 KB (vs. the
+   existing 250 KB test). A runaway plugin upgrade is
+   caught immediately.
+
+### Acceptance criteria
+
+When Phase 7 is complete, every box below must be checked:
+
+1. ✓ `npm install` adds `@tailwindcss/typography` to
+   `package-lock.json`
+2. ✓ `static/src/daisyui.css` carries
+   `@plugin "@tailwindcss/typography";`
+3. ✓ `internal/web/templates/chat_message.html` carries
+   `class="chat-msg prose prose-sm"` on the assistant
+   reply div
+4. ✓ `internal/web/static/chat.css` carries
+   `.chat-msg.prose { color: inherit }`
+5. ✓ `internal/web/static/daisyui.min.css` includes
+   `.prose :where(ul|ol|li|p|h2|h3|pre|code):not(...)`
+6. ✓ All six new tests in `chat_prose_test.go` pass
+7. ✓ All existing tests pass (`go test ./... -count=1`)
+8. ✓ `golangci-lint run` is clean
+9. ✓ `make css-check` is fresh
+10. ✓ daisyui.min.css stays under 200 KB
+11. ✓ Visual verification: chat reply with a list shows
+    properly indented bullet items with comfortable
+    spacing, in both light and dark mode
 
 ## Why this is the right next step
 

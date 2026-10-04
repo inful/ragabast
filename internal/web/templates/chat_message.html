@@ -113,7 +113,16 @@
             Assistant · <time datetime="{{ .Timestamp }}">just now</time>
         </div>
         <div class="chat-bubble">
-            <div class="chat-msg prose">{{ .AnswerHTML }}</div>
+            <!--
+                Phase 7 of plans/ux-overhaul.md (prose typography
+                follow-on). The assistant reply carries chat-msg
+                (overflow-wrap / word-break rules from chat.css)
+                + prose + prose-sm (typography plugin). prose-sm
+                (0.875rem / 14px) is the chat-appropriate size;
+                prose-base (1rem) is too large inside the
+                chat-bubble.
+            -->
+            <div class="chat-msg prose prose-sm">{{ .AnswerHTML }}</div>
             {{ if .Sources }}
             <!--
                 Source citations as inline badge chips.
