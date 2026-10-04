@@ -129,9 +129,34 @@ const cspStrict = "default-src 'self'; " +
 // (Huma serves a fixed template populated with the
 // server-generated OpenAPI doc), so the wider
 // trusted-script-origin set is bounded to a known surface.
+//
+// 'unsafe-inline' is allowed in style-src (Phase 9 of
+// plans/ux-overhaul.md) because two pieces of the docs
+// surface need it:
+//  1. Huma's emitted template carries
+//     `<body style="height: 100vh;">` verbatim — a
+//     fixed inline style attribute.
+//  2. `<elements-api>` is a Stoplight custom element
+//     that generates dynamic inline `<style>` blocks
+//     in its shadow DOM at runtime (to size the
+//     expand/collapse / search / copy-as-cURL / lock
+//     SVG icons, among other things). Without
+//     'unsafe-inline' in style-src, the browser drops
+//     those rules and the icons render at browser
+//     default sizes (huge or invisible).
+//
+// The risk is bounded:
+//   - script-src stays 'self' https://unpkg.com — no
+//     remote code execution becomes available.
+//   - 'unsafe-inline' for styles enables only CSS
+//     injection vectors (data exfiltration via
+//     background-image: url(...), clickjacking tricks);
+//     cannot execute scripts.
+//   - /docs does not render any user input, so the
+//     attack surface for CSS injection is small.
 const cspWithDocs = "default-src 'self'; " +
 	"script-src 'self' https://unpkg.com; " +
-	"style-src 'self' https://unpkg.com; " +
+	"style-src 'self' https://unpkg.com 'unsafe-inline'; " +
 	"img-src 'self' data:; " +
 	"frame-ancestors 'none'; " +
 	"base-uri 'self'; " +

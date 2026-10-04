@@ -1294,6 +1294,7 @@ look right?" — when in doubt, screenshot it.
 | 6 — cross-cutting polish | 0.5 day | Phases 1–5 |
 | 7 — prose typography | 0.5 day | Phases 2, 3 (template + CSS) |
 | 8 — login theme follow-on | 0.5 day | Phase 5 |
+| 9 — docs CSP follow-on | 0.25 day | Phase 5 |
 
 **Total: ~5–6 working days** for a single instance, working
 top-to-bottom. Phases 2–5 can be parallelized across
@@ -1491,6 +1492,116 @@ checked:
     left and the Chat/Search/Documents links on the right,
     provider buttons sit inside the card with proper flex
     alignment, in both light and dark mode
+
+---
+
+## Phase 9 — docs CSP follow-on
+
+A late-arriving issue from the huma v2.34.1 docs
+template. Huma emits the `/docs` page as:
+
+```html
+<!doctype html>
+<html lang="en">
+  <head>
+    <link href="https://unpkg.com/@stoplight/elements@9.0.0/styles.min.css" rel="stylesheet" />
+    <script src="https://unpkg.com/@stoplight/elements@9.0.0/web-components.min.js" integrity="…" crossorigin="anonymous"></script>
+  </head>
+  <body style="height: 100vh;">                ← INLINE STYLE
+    <elements-api apiDescriptionUrl="…/openapi.yaml" router="hash" layout="sidebar" tryItCredentialsPolicy="same-origin" />
+  </body>
+</html>
+```
+
+Two pieces of the docs surface need `'unsafe-inline'`
+in `style-src`:
+
+1. The `<body style="height: 100vh;">` attribute is a
+   fixed string huma ships verbatim.
+2. The `<elements-api>` tag is a Stoplight Elements
+   custom element that generates dynamic inline
+   `<style>` blocks in its shadow DOM at runtime
+   (used to size the expand/collapse / search /
+   copy-as-cURL / lock SVG icons, among other
+   things).
+
+The pre-Phase-9 `cspWithDocs` was
+`style-src 'self' https://unpkg.com` — no
+`'unsafe-inline'`. The browser silently dropped the
+body's height and the Stoplight shadow-DOM styles;
+the visible symptom was the Stoplight SVG icons
+rendering at browser default sizes (huge or
+invisible).
+
+The pre-Phase-9 test
+`TestSecurityHeaders_DocsPageAllowsUnpkg` only
+asserted that the CSP *contained* `https://unpkg.com`
+— it never opened the page in a real browser, so the
+CSS breakage wasn't caught.
+
+### Fix
+
+| File | What changes |
+|---|---|
+| `internal/web/security_headers.go` | Add `'unsafe-inline'` to `style-src` in `cspWithDocs`. The script-src stays strict (`'self' https://unpkg.com`). Update the long comment block above the constant to explain the relaxation and the bounded risk. |
+| `internal/web/security_headers_docs_inline_test.go` (new) | Three new tests pinning the contract (described below). |
+
+### Why this is safe
+
+- `script-src` stays `self https://unpkg.com` — no
+  remote code execution becomes available.
+- `'unsafe-inline'` for styles enables only CSS
+  injection vectors (data exfiltration via
+  `background-image: url(...)`, clickjacking tricks);
+  it cannot execute scripts.
+- `/docs` does not render any user input (Huma serves
+  a fixed template populated with the
+  server-generated OpenAPI doc), so the CSS-injection
+  attack surface is small.
+- The relaxation is contained to `/docs`; every other
+  route, including `/openapi.json`, `/openapi.yaml`,
+  `/api/*`, `/chat`, `/search`, `/documents`, stays
+  on `cspStrict`.
+
+### Tests (in `internal/web/security_headers_docs_inline_test.go`)
+
+1. `TestSecurityHeaders_DocsAllowsInlineStyles` — pins
+   that `/docs` CSP's `style-src` includes
+   `'unsafe-inline'` alongside `'self'` and
+   `https://unpkg.com`.
+2. `TestSecurityHeaders_DocsBodyKeepsInlineStyleHeight`
+   — pins the user-visible side: the huma-emitted
+   `<body style="height: 100vh;">` is in the HTML
+   body. If a future huma upgrade drops the inline
+   style, we revisit and can tighten the CSP back
+   down.
+3. `TestSecurityHeaders_AppRoutesStillRejectInlineStyles`
+   — pins the negative half: the app-route strict CSP
+   does not allow `'unsafe-inline'`. Phase 9 only
+   relaxes the `/docs` CSP, never the strict CSP.
+
+### Acceptance criteria
+
+When Phase 9 is complete, every box below must be
+checked:
+
+1. ✓ `cspWithDocs` `style-src` includes
+   `'self' https://unpkg.com 'unsafe-inline'`
+2. ✓ `cspStrict` (app routes) does NOT include
+   `'unsafe-inline'`
+3. ✓ `/docs` HTML body contains
+   `<body style="height: 100vh;">` (the huma
+   contract is preserved)
+4. ✓ All three new tests in
+   `security_headers_docs_inline_test.go` pass
+5. ✓ All existing tests pass (`go test ./... -count=1`)
+6. ✓ `golangci-lint run` is clean
+7. ✓ `make css-check` is fresh
+8. ✓ Visual verification: load `/docs` in a real
+   browser, confirm the Stoplight SVG icons (expand,
+   collapse, search, copy-as-cURL, lock) render at
+   their intended sizes, and the page fills the
+   viewport (`body { height: 100vh }`)
 
 ## Why this is the right next step
 
