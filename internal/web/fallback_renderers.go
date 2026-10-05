@@ -312,11 +312,22 @@ const chatFallbackBody = `<!DOCTYPE html>
 </head>
 <body class="container mx-auto mt-4 pt-16">
 	{{ template "header" .Header }}
-	<h1 class="text-2xl font-semibold">Chat</h1>
-	<p class="text-base text-base-content/70 mb-4">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
 
 	<div id="chat-messages" class="card chat-log" role="log" aria-live="polite" aria-label="Chat transcript">
 		<div class="card-body">
+			<!--
+				Header alignment: the page h1 + subtitle live
+				INSIDE the chat-log card-body (not as body-level
+				children above the card) so they share the same
+				column as the scrollback. The card-body's
+				internal padding aligns the title with the messages
+				below. Without this, the body-level h1 sat at x=0
+				while the centered card sat at x=192 on a 1280px
+				viewport — a 192px visual gap that made the page
+				header look detached from the scrollback.
+			-->
+			<h1 class="m-0 text-2xl font-semibold">Chat</h1>
+			<p class="m-0 mb-4 text-base text-base-content/70">Retrieval-augmented chat: each reply cites the chunks it was grounded on.</p>
 			<div class="prose flex flex-col items-center text-center" id="chat-messages-placeholder">
 				<!--
 					Phase 2.1 of plans/ux-overhaul.md: the

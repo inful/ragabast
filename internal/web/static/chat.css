@@ -73,6 +73,30 @@
   word-break: break-word;
 }
 
+/*
+ * Operator bubble max-width: daisyUI's chat-bubble defaults
+ * to max-width: 90% of its grid column. For a chat-log card
+ * at 56rem that meant an operator message stretched to
+ * ~510px wide — wide enough that a short question felt
+ * like a prose paragraph rather than a chat message.
+ * ChatGPT / Notion AI cap operator messages at ~70% of the
+ * scrollback width for the same reason: a narrower question
+ * reads as "you said something" rather than "here is a
+ * block of user text".
+ *
+ * The selector scopes to .chat-start so the assistant side
+ * (chat-end) keeps daisyUI's default — long answers with
+ * code blocks, source citations, and inline headings need
+ * the full column width. The fix is in CSS only (no template
+ * change) so the assistant chat_bubble from templates/
+ * chat_message.html picks it up via cascade order — chat.css
+ * loads after daisyui.min.css, so this rule wins at equal
+ * specificity.
+ */
+.chat-start .chat-bubble {
+  max-width: 70%;
+}
+
 pre.chat-msg {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

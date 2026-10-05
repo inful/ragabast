@@ -149,6 +149,64 @@ func TestChatLanding_OrientingPlaceholder(t *testing.T) {
 		"the empty state lives in the same page as the input form")
 }
 
+// TestChatLanding_PageHeaderInsideChatLogBody pins the
+// "the page header (h1 + subtitle) and the chat scrollback
+// share the same column" contract. Before this fix the
+// h1 and subtitle were body-level children with the chat
+// card centered to a 56rem max-width; the visual gap
+// between the body-level header (x=0) and the centered
+// card (x=192 on a 1280px viewport) made the page header
+// look detached from the scrollback below it. The h1
+// and subtitle now live INSIDE the chat-log card-body so
+// they align vertically with the messages.
+//
+// The test runs the chat fallback end-to-end (rather than
+// reading the static chatFallbackBody source) so a future
+// parsing regression — e.g. a re-introduced
+// {{ template "header" }} inside an HTML comment — trips
+// the test rather than silently regressing. Static-source
+// regression guards live separately in
+// internal/web/login_template_comment_test.go.
+func TestChatLanding_PageHeaderInsideChatLogBody(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeHumaService{})
+	s.templates = nil
+
+	data := chatFallbackData{
+		Title:     "Chat",
+		CsrfToken: "",
+		SessionID: "session-test",
+		Header: pageHeaderData{
+			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
+		},
+	}
+
+	var buf strings.Builder
+	require.NoError(t, s.fallback.chat.Execute(&buf, data))
+	body := buf.String()
+
+	// The chat-log card-body must contain BOTH the h1
+	// and the subtitle, before the chat-messages-placeholder.
+	// We pin the structural ordering (h1, subtitle,
+	// placeholder) inside the card, not the exact markup,
+	// so a future contributor can swap <p> for <div> or
+	// wrap things in <header> without breaking the test.
+	cardOpenIdx := strings.Index(body, `id="chat-messages"`)
+	cardBodyOpenIdx := strings.Index(body[cardOpenIdx:], "card-body")
+	h1Idx := strings.Index(body, "<h1")
+	subtitleIdx := strings.Index(body, "Retrieval-augmented chat")
+	placeholderIdx := strings.Index(body, `id="chat-messages-placeholder"`)
+	require.Positive(t, cardOpenIdx, "chat-messages card must render")
+	require.Positive(t, cardBodyOpenIdx, "card-body wrapper must render")
+	require.Positive(t, h1Idx, "h1 must render")
+	require.Positive(t, subtitleIdx, "subtitle must render")
+	require.Positive(t, placeholderIdx, "placeholder must render")
+	require.Greater(t, h1Idx, cardOpenIdx+cardBodyOpenIdx,
+		"the h1 must live inside the chat-messages card-body, not as a body-level child above the card")
+	require.Less(t, subtitleIdx, placeholderIdx,
+		"the subtitle must appear before the placeholder so the title block still introduces the empty state")
+}
+
 // TestChatLanding_SendButtonUsesPrimaryAction pins the
 // color-grammar contract: the chat landing page's primary
 // call-to-action must use daisyUI's `btn-primary` color

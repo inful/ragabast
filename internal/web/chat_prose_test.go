@@ -219,6 +219,37 @@ func TestShippedCSS_ChatMsgProseInheritsColor(t *testing.T) {
 		"chat.css must override color inside .chat-msg.prose so the chat-bubble color wins over the typography plugin's gray body text (Phase 7)")
 }
 
+// TestShippedCSS_OperatorBubbleMaxWidth pins the
+// "operator (chat-start) bubbles feel like chat questions,
+// not full-width prose paragraphs" contract. daisyUI's
+// chat-bubble defaults to max-width: 90% of its grid
+// column, which for the chat-log card at 56rem means an
+// operator message stretches to ~510px — wide enough that
+// a short question feels like a paragraph rather than a
+// chat message. ChatGPT / Notion AI cap operator messages
+// at ~70% of the scrollback width for the same reason:
+// a narrower question reads as "you said something"
+// rather than "here is a block of user text".
+//
+// chat.css scopes the override down to .chat-start
+// .chat-bubble so the assistant side (chat-end) keeps
+// daisyUI's default — long answers with code blocks need
+// the full column width.
+//
+// Regression guard for the user-reported "chat still looks
+// quite bad in the latest release" issue. The daisyUI
+// 90% cap is technically correct for a chat table but
+// reads as a paragraph here.
+func TestShippedCSS_OperatorBubbleMaxWidth(t *testing.T) {
+	css := readStaticAsset(t, "/static/chat.css")
+	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
+
+	assert.Regexp(t,
+		`\.chat-start\s+\.chat-bubble\s*\{[^}]*max-width:`,
+		css,
+		"chat.css must override .chat-start .chat-bubble max-width so operator messages feel like chat questions rather than full-width prose paragraphs")
+}
+
 // TestShippedCSS_ChatMsgLinksUseThemeAwareColor pins the
 // dark-mode link readability contract. The
 // @tailwindcss/typography plugin sets `.prose :where(a)` to
