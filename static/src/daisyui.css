@@ -59,7 +59,7 @@
 @plugin "@tailwindcss/typography";
 
 @plugin "daisyui" {
-  themes: light --default, dark --prefersdark;
+  themes: light --default;
   include: button, input, select, textarea, checkbox, label,
            navbar, card, alert, badge, table, fieldset, divider,
            loading, join, indicator, status,
