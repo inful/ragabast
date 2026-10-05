@@ -304,7 +304,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
 	<title>{{ .Title }}</title>
-	<meta name="htmx-config" content='{"allowEval":false}'>
+	<meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false}'>
 	<link rel="stylesheet" href="{{ asset "daisyui.min.css" }}">
 	<link rel="stylesheet" href="{{ asset "chat.css" }}">
 	<script src="{{ asset "htmx.min.js" }}" defer></script>

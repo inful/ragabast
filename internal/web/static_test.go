@@ -511,6 +511,58 @@ func TestChatFallback_HtmxConfigDisablesEval(t *testing.T) {
 		"htmx-config must set allowEval to false so eval() / Function() are never called at runtime")
 }
 
+// TestChatFallback_HtmxConfigDisablesIndicatorStyles pins the
+// "htmx does not auto-inject a <style> tag for the indicator
+// class" contract. htmx 1.9.x's `includeIndicatorStyles` config
+// defaults to `true`; on first request htmx injects a
+// `<style>` element into <head> with the standard
+// `.htmx-indicator { opacity: 0 }` / `.htmx-request .htmx-indicator
+// { opacity: 1 }` rules. That <style> element is rendered
+// by the browser as inline style, which our strict CSP
+// (`style-src 'self'` — no `unsafe-inline`) blocks. The
+// browser logs a CSP violation and the indicator never shows.
+//
+// The fix is to set `includeIndicatorStyles: false` in the
+// htmx-config meta tag, then provide our own indicator rules
+// in chat.css. We already do — see `.htmx-indicator` and
+// `.htmx-request.htmx-indicator` in internal/web/static/chat.css
+// — so disabling htmx's auto-injection doesn't lose the
+// loading-state affordance, it just shifts ownership to chat.css.
+func TestChatFallback_HtmxConfigDisablesIndicatorStyles(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+	s.templates = nil
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+
+	require.Contains(t, body, `"includeIndicatorStyles":false`,
+		"chat fallback must set htmx includeIndicatorStyles=false in the htmx-config meta tag — otherwise htmx auto-injects an inline <style> tag on the first request, which the strict CSP (style-src 'self', no 'unsafe-inline') blocks")
+}
+
+// TestSearchHTML_HtmxConfigDisablesIndicatorStyles pins the
+// same contract for the embedded /search template. The
+// search page also loads htmx (the filter input is
+// hx-get /search with hx-indicator), so the auto-injection
+// would fire there too and trip the strict CSP. The
+// fix is the same htmx-config meta tag, applied to the
+// search template's <head>.
+//
+// We use a static template read rather than going through
+// the HTTP server because the /search test fixture
+// (searchHTML) is just the template body — the /search
+// route is served from this template directly.
+func TestSearchHTML_HtmxConfigDisablesIndicatorStyles(t *testing.T) {
+	body := searchHTML(t)
+
+	require.Contains(t, body, `"includeIndicatorStyles":false`,
+		"search.html must set htmx includeIndicatorStyles=false in the htmx-config meta tag — same CSP contract as the chat fallback")
+}
+
 // TestChatFallback_NoHxOnAttributes pins that the chat
 // landing page does not use hx-on::* attributes. With
 // allowEval disabled, htmx would silently ignore them — the
