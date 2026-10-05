@@ -300,6 +300,24 @@ func (s *Server) renderFallback(w http.ResponseWriter, name string, data any) {
 //     htmx never tries to evaluate hx-on::* attributes. The
 //     loading-state UX that used to be hx-on::* is wired
 //     instead by /static/chat.js via DOM event listeners.
+//
+// Layout: the <body> deliberately drops the daisyUI
+// `container` class so the chat-log card and chat-form
+// card can use every horizontal pixel of the viewport.
+// The `container` utility is a centered max-width that
+// caps the page at the daisyUI 2xl breakpoint (~1536px)
+// on wide viewports — a chat that respects the cap feels
+// narrow on a 4K / ultrawide display. The horizontal
+// padding lives in chat.css (a `body { padding-inline }
+// ` rule) so the chat-log card has breathing room from
+// the viewport edges without re-introducing a
+// center-aligned cap. Putting the padding in chat.css
+// (rather than a `px-2 sm:px-4` utility class on the
+// body) means the rule ships verbatim in the chat.css
+// asset and doesn't require a `make css` rebuild when
+// it changes. The per-bubble max-widths (operator 70%,
+// assistant prose 65ch) keep individual messages
+// readable regardless of how wide the card gets.
 const chatFallbackBody = `<!DOCTYPE html>
 <html>
 <head>
@@ -310,7 +328,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<script src="{{ asset "htmx.min.js" }}" defer></script>
 	<script src="{{ asset "chat.js" }}" defer></script>
 </head>
-<body class="container mx-auto mt-4">
+<body class="mt-4">
 	{{ template "header" .Header }}
 
 	<div id="chat-messages" class="card chat-log" role="log" aria-live="polite" aria-label="Chat transcript">

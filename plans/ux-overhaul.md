@@ -463,22 +463,41 @@ navbar (chat, search, documents).
 
 ### 2.5 — Auto-scroll behavior
 
-**Problem:** new messages should auto-scroll to the bottom;
-if the user has scrolled up, don't snap them down.
+**Problem:** new messages should auto-scroll to the bottom
+so the operator always sees the newest reply. The original
+"near-bottom check" (Phase 2.5) gated the auto-scroll on
+the user already being at the tail — which left them
+stranded at a stale scroll position whenever a new message
+arrived while they were reading history. The user
+explicitly asked for the auto-scroll to always fire so
+they never have to click "Jump to latest" to see the
+newest information.
 
-**Fix:** JS in `chat.js`. After every `htmx:afterRequest` on
-`#chat-messages`, check if the user is "near the bottom" (within
-~50px). If so, `scrollTop = scrollHeight`. If not, leave them
-where they are.
+**Fix:** JS in `chat.js`. After every `htmx:afterRequest`
+on `#chat-messages`, scroll the log to the bottom
+unconditionally (`scrollTop = scrollHeight`). The
+"near-bottom" check is still used by the Jump-to-latest
+button to decide when to show itself — an operator who
+manually scrolled up after the auto-scroll fired can
+click the button to jump back to the tail.
+
+**Trade-off (called out in the test):** always-scrolling
+means an operator scrolled up to read history will be
+scrolled away when a new message arrives. The Jump-to-
+latest button still appears when they manually scroll up
+after the fact, so they can get back to the tail with one
+click — but they will not be left there silently when a
+new message lands.
 
 **Why JS not a daisyUI feature:** scrolling behavior is
-application logic, not styling. daisyUI has `scroll-snap` for
-snapping, but the "near bottom" check is custom.
+application logic, not styling. daisyUI has `scroll-snap`
+for snapping, but the unconditional bottom-scroll is
+custom.
 
 **The `Jump to latest` button** (already exists in the
-post-migration chat) is the manual override. Phase 2
-strengthens the auto-scroll and ensures the button still
-appears when the user is scrolled away.
+post-migration chat) is the manual override for when the
+operator has scrolled up after a new message and wants to
+return to the tail.
 
 ---
 

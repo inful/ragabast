@@ -42,45 +42,127 @@ func TestChatLog_HasRelativePositioning(t *testing.T) {
 // the full container width. The replacement tests below pin
 // the actual contract.
 //
-// See TestChatLog_UsesFullContainerWidth and
+// See TestChatLog_UsesFullBodyWidth and
 // TestChatBody_NoStickyNavbarGap for the new pins.
 
-// TestChatLog_UsesFullContainerWidth pins the "chat card
-// fills the container width" contract. The user reports the
-// chat page should match documents/search: the chat-log card
-// and the chat-form card each span the full body container
-// width, not a 56rem-capped sub-column. The v0.16.5 commit
-// added a max-width: 56rem cap to both, which made the chat
-// feel narrow against a wide viewport — and visually
-// disconnected from documents/search which use the full
-// container.
+// TestChatBody_HasHorizontalPadding pins the "chat page
+// has breathing room from the viewport edges" contract.
+// The body class drops the daisyUI `container` class
+// (so the chat cards can use the full viewport width)
+// and chat.css supplies the horizontal padding in its
+// place — 8px on small viewports, 16px from 640px up.
+// Without this rule the chat-log card and chat-form
+// card would touch the viewport edges on a full-bleed
+// layout, which is a design regression.
 //
-// The bubble-width contract is still preserved by the
-// per-bubble operator-bubble override (see
-// TestShippedCSS_OperatorBubbleMaxWidth), so the
-// individual messages don't span the full container —
-// just the cards that hold them.
-func TestChatLog_UsesFullContainerWidth(t *testing.T) {
+// Why the padding lives in chat.css (not as a `px-2
+// sm:px-4` utility on the body): the shipped
+// daisyui.min.css is tree-shaken from the @source
+// files. A body-class change would need a `make css`
+// rebuild to land in the embedded bundle. chat.css
+// ships verbatim from the source file (no tree-
+// shaking), so a CSS-only change here takes effect
+// without a rebuild.
+func TestChatBody_HasHorizontalPadding(t *testing.T) {
+	css := readStaticAsset(t, "/static/chat.css")
+	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
+
+	// The body element must declare padding-inline.
+	// We allow any value — the comment in chat.css
+	// documents the responsive scale (0.5rem on
+	// small, 1rem from 40rem up).
+	assert.Regexp(t, `body\s*\{[^}]*padding-inline:`, css,
+		"chat.css must declare padding-inline on body so the chat cards have breathing room from the viewport edges (the body class dropped the daisyUI `container` class so the cards can use the full viewport width; the padding has to live somewhere)")
+
+	// The responsive step (>= 640px / 40rem) must
+	// increase the padding so the chat doesn't
+	// look cramped on tablets/desktops.
+	assert.Regexp(t, `@media\s*\(\s*min-width:\s*40rem\s*\)\s*\{[^}]*body\s*\{[^}]*padding-inline:`, css,
+		"chat.css must declare a larger padding-inline on body at the sm breakpoint (40rem) so the breathing room scales up on tablets/desktops")
+}
+
+// TestChatLog_UsesFullBodyWidth pins the "chat cards fill
+// the available body width" contract. The user has
+// reported the chat feels narrow twice now: first against
+// the v0.16.5 56rem cap on the cards (fixed in a follow-on
+// by removing the cap and letting the cards fill the body
+// container), and again against the daisyUI `container`
+// class on the body itself (a centered max-width that
+// caps the page at ~1536px on a 2xl viewport, leaving
+// large empty margins on a 4K / ultrawide display).
+//
+// The current contract: the body uses the daisyUI
+// `container` class is REMOVED, so the chat-log card
+// and the chat-form card each span the full viewport
+// width (with a small breathing-room padding on the
+// body). The per-bubble max-widths (operator at 70%
+// via TestShippedCSS_OperatorBubbleMaxWidth; assistant
+// prose at 65ch via the @tailwindcss/typography plugin)
+// keep individual messages readable regardless of how
+// wide the card gets — a 4000px viewport still produces
+// a 65ch-wide assistant reply, the same as on a 1280px
+// viewport.
+//
+// The test pins both sides of the contract:
+//   - chat.css has no max-width cap on .chat-log or
+//     #chat-form (the CSS half).
+//   - The rendered <body> on the chat page does NOT
+//     carry the daisyUI `container` class (the
+//     template half — the body must not re-introduce
+//     a max-width constraint).
+func TestChatLog_UsesFullBodyWidth(t *testing.T) {
 	css := readStaticAsset(t, "/static/chat.css")
 	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
 
 	// .chat-log must not have a max-width cap. Bubbles
 	// inside are individually constrained (operator at
 	// 70%, assistant prose at 65ch) but the card itself
-	// fills the body container.
+	// fills the body width.
 	assert.NotRegexp(t, `\.chat-log\s*\{[^}]*max-width:`, css,
-		".chat-log must not have a max-width cap — the chat card should fill the body container width, matching documents/search")
+		".chat-log must not have a max-width cap — the chat card should fill the body width, matching documents/search and using every available horizontal pixel on wide viewports")
 
 	// Same for #chat-form. The textarea and source-kind
 	// checkboxes line up with the chat scrollback above
-	// because both fill the container.
+	// because both fill the body width.
 	assert.NotRegexp(t, `#chat-form\s*\{[^}]*max-width:`, css,
-		"#chat-form must not have a max-width cap — the input form should fill the body container width, matching the chat-log above it")
+		"#chat-form must not have a max-width cap — the input form should fill the body width, matching the chat-log above it")
 
 	// Same for the centering — no margin-inline: auto on
-	// the chat-log card now that it fills the container.
+	// the chat-log card now that it fills the body.
 	assert.NotRegexp(t, `\.chat-log\s*\{[^}]*margin-inline:\s*auto`, css,
-		".chat-log must not use margin-inline: auto to center a narrower card — the card now fills the container")
+		".chat-log must not use margin-inline: auto to center a narrower card — the card now fills the body")
+
+	// Now the template half: the chat fallback's
+	// <body> must not carry the daisyUI `container`
+	// class. `container` is a centered max-width utility
+	// that caps the page at the daisyUI 2xl breakpoint
+	// (~1536px) on wide viewports — exactly the
+	// "chat feels narrow on ultrawide displays" symptom
+	// the user reported. Removing it lets the body
+	// fill the viewport; the chat-log card fills the
+	// body; per-bubble max-widths keep messages
+	// readable.
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeHumaService{})
+	s.templates = nil
+
+	data := chatFallbackData{
+		Title:     "Chat",
+		CsrfToken: "",
+		SessionID: "session-test",
+		Header: pageHeaderData{
+			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
+		},
+	}
+
+	var buf strings.Builder
+	require.NoError(t, s.fallback.chat.Execute(&buf, data))
+	body := buf.String()
+
+	bodyClass := bodyRE(body, `<body\s+class="([^"]*)"`)
+	require.NotEmpty(t, bodyClass, "chat fallback must render a <body> with a class attribute")
+	assert.NotRegexp(t, `\bcontainer\b`, bodyClass,
+		"the chat <body> class must not include daisyUI's `container` — the centered max-width utility caps the page at ~1536px on wide viewports, leaving the chat feeling narrow on ultrawide displays. The per-bubble max-widths (operator 70%, assistant 65ch) handle readability; the card itself should fill the body.")
 }
 
 // TestChatBody_NoStickyNavbarGap pins the "no gap between the

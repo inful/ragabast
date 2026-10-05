@@ -30,11 +30,15 @@
  * to the chat-log container keeps it visually attached
  * to the message list.
  *
- * The chat card fills the body container width — matching
- * documents and search, which also use the full container.
- * The per-bubble max-widths (operator at 70%, assistant
- * prose at 65ch) are what give individual messages
- * reasonable line lengths, not the card itself.
+ * The chat card fills the body width — and the body fills
+ * the viewport width. The daisyUI `container` class was
+ * dropped from the body because its centered max-width cap
+ * (~1536px on 2xl) made the chat feel narrow on ultrawide
+ * displays. The per-bubble max-widths (operator at 70%,
+ * assistant prose at 65ch) are what give individual
+ * messages reasonable line lengths, not the card itself,
+ * so a 4000px viewport still produces a readable assistant
+ * reply (65ch, same as on a 1280px viewport).
  */
 .chat-log {
   max-height: 60vh;
@@ -43,9 +47,37 @@
 }
 
 /*
- * Chat form card. Full container width to align with the
- * chat-log above it. The textarea + source-kind checkboxes
- * span the container the same way the chat scrollback does.
+ * Body horizontal padding. The chat page drops the
+ * daisyUI `container` class on <body> so the chat-log
+ * card and chat-form card can use the full viewport
+ * width. Without padding, the cards would touch the
+ * viewport edges. This rule adds 8px (0.5rem) of
+ * horizontal padding on small viewports and 16px
+ * (1rem) on screens >= 640px (Tailwind's `sm`
+ * breakpoint) — the same scale the daisyUI `container`
+ * class used to provide. Why a CSS rule here instead
+ * of a `px-2 sm:px-4` utility class on the body: the
+ * shipped daisyui.min.css is tree-shaken from the
+ * source files; a contributor who changes the body
+ * class would need to run `make css` to regenerate
+ * the bundle. A CSS rule on `body` lives in chat.css
+ * (which is not tree-shaken — it ships verbatim) and
+ * applies immediately, no rebuild required.
+ */
+body {
+  padding-inline: 0.5rem;
+}
+@media (min-width: 40rem) {
+  body {
+    padding-inline: 1rem;
+  }
+}
+
+/*
+ * Chat form card. Full body width to align with the
+ * chat-log above it. The textarea + source-kind
+ * checkboxes span the body the same way the chat
+ * scrollback does.
  */
 #chat-form {
   width: 100%;

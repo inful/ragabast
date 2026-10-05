@@ -335,16 +335,33 @@
       }
     });
 
-    // Issue #88: "Jump to latest" affordance for long chat
-    // sessions. The chat log scrolls independently of the
-    // page; once the user scrolls up to read history they
-    // can lose track of where new messages are landing.
-    // The button is rendered inside the chat-log container
-    // (chatFallbackBody) and stays pinned to its
-    // bottom-right via .jump-to-latest CSS. chat.js toggles
-    // the .is-visible class on every scroll event so the
-    // button only shows when the operator is not at the
-    // tail. Click → smooth scroll to the bottom.
+    // Issue #88 + follow-on: "Jump to latest" affordance
+    // and "always-scroll-on-new-message" auto-scroll.
+    //
+    // The chat log scrolls independently of the page;
+    // once the user scrolls up to read history they can
+    // lose track of where new messages are landing. The
+    // follow-on revision changed the auto-scroll from
+    // "scroll only if already near the bottom" to
+    // "always scroll to the bottom on every new message"
+    // because the user reported the near-bottom check
+    // left them stranded at a stale scroll position —
+    // they didn't want to have to click "Jump to latest"
+    // to see the newest reply. The trade-off (called out
+    // in TestChat_AutoScrollOnEveryNewMessage) is that an
+    // operator scrolled up to read history will be
+    // scrolled away when a new message arrives; the
+    // Jump-to-latest button still appears when they
+    // manually scroll up after the fact, so they can
+    // get back to the tail with one click.
+    //
+    // The button is rendered inside the chat-log
+    // container (chatFallbackBody) and stays pinned to
+    // its bottom-right via .jump-to-latest CSS. chat.js
+    // toggles the .is-visible class on every scroll
+    // event so the button only shows when the operator
+    // is not at the tail. Click → smooth scroll to the
+    // bottom.
     var log = document.getElementById('chat-messages');
     var jumpBtn = document.getElementById('jump-to-latest');
     if (log && jumpBtn) {
@@ -374,14 +391,17 @@
 
       // On every new message (htmx:afterRequest fires after
       // the chat-form POST and the response fragment is
-      // beforeend-swapped into the log), check whether the
-      // operator was already at the tail. If yes, follow
-      // the new content; if no, leave them where they were
-      // — but show the button so they can choose to jump.
+      // beforeend-swapped into the log), scroll to the
+      // bottom unconditionally. The previous "near-bottom
+      // check" gated the scroll on the user already being
+      // at the tail — that left the user stranded at a
+      // stale scroll position when a new message arrived
+      // while they were reading history. The Jump-to-latest
+      // button still appears when the user manually scrolls
+      // up after the fact, so they can get back to the
+      // tail with one click.
       form.addEventListener('htmx:afterRequest', function () {
-        if (isNearBottom(log)) {
-          log.scrollTop = log.scrollHeight;
-        }
+        log.scrollTop = log.scrollHeight;
         updateJumpVisibility();
       });
 
