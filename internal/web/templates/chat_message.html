@@ -17,13 +17,17 @@
     standard pattern for chat UIs (Linear, Notion, Claude.ai,
     ChatGPT) is now applied here.
 
-    Layout:
+    Layout (pseudo-code; the real markup uses Go-template
+    action syntax that must NOT appear in this comment —
+    Go's parser has been observed to mis-execute directives
+    inside HTML comments, see TestEmbeddedTemplates_
+    NoTemplateDirectiveInComment):
 
       <div class="chat chat-start">            <- operator (left in LTR)
         <div class="chat-image avatar">         <- round initial-circle
         <div class="chat-header">                <- "You · 23:00"
         <div class="chat-bubble chat-bubble-primary">
-          {{ .User }}                            <- operator message
+          { .User }                             <- operator message
         </div>
       </div>
 
@@ -31,14 +35,14 @@
         <div class="chat-image avatar">         <- group = action-bar hover target
         <div class="chat-header">
         <div class="chat-bubble">                 <- default (neutral) color
-          {{ .AnswerHTML }}                      <- assistant reply (safe HTML)
-          {{ if .Sources }}
+          { .AnswerHTML }                       <- assistant reply (safe HTML)
+          { if .Sources }
           <div class="flex flex-wrap gap-1 mt-2">  <- inline source badges
-            {{ range .Sources }}
+            { range .Sources }
             <a class="badge badge-info badge-sm">     <- inline citation
-            {{ end }}
+            { end }
           </div>
-          {{ end }}
+          { end }
         </div>
         <div class="chat-footer opacity-0 group-hover:opacity-100">  <- action bar
           <button data-action="copy">Copy</button>

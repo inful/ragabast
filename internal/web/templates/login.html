@@ -28,7 +28,18 @@
             partial (in fallback_renderers.go) renders
             a small SVG mark next to the "ragabast" text
             in the brand bar. This page renders the
-            partial via {{ template "header" .Header }}.
+            partial via the header block.
+
+    IMPORTANT — template directives must NOT appear inside
+    HTML comments: Go's html/template parser does not
+    treat mustache-style braces inside comments as comment
+    text. A previous version of this comment included the
+    literal template directive that invokes the header
+    block, which caused the parser to render the navbar
+    TWICE — once before the document root and once inside
+    the body — producing the broken layout operators saw.
+    The directive is still authored in the body below; do
+    not reintroduce it into a comment.
 -->
 <html lang="en">
 <head>
