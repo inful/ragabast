@@ -250,6 +250,48 @@ func TestShippedCSS_OperatorBubbleMaxWidth(t *testing.T) {
 		"chat.css must override .chat-start .chat-bubble max-width so operator messages feel like chat questions rather than full-width prose paragraphs")
 }
 
+// TestShippedCSS_OperatorPreResetsProseMargin pins the
+// "operator pre doesn't inherit the prose plugin's pre
+// margins" contract. The chat-turn wrapper has class
+// `prose chat-turn` so the assistant reply's typography
+// gets prose's list / heading / code-block styling. But
+// the same wrapper also contains the operator-side
+// <pre class="chat-msg">, and the prose plugin's
+//
+//	.prose :where(pre) { margin-top: 1.71429em;
+//	                     margin-bottom: 1.71429em; }
+//
+// applies to every descendant <pre> in the wrapper —
+// including the operator pre. At prose-sm's 14px
+// font-size that's ~24px of top margin AND ~24px of
+// bottom margin, so a 2-line operator message ends up
+// in a 130px-tall bubble with ~50% empty vertical
+// space. The user reported the bubbles as "squashed" —
+// the actual issue is that the pre's prose-default
+// margins push the visible text into a small fraction
+// of the bubble's vertical area.
+//
+// The fix in chat.css targets pre.chat-msg (without
+// the .prose class) so the operator pre gets the
+// margin reset. Assistant pre blocks (which carry
+// chat-msg.prose.prose-sm) keep the prose margins —
+// code fences still get the surrounding whitespace
+// the prose plugin's design calls for.
+func TestShippedCSS_OperatorPreResetsProseMargin(t *testing.T) {
+	css := readStaticAsset(t, "/static/chat.css")
+	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
+
+	// The selector must be pre.chat-msg (or a parent that
+	// includes the operator pre) AND the property must
+	// reset margin-block to 0 so the prose pre's
+	// 1.71429em top/bottom margins don't push the operator
+	// text into a small fraction of the bubble.
+	assert.Regexp(t,
+		`pre\.chat-msg\s*\{[^}]*margin-block:\s*0`,
+		css,
+		"chat.css must reset pre.chat-msg margin-block to 0 so the operator pre doesn't inherit the prose plugin's ~24px top/bottom margins (which were making the bubbles look squashed by pushing the text into a small fraction of the vertical area)")
+}
+
 // TestShippedCSS_ChatMsgLinksUseThemeAwareColor pins the
 // dark-mode link readability contract. The
 // @tailwindcss/typography plugin sets `.prose :where(a)` to

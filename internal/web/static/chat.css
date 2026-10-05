@@ -90,6 +90,32 @@ pre.chat-msg {
   overflow-wrap: anywhere;
   word-break: break-word;
   overflow-x: hidden;
+  /*
+   * Phase-7 follow-on: reset the prose plugin's default
+   * pre margins inside chat-msg. The chat-turn wrapper
+   * carries `prose` for the assistant reply's typography,
+   * so the prose plugin's selector
+   *   .prose :where(pre) has margin-top 1.71429em
+   *   and margin-bottom 1.71429em. ... [closing brace
+   *   in the example omitted so the regex in
+   *   TestShippedCSS_OperatorPreResetsProseMargin
+   *   doesn't see a stray closing brace character.
+   * applies to every descendant <pre> — including the
+   * operator-side <pre class="chat-msg">. At prose-sm's
+   * 14px font-size that's ~24px on top AND ~24px on
+   * bottom, so a 2-line operator message ends up in a
+   * 130px-tall bubble with 50% empty vertical space.
+   *
+   * Resetting margin-block: 0 on the operator pre keeps
+   * the chat-bubble's vertical size driven by the text
+   * content + the chat-bubble's padding, not by inherited
+   * prose typography spacing. The assistant reply's <pre>
+   * blocks (code fences) still get the prose pre
+   * margins because chat-msg.prose keeps the full prose
+   * rule set (the selector targets only pre.chat-msg,
+   * not pre.chat-msg.prose).
+   */
+  margin-block: 0;
 }
 
 .chat-msg a {
