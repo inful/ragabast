@@ -310,7 +310,7 @@ const chatFallbackBody = `<!DOCTYPE html>
 	<script src="{{ asset "htmx.min.js" }}" defer></script>
 	<script src="{{ asset "chat.js" }}" defer></script>
 </head>
-<body class="container mx-auto mt-4 pt-16">
+<body class="container mx-auto mt-4">
 	{{ template "header" .Header }}
 
 	<div id="chat-messages" class="card chat-log" role="log" aria-live="polite" aria-label="Chat transcript">

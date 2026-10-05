@@ -1,6 +1,7 @@
 package web
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -33,52 +34,94 @@ func TestChatLog_HasRelativePositioning(t *testing.T) {
 		".chat-log must declare position: relative so the .jump-to-latest button pins to the container, not the viewport")
 }
 
-// TestChatLog_HasMaxWidthForLegibleLayout pins the
-// "chat interface isn't stretched across the full container"
-// contract. Without an explicit max-width, the chat-log card
-// and the chat-form card both inherit the body container's
-// width (up to 96rem / 1536px on extra-large viewports). The
-// bubbles inside are constrained by `.prose { max-width: 65ch
-// }` to about 65 characters (~520px), which leaves a sea of
-// empty card around them on wide screens and makes the chat
-// feel sparse and unfocused.
+// TestChatLog_HasMaxWidthForLegibleLayout was removed. The
+// v0.16.5 release added max-width: 56rem + margin-inline: auto
+// to .chat-log and #chat-form to give the chat a "comfortable
+// panel" feel on wide viewports, but the user subsequently
+// reported that the chat should match documents/search and use
+// the full container width. The replacement tests below pin
+// the actual contract.
 //
-// The fix in chat.css caps the chat cards at a narrower
-// "comfortable chat panel" width — the same range ChatGPT and
-// Notion AI use (~48-56rem). margin-inline: auto centers the
-// narrower card within the container.
+// See TestChatLog_UsesFullContainerWidth and
+// TestChatBody_NoStickyNavbarGap for the new pins.
+
+// TestChatLog_UsesFullContainerWidth pins the "chat card
+// fills the container width" contract. The user reports the
+// chat page should match documents/search: the chat-log card
+// and the chat-form card each span the full body container
+// width, not a 56rem-capped sub-column. The v0.16.5 commit
+// added a max-width: 56rem cap to both, which made the chat
+// feel narrow against a wide viewport — and visually
+// disconnected from documents/search which use the full
+// container.
 //
-// Regression guard for the user-reported "chat interface has
-// become somewhat cramped and unreadable" issue (the
-// underlying cause was cards that were too WIDE, leaving the
-// bubbles isolated in empty space rather than filling the
-// chat panel).
-func TestChatLog_HasMaxWidthForLegibleLayout(t *testing.T) {
+// The bubble-width contract is still preserved by the
+// per-bubble operator-bubble override (see
+// TestShippedCSS_OperatorBubbleMaxWidth), so the
+// individual messages don't span the full container —
+// just the cards that hold them.
+func TestChatLog_UsesFullContainerWidth(t *testing.T) {
 	css := readStaticAsset(t, "/static/chat.css")
 	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
 
-	// The chat-log card must declare a max-width so the
-	// chat interface isn't stretched to the full container
-	// width on wide viewports. The exact value is a design
-	// call (we don't pin the number — a future contributor
-	// may want to use 48rem or 64rem). What matters is that
-	// some max-width is declared.
-	assert.Regexp(t, `\.chat-log\s*\{[^}]*max-width:`, css,
-		".chat-log must declare a max-width so the chat panel is not stretched to the full container width on wide viewports (ChatGPT / Notion AI use ~48-56rem)")
+	// .chat-log must not have a max-width cap. Bubbles
+	// inside are individually constrained (operator at
+	// 70%, assistant prose at 65ch) but the card itself
+	// fills the body container.
+	assert.NotRegexp(t, `\.chat-log\s*\{[^}]*max-width:`, css,
+		".chat-log must not have a max-width cap — the chat card should fill the body container width, matching documents/search")
 
-	// The chat-form card must also be constrained, so the
-	// textarea and source-kind checkboxes line up visually
-	// with the chat-log above them. Without this, the form
-	// spans the full container and the input feels detached
-	// from the chat scrollback it's feeding.
-	assert.Regexp(t, `#chat-form\s*\{[^}]*max-width:`, css,
-		"#chat-form must declare a max-width so the input form does not stretch wider than the chat-log card above it")
+	// Same for #chat-form. The textarea and source-kind
+	// checkboxes line up with the chat scrollback above
+	// because both fill the container.
+	assert.NotRegexp(t, `#chat-form\s*\{[^}]*max-width:`, css,
+		"#chat-form must not have a max-width cap — the input form should fill the body container width, matching the chat-log above it")
 
-	// The narrowing must be balanced by margin-inline: auto
-	// so the narrower card is centered inside the wider
-	// container, not pinned to the start edge.
-	assert.Regexp(t, `\.chat-log\s*\{[^}]*margin-inline:\s*auto`, css,
-		".chat-log must declare margin-inline: auto so the narrower chat panel is centered within the container, not pinned to the start edge")
+	// Same for the centering — no margin-inline: auto on
+	// the chat-log card now that it fills the container.
+	assert.NotRegexp(t, `\.chat-log\s*\{[^}]*margin-inline:\s*auto`, css,
+		".chat-log must not use margin-inline: auto to center a narrower card — the card now fills the container")
+}
+
+// TestChatBody_NoStickyNavbarGap pins the "no gap between the
+// navbar and the chat card" contract. The chat body used to
+// carry `pt-16` (4rem padding-top), which created a 64px gap
+// between the sticky navbar and the chat-log card on every
+// page load. Documents and search don't carry that class and
+// flow naturally below the navbar — the chat should match.
+//
+// `pt-16` was originally added in Phase 2.4 of
+// plans/ux-overhaul.md (sticky navbar) to keep the navbar
+// from overlapping the first message. With the navbar's
+// actual measured height of 64px and a margin-top on the
+// body (mt-4 = 16px), 4rem of padding over-corrects the
+// issue and creates the visible gap. The simpler fix is to
+// just not have pt-16 — the navbar's natural position is
+// right above the content, and the existing mt-4 supplies a
+// small breathing-room gap.
+func TestChatBody_NoStickyNavbarGap(t *testing.T) {
+	cfg := config.DefaultConfig()
+	s := NewServer(cfg, &fakeService{})
+	s.templates = nil
+
+	data := chatFallbackData{
+		Title:     "Chat",
+		CsrfToken: "",
+		SessionID: "session-test",
+		Header: pageHeaderData{
+			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
+		},
+	}
+
+	var buf strings.Builder
+	require.NoError(t, s.fallback.chat.Execute(&buf, data))
+	body := buf.String()
+
+	// The chat body class must NOT include pt-16.
+	bodyClass := bodyRE(body, `<body\s+class="([^"]*)"`)
+	require.NotEmpty(t, bodyClass, "chat fallback must render a <body> with a class attribute")
+	assert.NotContains(t, bodyClass, "pt-16",
+		"the chat body class must not include pt-16 — that padding-top creates a 64px gap between the sticky navbar and the chat card that documents/search don't have")
 }
 
 // TestChatLanding_OrientingPlaceholder pins the empty-state
@@ -285,4 +328,18 @@ func TestChatLanding_AriaLiveOnMessageLog(t *testing.T) {
 	// opening tag.
 	assert.Regexp(t, `<div[^>]*\bid="chat-messages"[^>]*aria-live="polite"`, body,
 		"#chat-messages must declare aria-live=\"polite\" so screen readers announce new replies")
+}
+
+// bodyRE extracts the class attribute of the first <body>
+// element in the rendered HTML. Used by tests that need to
+// pin a single class token (e.g. "the chat body must not
+// include pt-16") without coupling to the rest of the class
+// string. Returns the captured group on match, "" on no match.
+func bodyRE(body, pattern string) string {
+	re := regexp.MustCompile(pattern)
+	m := re.FindStringSubmatch(body)
+	if len(m) < 2 {
+		return ""
+	}
+	return m[1]
 }

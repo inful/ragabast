@@ -30,37 +30,25 @@
  * to the chat-log container keeps it visually attached
  * to the message list.
  *
- * max-width: 56rem is the "comfortable chat panel" width —
- * the same range ChatGPT and Notion AI use (~48-56rem).
- * Without it the card inherits the body container's width
- * (up to 96rem / 1536px on extra-large screens), leaving
- * the bubbles constrained by `.prose { max-width: 65ch }`
- * (~520px) isolated in a sea of card on wide screens and
- * making the chat feel sparse. margin-inline: auto centers
- * the narrower card within the container.
- *
- * The matching #chat-form rule (below) constrains the
- * textarea + sources card to the same column, so the input
- * lines up visually with the chat scrollback it's feeding. */
+ * The chat card fills the body container width — matching
+ * documents and search, which also use the full container.
+ * The per-bubble max-widths (operator at 70%, assistant
+ * prose at 65ch) are what give individual messages
+ * reasonable line lengths, not the card itself.
+ */
 .chat-log {
   max-height: 60vh;
-  max-width: 56rem;
   overflow-y: auto;
   position: relative;
-  margin-inline: auto;
 }
 
 /*
- * Chat form card. Constrained to the same 56rem column as
- * .chat-log so the textarea lines up visually with the chat
- * scrollback it's feeding. Without this rule the form
- * stretched the full container width while the chat-log
- * above it stayed at 56rem, breaking the visual column the
- * card layout is supposed to express.
+ * Chat form card. Full container width to align with the
+ * chat-log above it. The textarea + source-kind checkboxes
+ * span the container the same way the chat scrollback does.
  */
 #chat-form {
-  max-width: 56rem;
-  margin-inline: auto;
+  width: 100%;
 }
 
 /* Chat message rows. The word-break rules prevent a single

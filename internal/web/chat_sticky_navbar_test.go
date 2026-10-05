@@ -47,10 +47,19 @@ func renderChatStickyNavbarFallback(t *testing.T, s *Server) string {
 // daisyUI's `navbar` component works as a sticky element
 // with two additions: `sticky top-0` (the Tailwind
 // positioning utility) and `z-10` (so the navbar layers
-// above any in-page content). The body needs a
-// `pt-16` to compensate for the navbar height (the
-// sticky bar would otherwise cover the top of the
-// page content).
+// above any in-page content).
+//
+// Note: the body does NOT need pt-16 (or any top-padding
+// compensation) for the sticky navbar — sticky positioning
+// keeps the element in flow, so content flows naturally
+// below it. The earlier "pt-16 on body" workaround was
+// over-cautious and produced a 64px gap between the navbar
+// and the chat card that the user reported as broken (the
+// other pages — documents, search — don't have it). The
+// missing top-padding would only matter if the navbar
+// were `fixed` (out of flow); the current `sticky` design
+// doesn't need it. TestChatBody_NoStickyNavbarGap in
+// chat_landing_test.go pins the body class absence.
 func TestChat_NavbarIsSticky(t *testing.T) {
 	body := renderChatStickyNavbarFallback(t, chatStickyNavbarTestServer(t))
 
@@ -74,23 +83,4 @@ func TestChat_NavbarIsSticky(t *testing.T) {
 		"the sticky navbar must be pinned to the top with top-0")
 	assert.Regexp(t, `\bz-\d+\b`, navTag,
 		"the sticky navbar must declare a z-* utility so it layers above page content")
-}
-
-// TestChat_BodyHasNavbarHeightCompensation pins the second
-// half of the sticky-navbar contract: the body needs
-// `pt-16` (or equivalent) so the page content doesn't
-// disappear under the sticky navbar. Tailwind's `pt-16`
-// is 4rem (16 * 0.25rem), which matches daisyUI's
-// default navbar min-height of 4rem.
-func TestChat_BodyHasNavbarHeightCompensation(t *testing.T) {
-	body := renderChatStickyNavbarFallback(t, chatStickyNavbarTestServer(t))
-
-	bodyStart := strings.Index(body, "<body")
-	require.GreaterOrEqual(t, bodyStart, 0, "the page must render a <body> element")
-	bodyEnd := strings.Index(body[bodyStart:], ">")
-	require.Positive(t, bodyEnd, "the <body> opening tag must have a closing >")
-	bodyTag := body[bodyStart : bodyStart+bodyEnd+1]
-
-	assert.Regexp(t, `\bpt-(\d+)\b`, bodyTag,
-		"the <body> element must declare a pt-* top-padding utility so the sticky navbar doesn't cover the page content (Phase 2.4 of plans/ux-overhaul.md)")
 }
