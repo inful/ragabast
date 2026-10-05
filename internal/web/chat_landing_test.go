@@ -33,6 +33,54 @@ func TestChatLog_HasRelativePositioning(t *testing.T) {
 		".chat-log must declare position: relative so the .jump-to-latest button pins to the container, not the viewport")
 }
 
+// TestChatLog_HasMaxWidthForLegibleLayout pins the
+// "chat interface isn't stretched across the full container"
+// contract. Without an explicit max-width, the chat-log card
+// and the chat-form card both inherit the body container's
+// width (up to 96rem / 1536px on extra-large viewports). The
+// bubbles inside are constrained by `.prose { max-width: 65ch
+// }` to about 65 characters (~520px), which leaves a sea of
+// empty card around them on wide screens and makes the chat
+// feel sparse and unfocused.
+//
+// The fix in chat.css caps the chat cards at a narrower
+// "comfortable chat panel" width — the same range ChatGPT and
+// Notion AI use (~48-56rem). margin-inline: auto centers the
+// narrower card within the container.
+//
+// Regression guard for the user-reported "chat interface has
+// become somewhat cramped and unreadable" issue (the
+// underlying cause was cards that were too WIDE, leaving the
+// bubbles isolated in empty space rather than filling the
+// chat panel).
+func TestChatLog_HasMaxWidthForLegibleLayout(t *testing.T) {
+	css := readStaticAsset(t, "/static/chat.css")
+	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
+
+	// The chat-log card must declare a max-width so the
+	// chat interface isn't stretched to the full container
+	// width on wide viewports. The exact value is a design
+	// call (we don't pin the number — a future contributor
+	// may want to use 48rem or 64rem). What matters is that
+	// some max-width is declared.
+	assert.Regexp(t, `\.chat-log\s*\{[^}]*max-width:`, css,
+		".chat-log must declare a max-width so the chat panel is not stretched to the full container width on wide viewports (ChatGPT / Notion AI use ~48-56rem)")
+
+	// The chat-form card must also be constrained, so the
+	// textarea and source-kind checkboxes line up visually
+	// with the chat-log above them. Without this, the form
+	// spans the full container and the input feels detached
+	// from the chat scrollback it's feeding.
+	assert.Regexp(t, `#chat-form\s*\{[^}]*max-width:`, css,
+		"#chat-form must declare a max-width so the input form does not stretch wider than the chat-log card above it")
+
+	// The narrowing must be balanced by margin-inline: auto
+	// so the narrower card is centered inside the wider
+	// container, not pinned to the start edge.
+	assert.Regexp(t, `\.chat-log\s*\{[^}]*margin-inline:\s*auto`, css,
+		".chat-log must declare margin-inline: auto so the narrower chat panel is centered within the container, not pinned to the start edge")
+}
+
 // TestChatLanding_OrientingPlaceholder pins the empty-state
 // design called out in the UI review at
 // .review-screenshots/2026-09-30-ragabast-ui-review: the

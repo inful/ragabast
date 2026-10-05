@@ -219,6 +219,78 @@ func TestShippedCSS_ChatMsgProseInheritsColor(t *testing.T) {
 		"chat.css must override color inside .chat-msg.prose so the chat-bubble color wins over the typography plugin's gray body text (Phase 7)")
 }
 
+// TestShippedCSS_ChatMsgLinksUseThemeAwareColor pins the
+// dark-mode link readability contract. The
+// @tailwindcss/typography plugin sets `.prose :where(a)` to
+// `color: var(--tw-prose-links)`, a hardcoded dark gray-blue
+// (oklch(21% .034 264.665)). That color is fine on a light
+// background, but inside the chat-bubble in dark mode it
+// lands as dark text on a dark bubble — invisible.
+//
+// The fix in chat.css overrides the prose plugin's link
+// color with daisyUI's theme-aware primary token. The
+// OS-driven prefers-color-scheme flip re-themes
+// --color-primary alongside the rest of the daisyUI palette.
+// Scoping to `.chat-msg` (not `.prose`) keeps the override
+// surgical — search-result chunks and the landing placeholder
+// keep the plugin's intended link color.
+//
+// Regression guard for the user-reported "links unreadable
+// in dark mode" issue (the prose plugin's hardcoded dark
+// link color was the root cause).
+func TestShippedCSS_ChatMsgLinksUseThemeAwareColor(t *testing.T) {
+	css := readStaticAsset(t, "/static/chat.css")
+	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
+
+	// The override must scope to .chat-msg a (not .prose a
+	// globally) so only chat messages pick up the theme-
+	// aware color. Search-result chunks (also .prose) keep
+	// the plugin's default link color.
+	//
+	// The color must reference a theme-aware variable, not
+	// a hardcoded oklch/rgb/hex value. var(--color-primary)
+	// is daisyUI's standard "link/CTA" color and is the
+	// canonical choice for chat message links (Slack,
+	// Linear, Notion AI all use the brand primary).
+	assert.Regexp(t,
+		`\.chat-msg\s+a\s*\{[^}]*color\s*:\s*var\(--color-primary\)`,
+		css,
+		"chat.css must override link color inside .chat-msg with var(--color-primary) so dark-mode links adapt to the daisyUI theme (the prose plugin's --tw-prose-links is hardcoded dark and invisible in dark mode)")
+}
+
+// TestShippedCSS_OperatorPreResetsProseBackground pins the
+// "operator bubble is not two-toned" contract. The chat-turn
+// wrapper carries `prose` so the assistant reply inherits
+// the typography plugin's list / heading / code-block styling.
+// The operator's `<pre class="chat-msg">` sits inside that
+// same wrapper, which means the plugin's `:where(pre)` rule
+// applies `--tw-prose-pre-bg` (a hardcoded dark navy
+// oklch(27.8% .033 256.848)) to the operator pre — leaving
+// the operator bubble looking two-toned (the bubble's
+// chat-bubble-primary on the outside, the prose-pre-bg on the
+// inside).
+//
+// The fix in chat.css scopes `background-color: transparent`
+// to `.chat-msg:not(.prose)` so only the operator pre
+// (which has `chat-msg` but NOT `prose`) gets the reset.
+// The assistant reply div carries `chat-msg prose prose-sm`
+// and intentionally keeps the plugin's pre styling for
+// fenced code blocks rendered inside.
+func TestShippedCSS_OperatorPreResetsProseBackground(t *testing.T) {
+	css := readStaticAsset(t, "/static/chat.css")
+	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
+
+	// The selector must be `.chat-msg:not(.prose)` (or
+	// equivalent specificity) so the assistant reply's
+	// prose pre blocks keep the plugin's background.
+	// Accept any whitespace around `:not(.prose)` — the
+	// preprocessor doesn't normalize it.
+	assert.Regexp(t,
+		`\.chat-msg:not\(\.prose\)\s*\{[^}]*background-color\s*:\s*transparent`,
+		css,
+		"chat.css must reset background-color on .chat-msg:not(.prose) so the operator pre does not inherit the prose plugin's --tw-prose-pre-bg (operator bubble should be one solid chat-bubble-primary color)")
+}
+
 // TestShippedCSS_BundleSizeBudgetReasonable pins that the
 // daisyui.min.css bundle stays under the existing 250 KB
 // budget after the typography plugin is added. The
