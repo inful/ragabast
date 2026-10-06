@@ -34,6 +34,50 @@ body {
   margin: 0;
   min-height: 100vh;
   display: flex;
+  /*
+   * flex-direction: column (NOT the default row) so the
+   * navbar (first child, via the header partial) sits at
+   * the top of the page and the <main> login form (second
+   * child) fills the remaining height and centers its
+   * content. The pre-fix design was a flex row with
+   * `align-items: center; justify-content: center`, which
+   * laid the navbar and the form out side-by-side and
+   * vertically centered them in the viewport — the
+   * navbar floated in the middle of the page instead of
+   * sticking to the top, which the user reported as
+   * "weirdly formatted" once more than one auth provider
+   * was configured.
+   *
+   * <main> itself is also a flex container (set inline in
+   * the next rule) so the login card (h1 + provider
+   * buttons + help links) is vertically and horizontally
+   * centered within the area below the navbar.
+   */
+  flex-direction: column;
+}
+
+main {
+  /* Fill the height below the navbar and center the
+   * login card within it. With flex: 1 the <main> takes
+   * all remaining vertical space; flex-direction: column
+   * stacks the h1, provider buttons, and help links
+   * vertically (matching the pre-fix block layout);
+   * align-items: center centers the stack horizontally
+   * (the card itself is max-w-md wide); justify-content:
+   * center centers the stack vertically within the
+   * remaining height. */
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  /* Center the <main> itself horizontally within the
+   * body. The body is a flex column with the default
+   * align-items: stretch, so the <main> (with
+   * max-w-md capping it at 448px) would otherwise sit
+   * flush against the left edge of the viewport. The
+   * template's `w-full` + `max-w-md` combo gives the
+   * element its content width but doesn't center it
+   * horizontally — this align-self does. */
+  align-self: center;
 }
