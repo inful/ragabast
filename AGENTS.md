@@ -143,6 +143,64 @@ Before committing changes, ensure:
 5. **Documentation updated**: Check for outdated references
 6. **No broken links**: Verify all file references in docs
 
+## Layout / CSS / template changes — visual verification
+
+For any change that touches `chat.css`, `login.css`,
+`internal/web/static/*.css`, the daisyUI config in
+`static/src/daisyui.css`, the chat/search/documents
+templates, or `internal/web/fallback_renderers.go`,
+**always do a before/after screenshot diff** before
+claiming the fix works. Tests passing is not the same as
+the layout looking right — the v0.16.9 chat-layout fix
+shipped with passing tests but the user still saw a
+narrow chat, and the v0.16.10 fix was needed to
+actually widen the bubbles.
+
+The tooling is in `scripts/`:
+
+```bash
+# 1. Start the dev server (port 8080 by default).
+RAGABAST_CONFIG=/path/to/config.yml ./ragabast serve &
+
+# 2. Capture the current (broken) state as the baseline.
+make screenshot
+make screenshot-baseline       # promotes actual/ -> baseline/
+
+# 3. Make the fix.
+
+# 4. Rebuild CSS (if you changed templates or daisyUI
+#    sources) and re-capture.
+make css
+make screenshot
+
+# 5. Diff. Exit 0 = no pixel differences; exit 1 = some
+#    differ. Per-viewport PNGs land in screenshots/diff/ —
+#    open the *-side-by-side.png for a human review (BEFORE
+#    / DIFF / AFTER stacked with labels).
+make screenshot-diff
+```
+
+`make screenshot-diff` exits non-zero when the actuals
+diverge from the baseline — wire it as a CI check if/when
+the project's CI moves from "build only" to "build + visual
+gate". `scripts/scripts_test.go` already pins the structure
+(scripts exist, executable, Makefile registers the
+targets, package.json has the deps) so a contributor who
+breaks the tooling gets a red test rather than a silent
+failure during a layout bug report.
+
+The capture script uses `puppeteer-core` driving the
+system Google Chrome (no extra browser download) at three
+standard viewports: 1920×1080, 1280×800, 768×1024. Override
+`CHAT_URL` in the Make target if the dev server isn't on
+`localhost:8080`.
+
+To capture a populated chat (for verifying bubble
+layouts, which don't appear in the empty state), inject
+sample HTML via the browser DevTools before running
+`make screenshot` — the tool captures whatever is at the
+URL when it runs.
+
 ## Common Pitfalls to Avoid
 
 ## Testing Guidelines

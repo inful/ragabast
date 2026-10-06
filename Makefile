@@ -10,7 +10,7 @@
 # release pipeline (goreleaser, distroless Docker) does
 # NOT need Node; the committed CSS is what ships.
 
-.PHONY: css css-check
+.PHONY: css css-check screenshot screenshot-before screenshot-diff screenshot-baseline
 
 # css: rebuild internal/web/static/daisyui.min.css from
 # static/src/daisyui.css. Run this after editing a
@@ -45,3 +45,53 @@ css-check:
 		diff /tmp/ragabast-daisyui.committed internal/web/static/daisyui.min.css | head -40; \
 		exit 1; \
 	fi
+
+# screenshot: capture screenshots of the local dev server at
+# the three standard viewports (1920x1080 desktop, 1280x800
+# laptop, 768x1024 tablet). Output goes to screenshots/actual/.
+# The dev server must already be running on localhost:8080
+# (or whatever CHAT_URL is set to below).
+#
+# Use as part of the before/after verification workflow:
+#
+#   1. (server up) make screenshot    # captures the current state
+#   2. cp -r screenshots/actual screenshots/before
+#   3. (make your CSS/HTML/template change)
+#   4. make css && make screenshot    # rebuilds CSS, re-captures
+#   5. make screenshot-diff           # before vs after
+#
+# Step 2 is just a rename — `make screenshot-before` is a
+# convenience alias.
+CHAT_URL ?= http://127.0.0.1:8080/
+screenshot:
+	@command -v node >/dev/null 2>&1 || { echo "Node.js 20+ is required. See .nvmrc."; exit 1; }
+	@mkdir -p screenshots/actual
+	./scripts/screenshot.sh "$(CHAT_URL)" screenshots/actual
+
+# screenshot-before: rename the current screenshots/actual to
+# screenshots/before so it survives the next `make screenshot`
+# run. Used in the before/after workflow (see `screenshot`).
+screenshot-before:
+	@rm -rf screenshots/before
+	@cp -r screenshots/actual screenshots/before
+	@echo "Captured current state as screenshots/before/"
+
+# screenshot-diff: diff screenshots/before (the "before" state
+# captured via `make screenshot-before`) against screenshots/actual
+# (the current state). Writes per-viewport pixel diffs and a
+# side-by-side composite into screenshots/diff/. Exits non-zero
+# if any viewport differs — useful as a CI gate.
+screenshot-diff:
+	@command -v node >/dev/null 2>&1 || { echo "Node.js 20+ is required. See .nvmrc."; exit 1; }
+	@./scripts/screenshot-diff.sh screenshots/baseline screenshots/actual screenshots/diff
+
+# screenshot-baseline: promote screenshots/actual/ to the
+# "known good" baseline. Run this after a visual change has been
+# reviewed and approved. CI's screenshot-diff job (if added) will
+# alert when future PRs diverge from this baseline.
+screenshot-baseline:
+	@rm -rf screenshots/baseline
+	@cp -r screenshots/actual screenshots/baseline
+	@echo "Promoted screenshots/actual -> screenshots/baseline/"
+	@git add screenshots/baseline/ && git status --short screenshots/baseline/
+

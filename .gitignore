@@ -81,3 +81,10 @@ data/documents/
 # passes. Always regenerated locally; never meant to live in
 # the repo's history.
 .review-screenshots/
+
+# Visual regression artifacts. Only screenshots/baseline/ is
+# checked in (the "known good" state); the rest are per-run
+# output and the diff (PNGs + summary.json).
+screenshots/actual/
+screenshots/diff/
+screenshots/before/

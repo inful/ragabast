@@ -10,6 +10,9 @@
     "@tailwindcss/cli": "^4.1.14",
     "@tailwindcss/typography": "^0.5.20",
     "daisyui": "^5.0.0",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "puppeteer-core": "^23.11.1",
     "tailwindcss": "^4.1.14"
   },
   "//": "Allow @parcel/watcher to run its native postinstall script. Without this, npm 11+ prints a warning on every install. @parcel/watcher is a transitive dep of @tailwindcss/cli and is required for Tailwind's file-watcher mode (we use it via npx during 'make css', not at runtime).",
