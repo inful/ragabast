@@ -95,26 +95,87 @@ body {
 
 /*
  * Operator bubble max-width: daisyUI's chat-bubble defaults
- * to max-width: 90% of its grid column. For a chat-log card
- * at 56rem that meant an operator message stretched to
- * ~510px wide — wide enough that a short question felt
- * like a prose paragraph rather than a chat message.
- * ChatGPT / Notion AI cap operator messages at ~70% of the
- * scrollback width for the same reason: a narrower question
- * reads as "you said something" rather than "here is a
- * block of user text".
+ * to max-width: 90% of its grid column. The 70% cap on the
+ * operator side was originally added so a short question
+ * didn't read as a prose paragraph (a chat-app convention
+ * — ChatGPT / Notion AI both narrow operator messages
+ * relative to the scrollback). The user reported that on
+ * a full-width chat-log card the 70% cap left the operator
+ * bubble at ~377px on a 1920px viewport — about 20% of
+ * the card — and "did not use the horizontal space
+ * available." The cap is widened to 90% (daisyUI's own
+ * default) so the operator message uses most of the
+ * column while the grid still leaves room for the avatar
+ * on the start edge. Short questions still shrink to
+ * content; the cap only matters for longer questions.
  *
- * The selector scopes to .chat-start so the assistant side
- * (chat-end) keeps daisyUI's default — long answers with
- * code blocks, source citations, and inline headings need
- * the full column width. The fix is in CSS only (no template
- * change) so the assistant chat_bubble from templates/
- * chat_message.html picks it up via cascade order — chat.css
- * loads after daisyui.min.css, so this rule wins at equal
- * specificity.
+ * The selector scopes to .chat-start so the assistant
+ * side (chat-end) gets its own override below. The fix
+ * is in CSS only (no template change) so the assistant
+ * chat_bubble from templates/chat_message.html picks
+ * it up via cascade order — chat.css loads after
+ * daisyui.min.css, so this rule wins at equal specificity.
  */
 .chat-start .chat-bubble {
-  max-width: 70%;
+  max-width: 90%;
+}
+
+/*
+ * Chat-turn wrapper: templates/chat_message.html wraps
+ * each turn (operator + assistant) in a `<div class="prose
+ * chat-turn">`. The `prose` class is there so the
+ * @tailwindcss/typography plugin's list / heading /
+ * code-block styles apply to the assistant reply inside.
+ * But `prose` also sets `max-width: 65ch` on the wrapper
+ * itself, which is the real reason the chat bubbles look
+ * narrow on a wide viewport: the chat-turn is capped at
+ * ~510px, so the daisyUI chat grid inside it is laid out
+ * inside a 510px column regardless of the card width.
+ * Both bubbles (operator + assistant) inherit that
+ * narrow column. The override resets the wrapper to
+ * its natural width so the chat grid can use the full
+ * card width.
+ *
+ * The assistant reply's own prose class
+ * (`.chat-msg.prose.prose-sm` on the `<div>` inside the
+ * bubble) is still capped below — the typography plugin's
+ * 65ch default is fine for the actual prose text inside
+ * the bubble, where it acts as a readability guardrail
+ * for long-form LLM output rather than a layout
+ * constraint.
+ */
+.prose.chat-turn {
+  max-width: none;
+}
+
+/*
+ * Assistant reply max-width: the @tailwindcss/typography
+ * plugin sets `.prose` body text to `max-width: 65ch`
+ * (about 511px at prose-sm's 14px font-size). On a
+ * full-width chat-log card on a 1920px viewport that
+ * caps the assistant reply at ~28% of the card — the
+ * message appears as a narrow column in the middle of
+ * a wide card, which the user reported as "not using
+ * the horizontal space available." The cap is widened
+ * to 90ch (~720px at the chat font size) on screens
+ * wide enough to benefit, with the original 65ch
+ * preserved on narrow viewports where the wider cap
+ * wouldn't make a visual difference. 90ch is still
+ * within the readability band the typography plugin
+ * targets (the plugin's "normal" prose width is 65ch
+ * but `prose-lg` ships at 80ch and `prose-xl` at 95ch
+ * — 90ch sits in the prose-lg / prose-xl middle ground
+ * and keeps long lines from running off the right
+ * edge on ultrawide displays).
+ */
+.chat-msg.prose {
+  color: inherit;
+  max-width: 65ch;
+}
+@media (min-width: 48rem) {
+  .chat-msg.prose {
+    max-width: 90ch;
+  }
 }
 
 pre.chat-msg {

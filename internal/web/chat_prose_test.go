@@ -220,26 +220,34 @@ func TestShippedCSS_ChatMsgProseInheritsColor(t *testing.T) {
 }
 
 // TestShippedCSS_OperatorBubbleMaxWidth pins the
-// "operator (chat-start) bubbles feel like chat questions,
-// not full-width prose paragraphs" contract. daisyUI's
-// chat-bubble defaults to max-width: 90% of its grid
-// column, which for the chat-log card at 56rem means an
-// operator message stretches to ~510px — wide enough that
-// a short question feels like a paragraph rather than a
-// chat message. ChatGPT / Notion AI cap operator messages
-// at ~70% of the scrollback width for the same reason:
-// a narrower question reads as "you said something"
-// rather than "here is a block of user text".
+// "operator (chat-start) bubbles are capped at 90% of the
+// grid column" contract. daisyUI's chat-bubble also
+// defaults to 90%, so this test reads as a no-op at the
+// daisyUI level — but the rule is still important to
+// pin because (a) it documents the intent (the operator
+// side does NOT want a different cap from daisyUI's
+// default) and (b) a future contributor who narrows it
+// back to 70% (the pre-fix value) without re-running the
+// visual review will get a red test.
+//
+// The historical context: the original 70% cap was
+// added in the daisyUI migration to keep a short
+// operator question from reading as a prose paragraph
+// (ChatGPT / Notion AI both narrow operator messages
+// relative to the scrollback). The user later reported
+// that on a full-width chat-log card the 70% cap left
+// the operator bubble at ~377px on a 1920px viewport —
+// about 20% of the card — and "did not use the horizontal
+// space available." The cap was widened to 90% (daisyUI's
+// own default) so long operator questions use the full
+// column while short ones still shrink to content
+// (width: fit-content is built into .chat-bubble).
 //
 // chat.css scopes the override down to .chat-start
 // .chat-bubble so the assistant side (chat-end) keeps
-// daisyUI's default — long answers with code blocks need
-// the full column width.
-//
-// Regression guard for the user-reported "chat still looks
-// quite bad in the latest release" issue. The daisyUI
-// 90% cap is technically correct for a chat table but
-// reads as a paragraph here.
+// its own override (the 90ch prose cap on .chat-msg.prose,
+// which serves a different purpose — a readability cap
+// for the assistant's long-form LLM output).
 func TestShippedCSS_OperatorBubbleMaxWidth(t *testing.T) {
 	css := readStaticAsset(t, "/static/chat.css")
 	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
@@ -247,7 +255,7 @@ func TestShippedCSS_OperatorBubbleMaxWidth(t *testing.T) {
 	assert.Regexp(t,
 		`\.chat-start\s+\.chat-bubble\s*\{[^}]*max-width:`,
 		css,
-		"chat.css must override .chat-start .chat-bubble max-width so operator messages feel like chat questions rather than full-width prose paragraphs")
+		"chat.css must override .chat-start .chat-bubble max-width — see the comment for the history of why this is pinned (and why 90% is the value, not 70%)")
 }
 
 // TestShippedCSS_OperatorPreResetsProseMargin pins the
@@ -290,6 +298,49 @@ func TestShippedCSS_OperatorPreResetsProseMargin(t *testing.T) {
 		`pre\.chat-msg\s*\{[^}]*margin-block:\s*0`,
 		css,
 		"chat.css must reset pre.chat-msg margin-block to 0 so the operator pre doesn't inherit the prose plugin's ~24px top/bottom margins (which were making the bubbles look squashed by pushing the text into a small fraction of the vertical area)")
+}
+
+// TestShippedCSS_ChatTurnResetsProseMaxWidth pins the
+// "the chat-turn wrapper is NOT constrained by the
+// @tailwindcss/typography plugin's 65ch cap" contract.
+// The `prose chat-turn` wrapper around each turn
+// (operator + assistant) carries the `prose` class so
+// the assistant reply inherits the typography plugin's
+// list / heading / code-block styling. The side effect
+// is that `prose` also sets `max-width: 65ch` on the
+// wrapper itself — and because the daisyUI chat grid
+// sits inside that wrapper, the entire grid is laid out
+// inside a 65ch column regardless of the card width.
+// Both bubbles (operator + assistant) appear as a
+// narrow column in the middle of a wide card (~28% on
+// a 1920px viewport) and the user reported that as
+// "not using the horizontal space available."
+//
+// The fix is a single rule in chat.css:
+//
+//	.prose.chat-turn { max-width: none }
+//
+// The assistant reply's own prose class
+// (`.chat-msg.prose.prose-sm` on the <div> inside the
+// bubble) is still capped below — the typography plugin's
+// 65ch default becomes a readability cap on the LLM
+// output inside the bubble rather than a layout cap on
+// the wrapper. (chat.css also widens that to 90ch on
+// viewports >= 48rem — see the comment in chat.css for
+// the reasoning.)
+func TestShippedCSS_ChatTurnResetsProseMaxWidth(t *testing.T) {
+	css := readStaticAsset(t, "/static/chat.css")
+	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
+
+	// The override must scope to .prose.chat-turn (or
+	// equivalent specificity) so only the chat-turn
+	// wrapper loses the 65ch cap — other .prose surfaces
+	// (search-result chunks, the landing placeholder)
+	// keep the plugin's intended body width.
+	assert.Regexp(t,
+		`\.prose\.chat-turn\s*\{[^}]*max-width:\s*none`,
+		css,
+		"chat.css must override .prose.chat-turn max-width to none so the daisyUI chat grid inside the wrapper uses the full card width (without this, the @tailwindcss/typography plugin's 65ch cap on the prose class constrains the entire chat turn to ~510px regardless of viewport)")
 }
 
 // TestShippedCSS_ChatMsgLinksUseThemeAwareColor pins the

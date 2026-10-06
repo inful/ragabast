@@ -83,25 +83,32 @@ func TestChatBody_HasHorizontalPadding(t *testing.T) {
 
 // TestChatLog_UsesFullBodyWidth pins the "chat cards fill
 // the available body width" contract. The user has
-// reported the chat feels narrow twice now: first against
-// the v0.16.5 56rem cap on the cards (fixed in a follow-on
-// by removing the cap and letting the cards fill the body
-// container), and again against the daisyUI `container`
-// class on the body itself (a centered max-width that
-// caps the page at ~1536px on a 2xl viewport, leaving
-// large empty margins on a 4K / ultrawide display).
+// reported the chat feels narrow three times now:
+//  1. v0.16.5 56rem cap on the cards (fixed by
+//     removing the cap and letting the cards fill the
+//     body container).
+//  2. daisyUI `container` class on the body (fixed by
+//     removing the class so the body fills the viewport).
+//  3. The chat bubbles themselves still looked narrow
+//     after the card fix — the root cause was the
+//     `prose chat-turn` wrapper carrying the typography
+//     plugin's 65ch cap, which constrains the entire
+//     chat grid inside it. Fixed by `.prose.chat-turn
+//     { max-width: none }` in chat.css; the assistant
+//     reply's own prose cap is widened to 90ch on
+//     viewports >= 48rem.
 //
-// The current contract: the body uses the daisyUI
-// `container` class is REMOVED, so the chat-log card
-// and the chat-form card each span the full viewport
-// width (with a small breathing-room padding on the
-// body). The per-bubble max-widths (operator at 70%
-// via TestShippedCSS_OperatorBubbleMaxWidth; assistant
-// prose at 65ch via the @tailwindcss/typography plugin)
-// keep individual messages readable regardless of how
-// wide the card gets — a 4000px viewport still produces
-// a 65ch-wide assistant reply, the same as on a 1280px
-// viewport.
+// The current contract: the body, the chat-log card, and
+// the chat-form card each span the full viewport width
+// (with a small breathing-room padding on the body). The
+// chat-turn wrapper fills the card width; the daisyUI
+// chat grid inside it lays out the operator and assistant
+// bubbles in their respective columns; the operator
+// bubble is capped at 90% of its grid column (daisyUI's
+// default — see TestShippedCSS_OperatorBubbleMaxWidth)
+// and the assistant reply's prose text is capped at 90ch
+// on desktop as a readability guardrail (see the
+// .chat-msg.prose rule in chat.css).
 //
 // The test pins both sides of the contract:
 //   - chat.css has no max-width cap on .chat-log or
@@ -114,10 +121,12 @@ func TestChatLog_UsesFullBodyWidth(t *testing.T) {
 	css := readStaticAsset(t, "/static/chat.css")
 	require.NotEmpty(t, css, "chat.css must be readable from the embedded bundle")
 
-	// .chat-log must not have a max-width cap. Bubbles
-	// inside are individually constrained (operator at
-	// 70%, assistant prose at 65ch) but the card itself
-	// fills the body width.
+	// .chat-log must not have a max-width cap. The
+	// chat-turn wrapper inside has its own cap override
+	// (.prose.chat-turn { max-width: none } — see
+	// TestShippedCSS_ChatTurnResetsProseMaxWidth), and
+	// the per-bubble caps (operator 90%, assistant 90ch
+	// on desktop) keep individual messages readable.
 	assert.NotRegexp(t, `\.chat-log\s*\{[^}]*max-width:`, css,
 		".chat-log must not have a max-width cap — the chat card should fill the body width, matching documents/search and using every available horizontal pixel on wide viewports")
 
