@@ -55,11 +55,21 @@ func AuthLabelFromContext(ctx context.Context) string {
 //     session → allow, stash the session, slide the
 //     expiry forward.
 //  4. Browser request (Accept: text/html) without a
-//     valid credential AND sessions != nil → redirect
-//     to /auth/login?next=<path> so the operator lands
-//     on the chooser page rather than seeing a raw 401.
-//     Programmatic clients (curl, etc.) still get a 401
-//     with WWW-Authenticate so they can retry correctly.
+//     valid credential AND sessions != nil → send the
+//     user to /auth/login?next=<path> so they land on
+//     the chooser page rather than seeing a raw 401.
+//     The redirect shape depends on the client:
+//     - HTMX-driven form posts (HX-Request: true)
+//     get a 200 + HX-Redirect header. HTMX silently
+//     drops 3xx on HX-Request requests, so a 302
+//     would be thrown away and the form would
+//     silently do nothing (issue #113).
+//     - Plain browser navigation gets a 302 + Location
+//     (the historical behavior; what curl and
+//     non-HTMX form submits expect).
+//     Programmatic clients without Accept: text/html
+//     still get a 401 with WWW-Authenticate so they
+//     can retry correctly.
 //  5. Otherwise → 401 with WWW-Authenticate.
 //
 // When both tokens and sessions are nil/empty the
