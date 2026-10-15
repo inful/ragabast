@@ -5,8 +5,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ragabast/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -490,4 +492,158 @@ func TestAuthMiddleware_BodySizeLimitAppliesBeforeAuth(t *testing.T) {
 	// materialized into the handler's working set.
 	require.Equal(t, http.StatusUnauthorized, w.Code,
 		"auth-failing oversized body must reject with 401 (got %d)", w.Code)
+}
+
+// newServerWithOAuth mounts a Server with one OAuth provider
+// configured so the authMiddleware sees hasSessions == true.
+// The IdP endpoints don't actually need to work for these
+// tests — the middleware short-circuits before any /auth/<p>/…
+// route fires. Helper is package-scoped so the four HX-Redirect
+// tests below share one setup shape.
+func newServerWithOAuth(t *testing.T) *Server {
+	t.Helper()
+
+	cfg := config.DefaultConfig()
+	cfg.Auth.Providers = []config.OAuthProvider{
+		{Name: "gh", Type: "github", ClientID: "id", ClientSecret: "sec"},
+	}
+	cfg.Auth.SessionTTL = time.Hour
+
+	return NewServer(cfg, &fakeHumaService{})
+}
+
+// TestAuthMiddleware_HTMXChatMessage_RedirectsViaHXRedirect
+// pins the bug fix for issue #113: an HTMX-driven POST to
+// /chat/message without a session, when OAuth is configured,
+// must respond with the HX-Redirect header (not a 302). HTMX
+// silently drops 3xx responses on HX-Request requests, which
+// is why the form "did nothing" before the fix — the
+// middleware was emitting a 302 that HTMX was throwing away.
+//
+// The target URL must carry the original path as ?next= so
+// the OAuth callback can return the user to where they were.
+func TestAuthMiddleware_HTMXChatMessage_RedirectsViaHXRedirect(t *testing.T) {
+	s := newServerWithOAuth(t)
+
+	req := httptest.NewRequestWithContext(t.Context(),
+		http.MethodPost, "/chat/message", strings.NewReader("message=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("Accept", "text/html") // HTMX preserves the browser's Accept
+
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"HTMX form post must respond 200 (HTMX treats 2xx + HX-Redirect as a navigation; got %d)", w.Code)
+	require.Empty(t, w.Header().Get("Location"),
+		"HTMX form post must NOT set a Location header (HTMX ignores 3xx; we use HX-Redirect instead)")
+	hxRedirect := w.Header().Get("HX-Redirect")
+	require.NotEmpty(t, hxRedirect,
+		"HTMX form post must set HX-Redirect so the browser navigates to /auth/login")
+	assert.Contains(t, hxRedirect, "/auth/login",
+		"HX-Redirect must point at the login chooser")
+	assert.Contains(t, hxRedirect, "next=",
+		"HX-Redirect must carry the original path as ?next= so the callback returns the user")
+	assert.Contains(t, hxRedirect, "chat%2Fmessage",
+		"HX-Redirect must URL-encode the original path in next=")
+}
+
+// TestAuthMiddleware_HTMXSearch_RedirectsViaHXRedirect pins
+// the same contract for POST /search. Both form routes share
+// the same middleware so a single fix covers both; this test
+// is the explicit pin for the second route.
+func TestAuthMiddleware_HTMXSearch_RedirectsViaHXRedirect(t *testing.T) {
+	s := newServerWithOAuth(t)
+
+	// Query string lives in the URL (matches the realistic
+	// "user clicked a tag chip on /documents and then
+	// submitted the search form" flow); form body is
+	// separate and is intentionally NOT what the redirect
+	// target carries — only the URL's path+query do.
+	req := httptest.NewRequestWithContext(t.Context(),
+		http.MethodPost, "/search?tag=security", strings.NewReader("query=tls"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("Accept", "text/html")
+
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"HTMX /search post must respond 200 (got %d)", w.Code)
+	require.Empty(t, w.Header().Get("Location"),
+		"HTMX /search post must NOT set a Location header")
+	hxRedirect := w.Header().Get("HX-Redirect")
+	require.NotEmpty(t, hxRedirect,
+		"HTMX /search post must set HX-Redirect so the browser navigates to /auth/login")
+
+	// The query string is preserved, but URL-encoded
+	// inside the next= parameter (the `?` and `=` between
+	// /search and tag=security are percent-encoded). Decode
+	// next= to assert the round-trip.
+	u, err := url.Parse(hxRedirect)
+	require.NoError(t, err)
+	require.Equal(t, "/auth/login", u.Path)
+	assert.Equal(t, "/search?tag=security", u.Query().Get("next"),
+		"HX-Redirect must preserve the query string inside next= so the user returns to the same filter state")
+}
+
+// TestAuthMiddleware_NonHTMXBrowserChatMessage_StillRedirectsVia302
+// pins the non-HTMX browser path: a manual form post (no
+// HX-Request header) keeps the historical 302 + Location
+// behavior, so curl / scripted clients that don't speak HTMX
+// still work. Without this pin, a future contributor could
+// "simplify" the middleware to always emit HX-Redirect and
+// break the programmatic clients.
+func TestAuthMiddleware_NonHTMXBrowserChatMessage_StillRedirectsVia302(t *testing.T) {
+	s := newServerWithOAuth(t)
+
+	req := httptest.NewRequestWithContext(t.Context(),
+		http.MethodPost, "/chat/message", strings.NewReader("message=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "text/html")
+	// No HX-Request header — this is a plain browser navigation.
+
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusFound, w.Code,
+		"non-HTMX browser post must keep the historical 302 redirect (got %d)", w.Code)
+	loc := w.Header().Get("Location")
+	require.NotEmpty(t, loc, "non-HTMX redirect must set Location")
+	assert.Contains(t, loc, "/auth/login")
+	assert.Contains(t, loc, "next=")
+	assert.Empty(t, w.Header().Get("HX-Redirect"),
+		"non-HTMX browser post must NOT set HX-Redirect (that's the HTMX path)")
+}
+
+// TestAuthMiddleware_HTMXChatMessage_NoOAuthConfigured_Still401s
+// pins the no-OAuth edge: when only bearer auth is
+// configured, an HTMX request without a token still gets
+// 401, not HX-Redirect. /auth/login with no providers is a
+// UX dead end, so we don't redirect into it. Programmatic
+// and HTMX clients both see the 401 + WWW-Authenticate; the
+// operator's remedy is to either configure an OAuth provider
+// or set the bearer token.
+func TestAuthMiddleware_HTMXChatMessage_NoOAuthConfigured_Still401s(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.AuthToken = "secret-token-123" // bearer only, no OAuth providers
+	s := NewServer(cfg, &fakeHumaService{})
+
+	req := httptest.NewRequestWithContext(t.Context(),
+		http.MethodPost, "/chat/message", strings.NewReader("message=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("Accept", "text/html")
+
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code,
+		"bearer-only auth must still 401 an HTMX request (no OAuth to redirect into; got %d)", w.Code)
+	require.Contains(t, w.Header().Get("WWW-Authenticate"), "Bearer",
+		"401 must advertise Bearer via WWW-Authenticate")
+	require.Empty(t, w.Header().Get("HX-Redirect"),
+		"bearer-only path must NOT emit HX-Redirect (would point at a chooser with no providers)")
 }
