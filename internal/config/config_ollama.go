@@ -1,7 +1,7 @@
 package config
 
 import (
-	"errors"
+	"fmt"
 	"time"
 )
 
@@ -99,84 +99,154 @@ type OllamaConfig struct {
 	Timeout time.Duration `env:"OLLAMA_TIMEOUT" yaml:"timeout"`
 }
 
+// validateOllamaOptions rejects values that would crash a
+// chat-completions server (or vLLM, which returns HTTP 400
+// on min_p with speculative decoding). The five knobs
+// flagged are the ones with documented floors or ceilings —
+// vendor extensions (stop, mirostat, repeat_penalty, ...)
+// flow through unmodified.
 func validateOllamaOptions(opts map[string]any) error {
 	if len(opts) == 0 {
 		return nil
 	}
-
-	getFloat := func(v any) (float64, bool) {
-		switch t := v.(type) {
-		case float64:
-			return t, true
-		case float32:
-			return float64(t), true
-		case int:
-			return float64(t), true
-		case int64:
-			return float64(t), true
-		case uint:
-			return float64(t), true
-		case uint64:
-			return float64(t), true
-		default:
-			return 0, false
+	for _, rule := range ollamaOptionChecks {
+		v, ok := opts[rule.key]
+		if !ok {
+			continue
+		}
+		if err := rule.check(v); err != nil {
+			return err
 		}
 	}
-
-	getInt := func(v any) (int64, bool) {
-		switch t := v.(type) {
-		case int:
-			return int64(t), true
-		case int64:
-			return t, true
-		case uint:
-			return int64(t), true
-		case uint64:
-			return int64(t), true
-		case float64:
-			return int64(t), true
-		default:
-			return 0, false
-		}
-	}
-
-	if v, ok := opts["top_p"]; ok {
-		if f, ok := getFloat(v); ok {
-			if f < 0 || f > 1 {
-				return errors.New("ollama.options.top_p must be between 0 and 1")
-			}
-		}
-	}
-	if v, ok := opts["min_p"]; ok {
-		if f, ok := getFloat(v); ok {
-			if f < 0 || f > 1 {
-				return errors.New("ollama.options.min_p must be between 0 and 1")
-			}
-		}
-	}
-	if v, ok := opts["top_k"]; ok {
-		if i, ok := getInt(v); ok {
-			if i < 0 {
-				return errors.New("ollama.options.top_k must be >= 0")
-			}
-		}
-	}
-	if v, ok := opts["num_predict"]; ok {
-		if i, ok := getInt(v); ok {
-			if i <= 0 {
-				return errors.New("ollama.options.num_predict must be > 0")
-			}
-		}
-	}
-	if v, ok := opts["num_ctx"]; ok {
-		if i, ok := getInt(v); ok {
-			if i <= 0 {
-				return errors.New("ollama.options.num_ctx must be > 0")
-			}
-		}
-	}
-
 	return nil
+}
+
+// ollamaOptionCheck pairs an Options key with a validator
+// that runs against the value the operator supplied.
+// Parsing errors (wrong type) are deliberately swallowed so
+// YAML/JSON int-vs-float ambiguity doesn't reject harmless
+// shapes — only true out-of-range values fail.
+type ollamaOptionCheck struct {
+	key   string
+	check func(v any) error
+}
+
+// ollamaOptionChecks is the closed set of knobs the
+// validator inspects. Adding a new rule means appending one
+// constructor call here and (optionally) one new helper;
+// nothing in validateOllamaOptions needs to change.
+var ollamaOptionChecks = []ollamaOptionCheck{
+	ollamaFloatInUnitInterval("top_p"),
+	ollamaFloatInUnitInterval("min_p"),
+	ollamaIntNonNegative("top_k"),
+	ollamaIntStrictlyPositive("num_predict"),
+	ollamaIntStrictlyPositive("num_ctx"),
+}
+
+// ollamaFloatInUnitInterval returns a check that accepts
+// the named option as a float (or any numeric type that
+// can losslessly convert to float64) in the closed range
+// [0, 1]. Used by top_p and min_p.
+func ollamaFloatInUnitInterval(name string) ollamaOptionCheck {
+	return ollamaOptionCheck{
+		key: name,
+		check: func(v any) error {
+			f, ok := asFloat64(v)
+			if !ok {
+				return nil
+			}
+			if f < 0 || f > 1 {
+				return fmt.Errorf("ollama.options.%s must be between 0 and 1", name)
+			}
+			return nil
+		},
+	}
+}
+
+// ollamaIntNonNegative returns a check that accepts the
+// named option as an integer >= 0. Used by top_k.
+func ollamaIntNonNegative(name string) ollamaOptionCheck {
+	return ollamaOptionCheck{
+		key: name,
+		check: func(v any) error {
+			i, ok := asInt64(v)
+			if !ok {
+				return nil
+			}
+			if i < 0 {
+				return fmt.Errorf("ollama.options.%s must be >= 0", name)
+			}
+			return nil
+		},
+	}
+}
+
+// ollamaIntStrictlyPositive returns a check that accepts
+// the named option as an integer > 0. Used by num_predict
+// and num_ctx — both have a floor of 1.
+func ollamaIntStrictlyPositive(name string) ollamaOptionCheck {
+	return ollamaOptionCheck{
+		key: name,
+		check: func(v any) error {
+			i, ok := asInt64(v)
+			if !ok {
+				return nil
+			}
+			if i <= 0 {
+				return fmt.Errorf("ollama.options.%s must be > 0", name)
+			}
+			return nil
+		},
+	}
+}
+
+// asFloat64 returns v as a float64 when it is one of the
+// numeric types any Go decoder (encoding/json, yaml.v3)
+// can produce on the hot path: float32, float64, or any of
+// the signed and unsigned integer widths. Booleans, strings,
+// slices, and maps are not numbers and return ok=false so
+// the caller can decide whether to pass them through.
+func asFloat64(v any) (float64, bool) {
+	switch t := v.(type) {
+	case float64:
+		return t, true
+	case float32:
+		return float64(t), true
+	case int:
+		return float64(t), true
+	case int64:
+		return float64(t), true
+	case uint:
+		return float64(t), true
+	case uint64:
+		return float64(t), true
+	default:
+		return 0, false
+	}
+}
+
+// asInt64 is the integer counterpart to asFloat64. It
+// returns v as an int64 when the source type is one of
+// the integer or float64 shapes a Go decoder can emit.
+// Float64 is accepted because JSON's number type covers
+// both: top_k: 20 (int) and top_k: 20.0 (float) parse to
+// different Go types depending on the surface, and the
+// validator must accept either.
+func asInt64(v any) (int64, bool) {
+	switch t := v.(type) {
+	case int:
+		return int64(t), true
+	case int64:
+		return t, true
+	case uint:
+		return int64(t), true
+	case uint64:
+		return int64(t), true
+	case float64:
+		return int64(t), true
+	default:
+		return 0, false
+	}
 }
 
 // EffectiveChatAPIKey returns the bearer token to use for the chat
