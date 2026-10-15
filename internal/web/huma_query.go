@@ -86,114 +86,118 @@ type searchResponseBody struct {
 
 // registerQueryOperation wires /api/query.
 func registerQueryOperation(api huma.API, svc serviceAPI) {
-	huma.Register(api, huma.Operation{
-		OperationID: "query",
-		Method:      http.MethodPost,
-		Path:        "/api/query",
-		Summary:     "Query the knowledge base",
-	}, func(ctx context.Context, input *struct{ Body queryRequestBody }) (*struct{ Body queryResponseBody }, error) {
-		q := strings.TrimSpace(input.Body.Query)
-		if q == "" {
-			return nil, huma.Error400BadRequest("query is required")
-		}
+	registerPOST[queryRequestBody, queryResponseBody](api,
+		huma.Operation{
+			OperationID: "query",
+			Method:      http.MethodPost,
+			Path:        "/api/query",
+			Summary:     "Query the knowledge base",
+		},
+		func(ctx context.Context, body *queryRequestBody) (*queryResponseBody, error) {
+			q := strings.TrimSpace(body.Query)
+			if q == "" {
+				return nil, huma.Error400BadRequest("query is required")
+			}
 
-		topK := input.Body.TopK
-		if topK == 0 {
-			topK = 5
-		}
+			topK := body.TopK
+			if topK == 0 {
+				topK = 5
+			}
 
-		history := make([]service.ChatMessage, 0, len(input.Body.History))
-		for _, m := range input.Body.History {
-			history = append(history, service.ChatMessage{Role: m.Role, Content: m.Content})
-		}
+			history := make([]service.ChatMessage, 0, len(body.History))
+			for _, m := range body.History {
+				history = append(history, service.ChatMessage{Role: m.Role, Content: m.Content})
+			}
 
-		answer, debug, err := svc.QueryDebugWithOptions(ctx, q, topK, service.LLMOptions{Temperature: input.Body.Temperature, History: history})
-		if err != nil {
-			return nil, huma.Error500InternalServerError("query failed")
-		}
+			answer, debug, err := svc.QueryDebugWithOptions(ctx, q, topK, service.LLMOptions{Temperature: body.Temperature, History: history})
+			if err != nil {
+				return nil, huma.Error500InternalServerError("query failed")
+			}
 
-		resp := queryResponseBody{Answer: answer}
-		if debug != nil {
-			resp.Links = extractLinksFromResults(debug.Results)
-			if input.Body.IncludeHits {
-				resp.Hits = make([]queryHit, 0, len(debug.Results))
-				for _, r := range debug.Results {
-					resp.Hits = append(resp.Hits, queryHit{
-						DocumentTitle: r.DocumentTitle,
-						Content:       r.Content,
-						Similarity:    r.Similarity,
-						DocumentURLs:  r.DocumentURLs,
-					})
+			resp := queryResponseBody{Answer: answer}
+			if debug != nil {
+				resp.Links = extractLinksFromResults(debug.Results)
+				if body.IncludeHits {
+					resp.Hits = make([]queryHit, 0, len(debug.Results))
+					for _, r := range debug.Results {
+						resp.Hits = append(resp.Hits, queryHit{
+							DocumentTitle: r.DocumentTitle,
+							Content:       r.Content,
+							Similarity:    r.Similarity,
+							DocumentURLs:  r.DocumentURLs,
+						})
+					}
 				}
 			}
-		}
 
-		return &struct{ Body queryResponseBody }{Body: resp}, nil
-	})
+			return &resp, nil
+		})
 }
 
 // registerSearchOperation wires /api/search.
 func registerSearchOperation(api huma.API, svc serviceAPI) {
-	huma.Register(api, huma.Operation{
-		OperationID: "search",
-		Method:      http.MethodPost,
-		Path:        "/api/search",
-		Summary:     "Hybrid search across the embedding index and the keyword index",
-	}, func(ctx context.Context, input *struct{ Body searchRequestBody }) (*struct{ Body searchResponseBody }, error) {
-		q := strings.TrimSpace(input.Body.Query)
-		if q == "" {
-			return nil, huma.Error400BadRequest("query is required")
-		}
-
-		limit := input.Body.Limit
-		if limit == 0 {
-			limit = 5
-		}
-		// min_score default dropped from 0.5 to 0 in v0.4.0:
-		// semantic similarity scores vary with the embeddings
-		// model and 0.5 was filtering too aggressively for
-		// nomic-embed-text. Callers who want the old
-		// behavior can pass min_score: 0.5 explicitly.
-		// The pointer is nil when the caller omits the field;
-		// dereference safely.
-		var minScore float64
-		if input.Body.MinScore != nil {
-			minScore = *input.Body.MinScore
-		}
-
-		mode := parseSearchMode(input.Body.Mode)
-		filters, err := parseSearchFilters(service.SearchFilters{
-			DocumentID: input.Body.DocumentID,
-			Tag:        input.Body.Tag,
-			Category:   input.Body.Category,
-		}, input.Body.CreatedAfter, input.Body.CreatedBefore,
-			input.Body.UpdatedAfter, input.Body.UpdatedBefore)
-		if err != nil {
-			return nil, huma.Error400BadRequest("invalid date filter: " + err.Error())
-		}
-
-		results, err := svc.HybridSearch(ctx, q, limit, filters, mode)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("search failed")
-		}
-
-		filtered := make([]searchResultBody, 0, len(results))
-		for _, r := range results {
-			if float64(r.Similarity) < minScore {
-				continue
+	registerPOST[searchRequestBody, searchResponseBody](api,
+		huma.Operation{
+			OperationID: "search",
+			Method:      http.MethodPost,
+			Path:        "/api/search",
+			Summary:     "Hybrid search across the embedding index and the keyword index",
+		},
+		func(ctx context.Context, body *searchRequestBody) (*searchResponseBody, error) {
+			q := strings.TrimSpace(body.Query)
+			if q == "" {
+				return nil, huma.Error400BadRequest("query is required")
 			}
-			filtered = append(filtered, searchResultBody{
-				ChunkID:       r.ChunkID,
-				DocumentID:    r.DocumentID,
-				DocumentTitle: r.DocumentTitle,
-				Content:       r.Content,
-				Similarity:    r.Similarity,
-				DocumentURLs:  r.DocumentURLs,
-			})
-		}
 
-		return &struct{ Body searchResponseBody }{Body: searchResponseBody{Count: len(filtered), Results: filtered}}, nil
-	})
+			limit := body.Limit
+			if limit == 0 {
+				limit = 5
+			}
+			// min_score default dropped from 0.5 to 0 in v0.4.0:
+			// semantic similarity scores vary with the embeddings
+			// model and 0.5 was filtering too aggressively for
+			// nomic-embed-text. Callers who want the old
+			// behavior can pass min_score: 0.5 explicitly.
+			// The pointer is nil when the caller omits the field;
+			// dereference safely.
+			var minScore float64
+			if body.MinScore != nil {
+				minScore = *body.MinScore
+			}
+
+			mode := parseSearchMode(body.Mode)
+			filters, err := parseSearchFilters(service.SearchFilters{
+				DocumentID: body.DocumentID,
+				Tag:        body.Tag,
+				Category:   body.Category,
+			}, body.CreatedAfter, body.CreatedBefore,
+				body.UpdatedAfter, body.UpdatedBefore)
+			if err != nil {
+				return nil, huma.Error400BadRequest("invalid date filter: " + err.Error())
+			}
+
+			results, err := svc.HybridSearch(ctx, q, limit, filters, mode)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("search failed")
+			}
+
+			filtered := make([]searchResultBody, 0, len(results))
+			for _, r := range results {
+				if float64(r.Similarity) < minScore {
+					continue
+				}
+				filtered = append(filtered, searchResultBody{
+					ChunkID:       r.ChunkID,
+					DocumentID:    r.DocumentID,
+					DocumentTitle: r.DocumentTitle,
+					Content:       r.Content,
+					Similarity:    r.Similarity,
+					DocumentURLs:  r.DocumentURLs,
+				})
+			}
+
+			return &searchResponseBody{Count: len(filtered), Results: filtered}, nil
+		})
 }
 
 // parseSearchMode maps the JSON wire string to the

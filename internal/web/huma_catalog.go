@@ -162,76 +162,84 @@ type tagsAndCategoriesResponseBody struct {
 // registerCatalogOperations wires the small read-only catalog
 // endpoints: health check and the three tag/category lookups.
 func registerCatalogOperations(api huma.API, svc serviceAPI, _ *jobs.Queue) {
-	huma.Register(api, huma.Operation{
-		OperationID: "health",
-		Method:      http.MethodGet,
-		Path:        "/api/health",
-		Summary:     "Health check",
-	}, func(ctx context.Context, input *struct{}) (*struct{ Body healthResponseBody }, error) {
-		_, err := svc.CheckHealth(ctx)
-		if err != nil {
-			return nil, huma.Error503ServiceUnavailable("Service unhealthy")
-		}
-		return &struct{ Body healthResponseBody }{Body: healthResponseBody{Status: "healthy"}}, nil
-	})
+	registerGET[healthResponseBody](api,
+		huma.Operation{
+			OperationID: "health",
+			Method:      http.MethodGet,
+			Path:        "/api/health",
+			Summary:     "Health check",
+		},
+		func(ctx context.Context) (*healthResponseBody, error) {
+			_, err := svc.CheckHealth(ctx)
+			if err != nil {
+				return nil, huma.Error503ServiceUnavailable("Service unhealthy")
+			}
+			return &healthResponseBody{Status: "healthy"}, nil
+		})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "health-full",
-		Method:      http.MethodGet,
-		Path:        "/api/health/full",
-		Summary:     "Detailed health check including async-ingest queue state",
-	}, func(ctx context.Context, input *struct{}) (*struct{ Body healthFullResponseBody }, error) {
-		body, err := buildHealthFull(ctx, svc)
-		if err != nil {
-			return nil, err
-		}
-		return &struct{ Body healthFullResponseBody }{Body: *body}, nil
-	})
+	registerGET[healthFullResponseBody](api,
+		huma.Operation{
+			OperationID: "health-full",
+			Method:      http.MethodGet,
+			Path:        "/api/health/full",
+			Summary:     "Detailed health check including async-ingest queue state",
+		},
+		func(ctx context.Context) (*healthFullResponseBody, error) {
+			body, err := buildHealthFull(ctx, svc)
+			if err != nil {
+				return nil, err
+			}
+			return body, nil
+		})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "get-tags",
-		Method:      http.MethodGet,
-		Path:        "/api/tags",
-		Summary:     "Get normalized tags",
-		Description: "Returns all unique tags from the vector database, normalized to lowercase and sorted.",
-	}, func(ctx context.Context, input *struct{}) (*struct{ Body tagsResponseBody }, error) {
-		tags, err := svc.GetNormalizedTags(ctx)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to retrieve tags")
-		}
-		return &struct{ Body tagsResponseBody }{Body: tagsResponseBody{Tags: tags}}, nil
-	})
+	registerGET[tagsResponseBody](api,
+		huma.Operation{
+			OperationID: "get-tags",
+			Method:      http.MethodGet,
+			Path:        "/api/tags",
+			Summary:     "Get normalized tags",
+			Description: "Returns all unique tags from the vector database, normalized to lowercase and sorted.",
+		},
+		func(ctx context.Context) (*tagsResponseBody, error) {
+			tags, err := svc.GetNormalizedTags(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to retrieve tags")
+			}
+			return &tagsResponseBody{Tags: tags}, nil
+		})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "get-categories",
-		Method:      http.MethodGet,
-		Path:        "/api/categories",
-		Summary:     "Get normalized categories",
-		Description: "Returns all unique categories from the vector database, trimmed of whitespace and sorted.",
-	}, func(ctx context.Context, input *struct{}) (*struct{ Body categoriesResponseBody }, error) {
-		categories, err := svc.GetNormalizedCategories(ctx)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to retrieve categories")
-		}
-		return &struct{ Body categoriesResponseBody }{Body: categoriesResponseBody{Categories: categories}}, nil
-	})
+	registerGET[categoriesResponseBody](api,
+		huma.Operation{
+			OperationID: "get-categories",
+			Method:      http.MethodGet,
+			Path:        "/api/categories",
+			Summary:     "Get normalized categories",
+			Description: "Returns all unique categories from the vector database, trimmed of whitespace and sorted.",
+		},
+		func(ctx context.Context) (*categoriesResponseBody, error) {
+			categories, err := svc.GetNormalizedCategories(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to retrieve categories")
+			}
+			return &categoriesResponseBody{Categories: categories}, nil
+		})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "get-tags-and-categories",
-		Method:      http.MethodGet,
-		Path:        "/api/tags-categories",
-		Summary:     "Get both tags and categories",
-		Description: "Returns all unique tags (lowercase) and categories (preserved case) from the vector database.",
-	}, func(ctx context.Context, input *struct{}) (*struct{ Body tagsAndCategoriesResponseBody }, error) {
-		tags, categories, err := svc.GetTagsAndCategories(ctx)
-		if err != nil {
-			return nil, huma.Error500InternalServerError("failed to retrieve tags and categories")
-		}
-		return &struct{ Body tagsAndCategoriesResponseBody }{
-			Body: tagsAndCategoriesResponseBody{
+	registerGET[tagsAndCategoriesResponseBody](api,
+		huma.Operation{
+			OperationID: "get-tags-and-categories",
+			Method:      http.MethodGet,
+			Path:        "/api/tags-categories",
+			Summary:     "Get both tags and categories",
+			Description: "Returns all unique tags (lowercase) and categories (preserved case) from the vector database.",
+		},
+		func(ctx context.Context) (*tagsAndCategoriesResponseBody, error) {
+			tags, categories, err := svc.GetTagsAndCategories(ctx)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to retrieve tags and categories")
+			}
+			return &tagsAndCategoriesResponseBody{
 				Tags:       tags,
 				Categories: categories,
-			},
-		}, nil
-	})
+			}, nil
+		})
 }
