@@ -541,11 +541,15 @@ func TestAuthMiddleware_HTMXChatMessage_RedirectsViaHXRedirect(t *testing.T) {
 	hxRedirect := w.Header().Get("HX-Redirect")
 	require.NotEmpty(t, hxRedirect,
 		"HTMX form post must set HX-Redirect so the browser navigates to /auth/login")
-	assert.Contains(t, hxRedirect, "/auth/login",
+
+	// Decode next= to assert the round-trip — substring
+	// matching would let a missing `?` between path and
+	// query slip through (e.g. /auth/loginnext=/chat/message).
+	u, err := url.Parse(hxRedirect)
+	require.NoError(t, err, "HX-Redirect must be a valid URL")
+	require.Equal(t, "/auth/login", u.Path,
 		"HX-Redirect must point at the login chooser")
-	assert.Contains(t, hxRedirect, "next=",
-		"HX-Redirect must carry the original path as ?next= so the callback returns the user")
-	assert.Contains(t, hxRedirect, "chat%2Fmessage",
+	assert.Equal(t, "/chat/message", u.Query().Get("next"),
 		"HX-Redirect must URL-encode the original path in next=")
 }
 
@@ -612,8 +616,15 @@ func TestAuthMiddleware_NonHTMXBrowserChatMessage_StillRedirectsVia302(t *testin
 		"non-HTMX browser post must keep the historical 302 redirect (got %d)", w.Code)
 	loc := w.Header().Get("Location")
 	require.NotEmpty(t, loc, "non-HTMX redirect must set Location")
-	assert.Contains(t, loc, "/auth/login")
-	assert.Contains(t, loc, "next=")
+
+	// Decode the URL so a regression like a missing `?`
+	// between /auth/login and next= (e.g.
+	// /auth/loginnext=/chat/message) shows as a red test.
+	u, err := url.Parse(loc)
+	require.NoError(t, err, "non-HTMX Location must be a valid URL")
+	require.Equal(t, "/auth/login", u.Path)
+	assert.Equal(t, "/chat/message", u.Query().Get("next"),
+		"non-HTMX browser redirect must keep the historical /auth/login?next= shape")
 	assert.Empty(t, w.Header().Get("HX-Redirect"),
 		"non-HTMX browser post must NOT set HX-Redirect (that's the HTMX path)")
 }
@@ -646,4 +657,37 @@ func TestAuthMiddleware_HTMXChatMessage_NoOAuthConfigured_Still401s(t *testing.T
 		"401 must advertise Bearer via WWW-Authenticate")
 	require.Empty(t, w.Header().Get("HX-Redirect"),
 		"bearer-only path must NOT emit HX-Redirect (would point at a chooser with no providers)")
+}
+
+// TestAuthMiddleware_HTMXRequest_ValidBearerToken_PassesThrough
+// pins the (bearer + HX-Request) intersection: a valid
+// bearer token lets the request through regardless of the
+// HTMX header. The bearer check must run before any
+// HTMX branching, so an authenticated HTMX request reaches
+// the handler — it does not get a 302 (or an HX-Redirect).
+//
+// Pre-existing TestAuthMiddleware_AcceptsValidBearerToken
+// covers the (bearer, no-HTX) intersection. This test is
+// the explicit pin for the (bearer, HTX) intersection so a
+// future "swap the auth order" refactor surfaces a red
+// test rather than a silent regression.
+func TestAuthMiddleware_HTMXRequest_ValidBearerToken_PassesThrough(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.AuthToken = "secret-token-123"
+	s := NewServer(cfg, &fakeHumaService{})
+
+	req := httptest.NewRequestWithContext(t.Context(),
+		http.MethodGet, "/api/health", nil)
+	req.Header.Set("Authorization", "Bearer secret-token-123")
+	req.Header.Set("HX-Request", "true")
+
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code,
+		"valid bearer token must let an HTMX request through to the handler (got %d)", w.Code)
+	require.Empty(t, w.Header().Get("Location"),
+		"authenticated request must NOT trigger a 302 redirect")
+	require.Empty(t, w.Header().Get("HX-Redirect"),
+		"authenticated request must NOT trigger the HX-Redirect branch — auth passed, no redirect needed")
 }
