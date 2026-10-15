@@ -137,12 +137,30 @@ func authMiddleware(tokens []config.AuthToken, sessions *sessionStore, cookieNam
 			// otherwise the 401 stays in place so an
 			// operator who forgot to set auth_token
 			// still sees a clear "this is broken" signal.
+			//
+			// HTMX-driven form posts (HX-Request: true)
+			// need HX-Redirect instead of a 302: per the
+			// HTMX spec, a 3xx response on an HX-Request
+			// request is silently dropped, so the user
+			// sees "nothing happened" instead of a
+			// navigation. HX-Redirect triggers a full
+			// client-side navigation, which is what the
+			// OAuth round-trip needs anyway.
 			if hasSessions && wantsHTML(r) {
 				next := r.URL.Path
 				if r.URL.RawQuery != "" {
 					next += "?" + r.URL.RawQuery
 				}
-				http.Redirect(w, r, "/auth/login?next="+url.QueryEscape(next), http.StatusFound)
+				target := "/auth/login?next=" + url.QueryEscape(next)
+
+				if r.Header.Get("HX-Request") == "true" {
+					w.Header().Set("HX-Redirect", target)
+					w.WriteHeader(http.StatusOK)
+
+					return
+				}
+
+				http.Redirect(w, r, target, http.StatusFound)
 
 				return
 			}
