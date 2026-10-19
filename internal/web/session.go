@@ -147,22 +147,61 @@ func userFromSession(s *Session) User {
 // request; Put / Delete / Sweep take the write lock.
 //
 // Eviction: Get evicts the entry lazily when it finds an
-// expired record; Sweep walks the map and removes all
-// expired entries in one pass (for periodic cleanup and
-// for the optional "users gc" admin command).
+// expired record; a background ticker (started in
+// newSessionStore) calls Sweep every 5 minutes so entries
+// whose cookies were abandoned by the browser (operator
+// closed the tab without logging out) get cleaned up
+// without waiting for someone to look. The Sweep method
+// remains exported for the optional "users gc" admin
+// command and the tests.
 type sessionStore struct {
 	mu         sync.RWMutex
 	entries    map[string]*Session
 	defaultTTL time.Duration
+	stop       chan struct{}
+	done       chan struct{}
 }
 
 // newSessionStore returns an empty store. defaultTTL is
 // applied to New() (and to Put when the caller doesn't set
-// ExpiresAt explicitly).
+// ExpiresAt explicitly). Starts a background goroutine
+// that runs Sweep every 5 minutes; Stop() signals exit.
 func newSessionStore(defaultTTL time.Duration) *sessionStore {
-	return &sessionStore{
+	s := &sessionStore{
 		entries:    make(map[string]*Session),
 		defaultTTL: defaultTTL,
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+	go s.sweepLoop()
+	return s
+}
+
+// Stop signals the sweep goroutine to exit and waits for
+// it. Idempotent.
+func (s *sessionStore) Stop() {
+	select {
+	case <-s.stop:
+		return
+	default:
+		close(s.stop)
+	}
+	<-s.done
+}
+
+// sweepLoop runs until Stop closes s.stop. Walks the map
+// every 5 minutes and removes expired entries.
+func (s *sessionStore) sweepLoop() {
+	defer close(s.done)
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			s.Sweep()
+		}
 	}
 }
 

@@ -39,14 +39,13 @@ type ChatSessionStoreConfig struct {
 // default — that's the sticky-default UX contract; see
 // .planning/multi-source.md Stage 2.4).
 //
-// lastAccess is wired for a future IdleTTL GC pass; not
-// read today but set on every Get/Append so the value
-// is always current when the GC lands. The unused-field
-// lint allows it on purpose.
+// lastAccess is stamped on every Get/Append and read by
+// the IdleTTL GC (see ChatSessionStore.gc). Without it,
+// abandoned sessions would leak forever (audit finding 1).
 type chatSession struct {
 	history     []ChatMessage
 	sourceKinds []string
-	lastAccess  time.Time //nolint:unused // wired for future IdleTTL GC
+	lastAccess  time.Time
 }
 
 // ChatSessionStore is an in-memory map of session_id →
@@ -60,18 +59,93 @@ type ChatSessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*chatSession
 	cfg      ChatSessionStoreConfig
+
+	// stop is closed by Stop() to signal the GC goroutine
+	// to exit. Storing the channel on the struct (instead
+	// of capturing it in a closure) keeps Stop callable
+	// from any goroutine without a race between Stop and
+	// the GC's select.
+	stop chan struct{}
+	// done is closed when the GC goroutine returns. Used
+	// only from tests to synchronize shutdown assertions.
+	done chan struct{}
 }
 
 // NewChatSessionStore constructs the store with the given
 // config. MaxTurns is clamped to a sensible floor (1) so
 // a config typo can't silently disable the cap.
+//
+// IdleTTL > 0 starts a background goroutine that GC's
+// sessions whose lastAccess is older than IdleTTL every
+// minute. IdleTTL == 0 means no GC (matches the historical
+// behavior; sessions live until process restart). The
+// goroutine stops on Stop().
 func NewChatSessionStore(cfg ChatSessionStoreConfig) *ChatSessionStore {
 	if cfg.MaxTurns <= 0 {
 		cfg.MaxTurns = 20
 	}
-	return &ChatSessionStore{
+	s := &ChatSessionStore{
 		sessions: make(map[string]*chatSession),
 		cfg:      cfg,
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+	}
+	if cfg.IdleTTL > 0 {
+		go s.gcLoop()
+	} else {
+		close(s.done)
+	}
+	return s
+}
+
+// Stop signals the GC goroutine to exit and waits for it.
+// Idempotent — a second call is a no-op.
+func (s *ChatSessionStore) Stop() {
+	select {
+	case <-s.stop:
+		// already stopped
+	default:
+		close(s.stop)
+	}
+	<-s.done
+}
+
+// gcLoop runs until Stop closes s.stop. Walks the map every
+// minute and deletes sessions whose lastAccess is older than
+// the configured IdleTTL.
+//
+// One minute between sweeps is a deliberate balance: long
+// enough that the GC overhead is negligible, short enough
+// that abandoned sessions don't sit in memory for hours
+// before being reclaimed.
+func (s *ChatSessionStore) gcLoop() {
+	defer close(s.done)
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			s.gc()
+		}
+	}
+}
+
+// gc deletes sessions whose lastAccess is older than IdleTTL.
+// Called under the store's mutex; safe against concurrent
+// Get/Append/Clear.
+func (s *ChatSessionStore) gc() {
+	if s.cfg.IdleTTL <= 0 {
+		return
+	}
+	cutoff := time.Now().Add(-s.cfg.IdleTTL)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, sess := range s.sessions {
+		if sess.lastAccess.Before(cutoff) {
+			delete(s.sessions, id)
+		}
 	}
 }
 

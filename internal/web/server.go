@@ -891,6 +891,20 @@ func (s *Server) Stop(ctx context.Context) error {
 		s.ingestQueue.Stop()
 	}
 
+	// Stop the per-store GC goroutines so they exit cleanly.
+	// Idempotent Stop on nil-safe receivers means the
+	// guards below only matter for the case where OAuth
+	// was never initialized.
+	if s.sessions != nil {
+		s.sessions.Stop()
+	}
+	if s.oauthHandlers != nil && s.oauthHandlers.flows != nil {
+		s.oauthHandlers.flows.Stop()
+	}
+	if s.service != nil {
+		s.service.StopChatSessionsGC()
+	}
+
 	if s.server != nil {
 		return s.server.Shutdown(ctx)
 	}

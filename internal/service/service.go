@@ -145,15 +145,18 @@ func NewService(cfg *config.Config) (*Service, error) {
 	cacheTTL := cfg.Ragabast.QueryCacheTTL
 
 	return &Service{
-		config:       cfg,
-		parser:       docParser,
-		chunker:      docChunker,
-		vectorOps:    vectorOps,
-		llmClient:    newLLMChatClient(cfg),
-		cache:        querycache.New[[]models.SearchResult](cacheSize, cacheTTL),
-		chatSessions: NewChatSessionStore(ChatSessionStoreConfig{MaxTurns: cfg.Ragabast.ChatSessionMaxTurns}),
-		embedModel:   cfg.Ollama.EmbeddingModel,
-		now:          time.Now,
+		config:    cfg,
+		parser:    docParser,
+		chunker:   docChunker,
+		vectorOps: vectorOps,
+		llmClient: newLLMChatClient(cfg),
+		cache:     querycache.New[[]models.SearchResult](cacheSize, cacheTTL),
+		chatSessions: NewChatSessionStore(ChatSessionStoreConfig{
+			MaxTurns: cfg.Ragabast.ChatSessionMaxTurns,
+			IdleTTL:  cfg.Ragabast.ChatSessionIdleTTL,
+		}),
+		embedModel: cfg.Ollama.EmbeddingModel,
+		now:        time.Now,
 	}, nil
 }
 
@@ -163,4 +166,17 @@ func NewService(cfg *config.Config) (*Service, error) {
 // this; the constructor sets time.Now as the default.
 func (s *Service) SetNow(now func() time.Time) {
 	s.now = now
+}
+
+// StopChatSessionsGC stops the ChatSessionStore's idle-TTL
+// GC goroutine. Safe to call when the store is nil (no-op)
+// or when IdleTTL was 0 (the goroutine isn't running). Idempotent.
+//
+// The web server's Stop() calls this so shutdown is clean;
+// the GC exits in well under a second after Stop is called.
+func (s *Service) StopChatSessionsGC() {
+	if s == nil || s.chatSessions == nil {
+		return
+	}
+	s.chatSessions.Stop()
 }

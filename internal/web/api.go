@@ -35,6 +35,12 @@ type serviceAPI interface {
 	GetNormalizedTags(ctx context.Context) ([]string, error)
 	GetNormalizedCategories(ctx context.Context) ([]string, error)
 	GetTagsAndCategories(ctx context.Context) (tags []string, categories []string, err error)
+
+	// StopChatSessionsGC stops the chat-session idle-TTL
+	// GC goroutine. The web Server's Stop calls this so a
+	// clean shutdown doesn't leave a hung goroutine. Tests
+	// can also call it; nil-safe on the receiver.
+	StopChatSessionsGC()
 }
 
 // Compile-time assertion that *service.Service satisfies serviceAPI.

@@ -62,6 +62,17 @@ type RagabastConfig struct {
 	// context for follow-up questions without unbounded
 	// memory growth. Default 20 (≈40 messages).
 	ChatSessionMaxTurns int `env:"RAGABAST_CHAT_SESSION_MAX_TURNS" yaml:"chat_session_max_turns,omitempty"`
+
+	// ChatSessionIdleTTL drops chat sessions whose last
+	// access is older than this (audit finding 1). Without
+	// a TTL, abandoned sessions accumulate forever because
+	// browsers that close without logging out leave no
+	// signal for the lazy eviction to fire. Default 24h —
+	// longer than a typical browser session, short enough
+	// that an inactive operator's history doesn't pin memory
+	// indefinitely. Set to 0 to disable the GC and rely on
+	// process restart (the v0.16 behavior).
+	ChatSessionIdleTTL time.Duration `env:"RAGABAST_CHAT_SESSION_IDLE_TTL" yaml:"chat_session_idle_ttl,omitempty"`
 }
 
 // validateAndTrimDocbuilderBaseURL validates the configured

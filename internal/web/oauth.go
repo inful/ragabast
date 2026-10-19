@@ -152,14 +152,67 @@ type flowState struct {
 
 // flowStateStore is the in-memory map of pending OAuth
 // flows. Same concurrency rules as sessionStore: RWMutex
-// around the map, lazy eviction on Get.
+// around the map, lazy eviction on Get plus a background
+// ticker that GC's entries whose CreatedAt is older than
+// oauthFlowStateTTL. The ticker matters because the
+// state cookie expires on the browser side; a flow whose
+// cookie is abandoned (operator closes the chooser
+// without completing login) was leaking forever before
+// the ticker. Audit finding 13.
 type flowStateStore struct {
 	mu      sync.RWMutex
 	entries map[string]*flowState
+	stop    chan struct{}
+	done    chan struct{}
 }
 
 func newFlowStateStore() *flowStateStore {
-	return &flowStateStore{entries: make(map[string]*flowState)}
+	s := &flowStateStore{
+		entries: make(map[string]*flowState),
+		stop:    make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	go s.gcLoop()
+	return s
+}
+
+// Stop signals the GC goroutine to exit and waits for it.
+// Idempotent.
+func (s *flowStateStore) Stop() {
+	select {
+	case <-s.stop:
+		return
+	default:
+		close(s.stop)
+	}
+	<-s.done
+}
+
+// gcLoop runs until Stop closes s.stop. Sweeps every minute.
+func (s *flowStateStore) gcLoop() {
+	defer close(s.done)
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			s.gc()
+		}
+	}
+}
+
+// gc deletes entries older than oauthFlowStateTTL.
+func (s *flowStateStore) gc() {
+	cutoff := time.Now().Add(-oauthFlowStateTTL)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for state, entry := range s.entries {
+		if entry.createdAt.Before(cutoff) {
+			delete(s.entries, state)
+		}
+	}
 }
 
 // Put stores a flow keyed by state. Caller must set
