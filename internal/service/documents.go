@@ -207,6 +207,20 @@ func (s *Service) BulkUpdateDocuments(ctx context.Context, patches []vector.Docu
 	// rankings (tags/categories drive filters, URLs drive
 	// result surfaces). Drop everything — same policy as
 	// DeleteDocument.
+	//
+	// Trade-off (audit finding 14): the cache key is hashed
+	// from query+filters+mode, NOT from the document that
+	// changed. A bulk update on 200 documents invalidates
+	// every cached search — fine if bulk updates are
+	// rare (operator-driven tagging campaign), wasteful
+	// when they aren't. A per-document key prefix would
+	// let the cache evict only the entries whose results
+	// might have shifted; today the cache is whole-or-
+	// nothing. Operators running frequent bulk updates
+	// see a brief hit-rate dip after each call — the
+	// TTL heals the situation within
+	// ragabast.query_cache_ttl. Acceptable: bulk metadata
+	// updates are operator-time, not request-time.
 	s.cache.Clear()
 	return results, nil
 }
