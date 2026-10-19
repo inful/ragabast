@@ -893,37 +893,71 @@ func fetchGitHubPrimaryEmail(ctx context.Context, c *http.Client, tok *oauth2.To
 	return ""
 }
 
+// userInfoFromGET is the shared body of every provider-
+// specific userInfoFn that follows the "GET
+// <baseURL><path>, decode JSON, map to userInfo" pattern.
+// GitLab and Forgejo are near-copies of this shape (audit
+// finding 9); the differences are the JSON field names
+// (GitLab uses `username`/`name`, Forgejo uses
+// `login`/`full_name`). All four candidate fields are
+// decoded; mapToUserInfo picks the populated one for
+// the canonical userInfo.Username and userInfo.Name.
+type userInfoJSON struct {
+	ID       int64  `json:"id"`
+	Login    string `json:"login"`
+	Username string `json:"username"`
+	Name     string `json:"name"`
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+}
+
+func userInfoFromGET(
+	ctx context.Context, c *http.Client, tok *oauth2.Token,
+	baseURL, path string,
+) (userInfo, error) {
+	url := baseURL + path
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	res, err := c.Do(req)
+	if err != nil {
+		return userInfo{}, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		return userInfo{}, &httpStatusError{status: res.StatusCode, url: url}
+	}
+	var u userInfoJSON
+	if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
+		return userInfo{}, err
+	}
+	// Pick the more-populated of the two candidates for
+	// each field. Providers that ship both fields (a
+	// future GitLab-fork) populate both; current providers
+	// populate exactly one. firstNonEmpty keeps the populated
+	// one without a per-provider branch.
+	return userInfo{
+		Subject:  strconv.FormatInt(u.ID, 10),
+		Username: firstNonEmpty(u.Username, u.Login),
+		Name:     firstNonEmpty(u.Name, u.FullName),
+		Email:    u.Email,
+	}, nil
+}
+
+// firstNonEmpty returns a if a != "", otherwise b. Used
+// to pick the more populated of two optional JSON fields.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // gitlabUserInfo returns a userInfoFn that talks to the
 // GitLab /api/v4/user endpoint. baseURL is the GitLab
 // root (https://gitlab.com or a self-hosted BaseURL).
 func gitlabUserInfo(baseURL string) func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
 	return func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v4/user", nil)
-		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-		res, err := c.Do(req)
-		if err != nil {
-			return userInfo{}, err
-		}
-		defer func() { _ = res.Body.Close() }()
-		if res.StatusCode != http.StatusOK {
-			return userInfo{}, &httpStatusError{status: res.StatusCode, url: baseURL + "/api/v4/user"}
-		}
-		var u struct {
-			ID       int64  `json:"id"`
-			Username string `json:"username"`
-			Name     string `json:"name"`
-			Email    string `json:"email"`
-		}
-		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-			return userInfo{}, err
-		}
-
-		return userInfo{
-			Subject:  strconv.FormatInt(u.ID, 10),
-			Username: u.Username,
-			Email:    u.Email,
-			Name:     u.Name,
-		}, nil
+		return userInfoFromGET(ctx, c, tok, baseURL, "/api/v4/user")
 	}
 }
 
@@ -933,32 +967,7 @@ func gitlabUserInfo(baseURL string) func(ctx context.Context, c *http.Client, to
 // Validate method).
 func forgejoUserInfo(baseURL string) func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
 	return func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/user", nil)
-		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-		res, err := c.Do(req)
-		if err != nil {
-			return userInfo{}, err
-		}
-		defer func() { _ = res.Body.Close() }()
-		if res.StatusCode != http.StatusOK {
-			return userInfo{}, &httpStatusError{status: res.StatusCode, url: baseURL + "/api/v1/user"}
-		}
-		var u struct {
-			ID       int64  `json:"id"`
-			Login    string `json:"login"`
-			FullName string `json:"full_name"`
-			Email    string `json:"email"`
-		}
-		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-			return userInfo{}, err
-		}
-
-		return userInfo{
-			Subject:  strconv.FormatInt(u.ID, 10),
-			Username: u.Login,
-			Email:    u.Email,
-			Name:     u.FullName,
-		}, nil
+		return userInfoFromGET(ctx, c, tok, baseURL, "/api/v1/user")
 	}
 }
 
