@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Key is the set of inputs that distinguish a query
@@ -92,6 +94,15 @@ type Stats struct {
 // A zero capacity means "cache disabled" — Get always
 // misses and the loader always runs. This is the operator-
 // off escape hatch.
+//
+// Concurrency: a singleflight.Group deduplicates concurrent
+// loads for the same key. N goroutines hitting Get with the
+// same key during a cold cache see one loader invocation,
+// not N — the cache stampede fix for the hot-query path
+// (audit finding 3). The loader itself is still responsible
+// for being safe to call from multiple goroutines (the search
+// pipeline is), so the pre-singleflight "loser is discarded"
+// comment is still accurate; the change is "no loser at all".
 type Cache[V any] struct {
 	mu       sync.Mutex
 	capacity int
@@ -100,6 +111,7 @@ type Cache[V any] struct {
 	entries  map[string]*list.Element // hashed key → element
 	hits     int64
 	misses   int64
+	group    singleflight.Group
 }
 
 type entry[V any] struct {
@@ -124,11 +136,13 @@ func New[V any](capacity int, ttl time.Duration) *Cache[V] {
 // miss and storing the result. The boolean reports whether
 // the cache served the call (true = hit, false = miss).
 //
-// Concurrent calls are safe: the loader may run more than
-// once for the same key under high contention, but only
-// one result wins (the loser is discarded). For ragabast's
-// search path this is acceptable — the underlying search
-// is idempotent.
+// Concurrent calls are safe AND deduplicated: under
+// singleflight, N goroutines racing into Get with the same
+// key during a cold cache produce exactly one loader
+// invocation, not N. The prior behavior ("loader may run
+// more than once under high contention") was the cache
+// stampede shape — every concurrent caller paid for one
+// embedding round-trip. Audit finding 3.
 func (c *Cache[V]) Get(ctx context.Context, key string, loader func(context.Context) (V, error)) (V, bool, error) {
 	if c == nil || c.capacity <= 0 {
 		v, err := loader(ctx)
@@ -152,17 +166,23 @@ func (c *Cache[V]) Get(ctx context.Context, key string, loader func(context.Cont
 	c.misses++
 	c.mu.Unlock()
 
-	v, err := loader(ctx)
+	// Slow path: dedupe the loader across concurrent callers
+	// via singleflight. The singleflight key is namespaced
+	// so concurrent loads for different Cache[V] instances
+	// don't share the same dedupe slot.
+	res, err, _ := c.group.Do(key, func() (any, error) {
+		return loader(ctx)
+	})
 	if err != nil {
-		// Don't cache the zero value on error — callers
-		// that retry after a transient failure shouldn't
-		// be served a stale failure from a previous run.
+		// Don't cache the zero value on error — callers that
+		// retry after a transient failure shouldn't be served
+		// a stale failure from a previous run.
 		var zero V
 		return zero, false, err
 	}
+	v := res.(V)
 
-	// Slow path: insert. Re-check capacity under lock so a
-	// race doesn't push us over the configured bound.
+	// Insert under lock so capacity bounds stay honest.
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.capacity > 0 {
