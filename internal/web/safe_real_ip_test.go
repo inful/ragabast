@@ -18,8 +18,7 @@ func TestSafeRealIP_DirectConnectionIgnoresXFF(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil).
-		WithContext(t.Context())
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.RemoteAddr = "203.0.113.42:55555" // RFC 5737 doc-range; not loopback
 	req.Header.Set("X-Forwarded-For", "127.0.0.1")
 	req.Header.Set("X-Real-IP", "127.0.0.1")
@@ -42,8 +41,7 @@ func TestSafeRealIP_LoopbackConnectionTrustsXFF(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil).
-		WithContext(t.Context())
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("X-Forwarded-For", "203.0.113.42")
 
@@ -62,8 +60,7 @@ func TestSafeRealIP_FallsBackToXRealIP(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil).
-		WithContext(t.Context())
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.RemoteAddr = "[::1]:54321"
 	req.Header.Set("X-Real-IP", "203.0.113.99")
 
@@ -82,8 +79,7 @@ func TestSafeRealIP_NoHeadersLeavesRemoteAddrAlone(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil).
-		WithContext(t.Context())
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:54321"
 
 	handler := safeRealIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,8 +97,7 @@ func TestSafeRealIP_PicksLeftmostXFFEntry(t *testing.T) {
 	t.Parallel()
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil).
-		WithContext(t.Context())
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", nil)
 	req.RemoteAddr = "127.0.0.1:54321"
 	req.Header.Set("X-Forwarded-For", "203.0.113.1, 10.0.0.5, 10.0.0.6")
 
