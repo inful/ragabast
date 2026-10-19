@@ -111,19 +111,6 @@ type ingestBatchItem struct {
 	Content string `json:"content" required:"true"`
 }
 
-// ingestBatchRequest was the planned huma input struct
-// for POST /api/ingest/batch. The endpoint ended up
-// registered on the chi mux directly (see
-// registerIngestBatchHandler) because huma's body
-// binding couldn't represent the JSON-array-vs-NDJSON
-// dispatch we need, so the struct is no longer used.
-// Kept as a placeholder so a future refactor that goes
-// back to huma.Register has a starting point — but
-// unused for now.
-type ingestBatchRequest struct { //nolint:unused
-	RawBody []byte `body:"raw"`
-}
-
 // ingestBatchItemResponse is one element of the batch
 // response array. status is \`queued\` for accepted docs
 // (with a non-empty job_id) or \`error\` for rejected
