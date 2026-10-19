@@ -474,13 +474,15 @@ func (s *Server) installMiddleware() {
 	s.router.Use(redactAccessLogMiddleware)
 	s.router.Use(middleware.Logger)
 	s.router.Use(middleware.Recoverer)
-	s.router.Use(middleware.RealIP)
-	// clientIPMiddleware runs immediately after chi's RealIP
+	s.router.Use(safeRealIP)
+	// clientIPMiddleware runs immediately after safeRealIP
 	// so r.RemoteAddr has already been rewritten from
-	// X-Forwarded-For / X-Real-IP headers. The middleware
-	// extracts the host portion and stores it on the
-	// request context; downstream callers (audit log,
-	// rate-limit) read it via ClientIPFromContext.
+	// X-Forwarded-For / X-Real-IP headers (when the
+	// connection comes from a loopback proxy — see the
+	// safeRealIP godoc). The middleware extracts the host
+	// portion and stores it on the request context;
+	// downstream callers (audit log, rate-limit) read it
+	// via ClientIPFromContext.
 	s.router.Use(clientIPMiddleware())
 	s.router.Use(maxBytesReaderMiddleware)
 	s.router.Use(middleware.Timeout(middlewareTimeout))
