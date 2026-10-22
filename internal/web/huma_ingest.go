@@ -33,35 +33,46 @@ type ingestResponseBody struct {
 // check — useful for tests but should not be set in
 // production; the config default is 1 MiB.
 func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter, maxDocumentBytes int) {
-	huma.Register(api, huma.Operation{
-		OperationID: "ingest",
-		Method:      http.MethodPost,
-		Path:        "/api/ingest",
-		Summary:     "Ingest a docbuilder document",
-	}, func(ctx context.Context, input *struct{ Body ingestRequestBody }) (*struct{ Body ingestResponseBody }, error) {
-		content := strings.TrimSpace(input.Body.Content)
-		if content == "" {
-			return nil, huma.Error400BadRequest("content is required")
-		}
-		release, err := withIngestGuard(limiter, maxDocumentBytes, len(content))
-		if err != nil {
-			return nil, err
-		}
-		defer release()
+	registerPOST[ingestRequestBody, ingestResponseBody](api,
+		huma.Operation{
+			OperationID: "ingest",
+			Method:      http.MethodPost,
+			Path:        "/api/ingest",
+			Summary:     "Ingest a docbuilder document",
+		},
+		func(ctx context.Context, body *ingestRequestBody) (*ingestResponseBody, error) {
+			content := strings.TrimSpace(body.Content)
+			if content == "" {
+				return nil, huma.Error400BadRequest("content is required")
+			}
+			release, err := withIngestGuard(limiter, maxDocumentBytes, len(content))
+			if err != nil {
+				return nil, err
+			}
+			defer release()
 
-		doc, err := svc.IngestDocument(ctx, content)
-		if err != nil {
-			return nil, huma.Error400BadRequest(
-				fmt.Sprintf("failed to ingest: %s", err.Error()))
-		}
+			doc, err := svc.IngestDocument(ctx, content)
+			if err != nil {
+				return nil, huma.Error400BadRequest(
+					fmt.Sprintf("failed to ingest: %s", err.Error()))
+			}
 
-		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{
-			Message:    "Document ingested successfully",
-			DocumentID: doc.ID,
-			Chunks:     len(doc.Chunks),
-		}}, nil
-	})
+			return &ingestResponseBody{
+				Message:    "Document ingested successfully",
+				DocumentID: doc.ID,
+				Chunks:     len(doc.Chunks),
+			}, nil
+		})
 
+	// /api/ingest/raw takes a raw text/markdown body. Huma
+	// parses it as []byte and hands the bytes to the handler.
+	// registerPOST's body wrapper expects a JSON-decodable
+	// struct, so this endpoint stays on the verbose
+	// huma.Register form. The migration goal is "no framework
+	// noise where the typed helpers can carry the shape" —
+	// raw byte bodies are the explicit carve-out (alongside
+	// the multipart endpoint below and the GitLab endpoint
+	// in huma_ingest_gitlab.go).
 	huma.Register(api, huma.Operation{
 		OperationID: "ingest-raw",
 		Method:      http.MethodPost,
@@ -70,7 +81,10 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 	}, func(ctx context.Context, input *struct {
 		RawBody []byte `contentType:"text/markdown" required:"true"`
 	},
-	) (*struct{ Body ingestResponseBody }, error) {
+	) (*struct {
+		Body ingestResponseBody
+	}, error,
+	) {
 		if len(bytes.TrimSpace(input.RawBody)) == 0 {
 			return nil, huma.Error400BadRequest("request body is required")
 		}
@@ -93,6 +107,12 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		}}, nil
 	})
 
+	// /api/ingest/file takes a multipart file upload. Like
+	// the raw endpoint above, huma's MultipartFormFiles
+	// type doesn't fit the registerPOST body-wrapper
+	// shape (the wrapper expects a JSON-decodable struct).
+	// Stays on the verbose form for the same reason as
+	// /api/ingest/raw.
 	huma.Register(api, huma.Operation{
 		OperationID: "ingest-file",
 		Method:      http.MethodPost,
@@ -103,7 +123,10 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 			File huma.FormFile `form:"file" required:"true"`
 		}]
 	},
-	) (*struct{ Body ingestResponseBody }, error) {
+	) (*struct {
+		Body ingestResponseBody
+	}, error,
+	) {
 		form := input.RawBody.Data()
 		b, err := io.ReadAll(form.File)
 		if err != nil {

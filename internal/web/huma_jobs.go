@@ -50,6 +50,20 @@ type ingestJobsListResponseBody struct {
 	Total int                     `json:"total"`
 }
 
+// ingestJobStatusRequest carries the path parameter for
+// GET /api/ingest/jobs/{job_id}.
+type ingestJobStatusRequest struct {
+	JobID string `path:"job_id"`
+}
+
+// ingestJobsListRequest carries the query parameters for
+// GET /api/ingest/jobs.
+type ingestJobsListRequest struct {
+	Status string `enum:"pending,processing,completed,failed,all" query:"status,omitempty"`
+	Limit  int    `maximum:"1000" minimum:"1" query:"limit,omitempty"`
+	Offset int    `minimum:"0" query:"offset,omitempty"`
+}
+
 // batchIngestMuxRegistrar is the slice of mux methods
 // we need from the http.Handler passed to
 // registerIngestJobsOperations. The interface covers the
@@ -112,8 +126,8 @@ type ingestBatchItem struct {
 }
 
 // ingestBatchItemResponse is one element of the batch
-// response array. status is \`queued\` for accepted docs
-// (with a non-empty job_id) or \`error\` for rejected
+// response array. status is `queued` for accepted docs
+// (with a non-empty job_id) or `error` for rejected
 // ones (with a non-empty error). Callers iterate the
 // items array to learn which documents queued and which
 // failed.
@@ -130,7 +144,7 @@ type ingestBatchItemResponse struct {
 // status is always 200 (or 4xx for batch-level errors
 // like 413 for the whole batch exceeding the per-doc
 // cap); per-document failures are reported as
-// status=\"error\" in the items array.
+// status="error" in the items array.
 type ingestBatchResponseBody struct {
 	Items []ingestBatchItemResponse `json:"items"`
 }
@@ -163,113 +177,108 @@ func registerIngestJobsOperations(api huma.API, router http.Handler, q *jobs.Que
 	// Content-Type isn't required.
 	registerIngestBatchHandler(router, q)
 
-	huma.Register(api, huma.Operation{
-		OperationID:   "ingest-async",
-		Method:        http.MethodPost,
-		Path:          "/api/ingest/async",
-		Summary:       "Submit a docbuilder document for async ingest",
-		Description:   "Returns 202 Accepted with a job ID immediately. The job is persisted to the async-ingest queue and processed by a background worker pool. Poll /api/ingest/jobs/{job_id} for status.",
-		DefaultStatus: http.StatusAccepted,
-	}, func(ctx context.Context, input *struct{ Body ingestAsyncRequestBody }) (*struct{ Body ingestAsyncResponseBody }, error) {
-		// Re-use the same per-document size check the sync
-		// path enforces; ErrJobContentTooLarge is mapped to
-		// 413 by the queue.
-		j, err := q.Submit(input.Body.Content, clientIPFromContext(ctx), requestIDFromContext(ctx))
-		if err != nil {
-			if errors.Is(err, jobs.ErrJobContentTooLarge) {
-				return nil, &huma.ErrorModel{
-					Status: http.StatusRequestEntityTooLarge,
-					Title:  http.StatusText(http.StatusRequestEntityTooLarge),
-					Detail: "document exceeds server.max_ingest_document_bytes",
+	registerPOST[ingestAsyncRequestBody, ingestAsyncResponseBody](api,
+		huma.Operation{
+			OperationID:   "ingest-async",
+			Method:        http.MethodPost,
+			Path:          "/api/ingest/async",
+			Summary:       "Submit a docbuilder document for async ingest",
+			Description:   "Returns 202 Accepted with a job ID immediately. The job is persisted to the async-ingest queue and processed by a background worker pool. Poll /api/ingest/jobs/{job_id} for status.",
+			DefaultStatus: http.StatusAccepted,
+		},
+		func(ctx context.Context, body *ingestAsyncRequestBody) (*ingestAsyncResponseBody, error) {
+			// Re-use the same per-document size check the sync
+			// path enforces; ErrJobContentTooLarge is mapped to
+			// 413 by the queue.
+			j, err := q.Submit(body.Content, clientIPFromContext(ctx), requestIDFromContext(ctx))
+			if err != nil {
+				if errors.Is(err, jobs.ErrJobContentTooLarge) {
+					return nil, &huma.ErrorModel{
+						Status: http.StatusRequestEntityTooLarge,
+						Title:  http.StatusText(http.StatusRequestEntityTooLarge),
+						Detail: "document exceeds server.max_ingest_document_bytes",
+					}
 				}
+				return nil, huma.Error500InternalServerError("failed to submit job: " + err.Error())
 			}
-			return nil, huma.Error500InternalServerError("failed to submit job: " + err.Error())
-		}
-		return &struct{ Body ingestAsyncResponseBody }{Body: ingestAsyncResponseBody{
-			JobID:     j.ID,
-			Status:    string(j.Status),
-			StatusURL: "/api/ingest/jobs/" + j.ID,
-		}}, nil
-	})
+			return &ingestAsyncResponseBody{
+				JobID:     j.ID,
+				Status:    string(j.Status),
+				StatusURL: "/api/ingest/jobs/" + j.ID,
+			}, nil
+		})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "ingest-job-status",
-		Method:      http.MethodGet,
-		Path:        "/api/ingest/jobs/{job_id}",
-		Summary:     "Get the status of an async ingest job",
-	}, func(ctx context.Context, input *struct {
-		JobID string `path:"job_id"`
-	},
-	) (*struct{ Body ingestJobResponseBody }, error) {
-		j, gerr := q.Get(input.JobID)
-		if gerr != nil {
-			if errors.Is(gerr, jobs.ErrJobNotFound) {
-				return nil, huma.Error404NotFound("job not found")
+	registerWithInput[ingestJobStatusRequest, ingestJobResponseBody](api,
+		huma.Operation{
+			OperationID: "ingest-job-status",
+			Method:      http.MethodGet,
+			Path:        "/api/ingest/jobs/{job_id}",
+			Summary:     "Get the status of an async ingest job",
+		},
+		func(ctx context.Context, in *ingestJobStatusRequest) (*ingestJobResponseBody, error) {
+			j, gerr := q.Get(in.JobID)
+			if gerr != nil {
+				if errors.Is(gerr, jobs.ErrJobNotFound) {
+					return nil, huma.Error404NotFound("job not found")
+				}
+				return nil, huma.Error500InternalServerError("failed to read job: " + gerr.Error())
 			}
-			return nil, huma.Error500InternalServerError("failed to read job: " + gerr.Error())
-		}
-		resp := &struct{ Body ingestJobResponseBody }{Body: buildJobResponseBody(j)}
-		if j.Chunks > 0 {
-			resp.Body.Chunks = j.Chunks
-		}
-		if j.StartedAt != nil {
-			s := j.StartedAt.Format("2006-01-02T15:04:05Z07:00")
-			resp.Body.StartedAt = &s
-		}
-		if j.CompletedAt != nil {
-			s := j.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
-			resp.Body.CompletedAt = &s
-		}
-		return resp, nil
-	})
+			resp := buildJobResponseBody(j)
+			if j.Chunks > 0 {
+				resp.Chunks = j.Chunks
+			}
+			if j.StartedAt != nil {
+				s := j.StartedAt.Format("2006-01-02T15:04:05Z07:00")
+				resp.StartedAt = &s
+			}
+			if j.CompletedAt != nil {
+				s := j.CompletedAt.Format("2006-01-02T15:04:05Z07:00")
+				resp.CompletedAt = &s
+			}
+			return &resp, nil
+		})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "ingest-jobs-list",
-		Method:      http.MethodGet,
-		Path:        "/api/ingest/jobs",
-		Summary:     "List async ingest jobs",
-		Description: "Returns up to `limit` jobs (default 50) starting at `offset`, filtered by `status` if supplied. The `total` field reflects the count of all matching jobs, not just the page.",
-	}, func(ctx context.Context, input *struct {
-		Status string `enum:"pending,processing,completed,failed,all" query:"status,omitempty"`
-		Limit  int    `maximum:"1000" minimum:"1" query:"limit,omitempty"`
-		Offset int    `minimum:"0" query:"offset,omitempty"`
-	},
-	) (*struct{ Body ingestJobsListResponseBody }, error) {
-		limit := input.Limit
-		if limit == 0 {
-			limit = 50
-		}
-		offset := input.Offset
+	registerWithInput[ingestJobsListRequest, ingestJobsListResponseBody](api,
+		huma.Operation{
+			OperationID: "ingest-jobs-list",
+			Method:      http.MethodGet,
+			Path:        "/api/ingest/jobs",
+			Summary:     "List async ingest jobs",
+			Description: "Returns up to `limit` jobs (default 50) starting at `offset`, filtered by `status` if supplied. The `total` field reflects the count of all matching jobs, not just the page.",
+		},
+		func(ctx context.Context, in *ingestJobsListRequest) (*ingestJobsListResponseBody, error) {
+			limit := in.Limit
+			if limit == 0 {
+				limit = 50
+			}
+			offset := in.Offset
 
-		filter := jobs.Status(input.Status)
-		// "all" or empty means no filter.
-		if filter == "all" || filter == "" {
-			filter = ""
-		}
+			filter := jobs.Status(in.Status)
+			// "all" or empty means no filter.
+			if filter == "all" || filter == "" {
+				filter = ""
+			}
 
-		all, err := q.List(filter)
-		if err != nil {
-			return nil, huma.Error500InternalServerError(
-				"failed to list jobs: " + err.Error())
-		}
+			all, err := q.List(filter)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("failed to list jobs: " + err.Error())
+			}
 
-		// Page the slice. all is already filtered by status;
-		// limit/offset just slice the result.
-		total := len(all)
-		if offset > total {
-			offset = total
-		}
-		end := min(offset+limit, total)
-		page := all[offset:end]
+			// Page the slice. all is already filtered by status;
+			// limit/offset just slice the result.
+			total := len(all)
+			if offset > total {
+				offset = total
+			}
+			end := min(offset+limit, total)
+			page := all[offset:end]
 
-		out := make([]ingestJobResponseBody, len(page))
-		for i, j := range page {
-			out[i] = buildJobResponseBody(j)
-		}
-		return &struct{ Body ingestJobsListResponseBody }{
-			Body: ingestJobsListResponseBody{Jobs: out, Total: total},
-		}, nil
-	})
+			out := make([]ingestJobResponseBody, len(page))
+			for i, j := range page {
+				out[i] = buildJobResponseBody(j)
+			}
+			return &ingestJobsListResponseBody{Jobs: out, Total: total}, nil
+		})
 }
 
 // buildJobResponseBody converts a *jobs.Job to the wire-shape
@@ -308,35 +317,47 @@ func buildJobResponseBody(j *jobs.Job) ingestJobResponseBody {
 // API surface stability but signal "not configured" to
 // callers.
 func registerIngestJobsDisabled(api huma.API) {
-	huma.Register(api, huma.Operation{
-		OperationID: "ingest-async",
-		Method:      http.MethodPost,
-		Path:        "/api/ingest/async",
-		Summary:     "Submit a docbuilder document for async ingest (disabled)",
-	}, func(_ context.Context, _ *struct{ Body ingestAsyncRequestBody }) (*struct{ Body ingestAsyncResponseBody }, error) {
-		return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
-	})
+	// When async ingest is disabled, the three endpoints
+	// are stubs that return 503. They use the same wire
+	// shape as the live endpoints so a client that
+	// discovers the queue is missing at runtime gets a
+	// well-formed error response, not a 404.
 
-	huma.Register(api, huma.Operation{
-		OperationID: "ingest-job-status",
-		Method:      http.MethodGet,
-		Path:        "/api/ingest/jobs/{job_id}",
-		Summary:     "Get the status of an async ingest job (disabled)",
-	}, func(_ context.Context, _ *struct {
-		JobID string `path:"job_id"`
-	},
-	) (*struct{ Body ingestJobResponseBody }, error) {
-		return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
-	})
+	// stubRequest is the empty input the disabled handlers
+	// ignore. Defined inline (no exported type) because the
+	// disabled path doesn't accept a body.
+	registerPOST[ingestAsyncRequestBody, ingestAsyncResponseBody](api,
+		huma.Operation{
+			OperationID: "ingest-async",
+			Method:      http.MethodPost,
+			Path:        "/api/ingest/async",
+			Summary:     "Submit a docbuilder document for async ingest (disabled)",
+		},
+		func(_ context.Context, _ *ingestAsyncRequestBody) (*ingestAsyncResponseBody, error) {
+			return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
+		})
 
-	huma.Register(api, huma.Operation{
-		OperationID: "ingest-jobs-list",
-		Method:      http.MethodGet,
-		Path:        "/api/ingest/jobs",
-		Summary:     "List async ingest jobs (disabled)",
-	}, func(_ context.Context, _ *struct{}) (*struct{ Body ingestJobsListResponseBody }, error) {
-		return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
-	})
+	registerWithInput[ingestJobStatusRequest, ingestJobResponseBody](api,
+		huma.Operation{
+			OperationID: "ingest-job-status",
+			Method:      http.MethodGet,
+			Path:        "/api/ingest/jobs/{job_id}",
+			Summary:     "Get the status of an async ingest job (disabled)",
+		},
+		func(_ context.Context, _ *ingestJobStatusRequest) (*ingestJobResponseBody, error) {
+			return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
+		})
+
+	registerWithInput[ingestJobsListRequest, ingestJobsListResponseBody](api,
+		huma.Operation{
+			OperationID: "ingest-jobs-list",
+			Method:      http.MethodGet,
+			Path:        "/api/ingest/jobs",
+			Summary:     "List async ingest jobs (disabled)",
+		},
+		func(_ context.Context, _ *ingestJobsListRequest) (*ingestJobsListResponseBody, error) {
+			return nil, huma.Error503ServiceUnavailable("async ingest is not configured (server.async_ingest_queue_dir is empty)")
+		})
 }
 
 // clientIPFromContext extracts the client IP from the

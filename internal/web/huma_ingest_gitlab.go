@@ -29,20 +29,14 @@ type gitlabIssueIngestResponse struct {
 // in a separate handler so the wire shape and the per-issue
 // checks stay obvious.
 //
-// Why `[]byte` for the body: huma generates a JSON schema from
-// the request type, but the GitLab issue schema is larger than
-// what we want to constrain (we tolerate any field the sender
-// includes — see internal/gitlab.IssuePayload). Accepting raw
-// bytes lets us defer parsing to the existing gitlab package,
-// which has the full schema. The handler still bounds the body
-// length against MaxIngestDocumentBytes.
-//
-// The body is tagged with `contentType: "*/*"` to defeat huma's
-// default body-type inference — without it huma tries to JSON-
-// parse `[]byte` and wraps the response in a stringly-typed
-// schema, which rejects every request with 422. With the
-// override, huma treats the body as opaque bytes and hands the
-// raw slice to the handler.
+// Why this endpoint stays on the verbose huma.Register form
+// (rather than registerPOST): the body is a JSON envelope we
+// decode ourselves via internal/gitlab.EnvelopeToDocbuilderMarkdown,
+// so the input is `[]byte` with `contentType:"*/*"` to defeat
+// huma's default body-type inference. registerPOST's body
+// wrapper expects a JSON-decodable struct, which doesn't fit.
+// The /api/ingest/raw and /api/ingest/file endpoints in
+// huma_ingest.go have the same carve-out for the same reason.
 //
 // maxDocumentBytes is the per-document size cap (from
 // server.max_ingest_document_bytes), applied to the *rendered*

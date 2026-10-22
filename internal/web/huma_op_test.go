@@ -82,6 +82,77 @@ func TestRegisterGET_TypedHandlerInvoked(t *testing.T) {
 	assert.Contains(t, resp.Body.String(), `"pong":"yes"`)
 }
 
+// TestRegisterWithInput_PathParam pins the typed-wrapper
+// contract for endpoints whose input is carried in path or
+// query parameters (DELETE /x/{id}, GET /x/{id}, GET /x?y=z).
+// The handler signature is (ctx, *In) → (*Out, error) and
+// huma parses In's path/query/header/cookie tags into the
+// request shape — no Body wrapper.
+func TestRegisterWithInput_PathParam(t *testing.T) {
+	_, api := humatest.New(t)
+
+	type delReq struct {
+		DocumentID string `path:"document_id"`
+	}
+	type delResp struct {
+		DeletedID string `json:"deleted_id"`
+	}
+
+	var called bool
+	var gotID string
+	registerWithInput[delReq, delResp](api, humaOpDELETE("/items/{document_id}", "Delete an item"),
+		func(_ context.Context, in *delReq) (*delResp, error) {
+			called = true
+			gotID = in.DocumentID
+			return &delResp{DeletedID: in.DocumentID}, nil
+		})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/items/abc-123", nil)
+	api.Adapter().ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.True(t, called, "handler should have been invoked")
+	assert.Equal(t, "abc-123", gotID, "handler should have received the path param")
+	assert.Contains(t, resp.Body.String(), `"deleted_id":"abc-123"`)
+}
+
+// TestRegisterWithInput_QueryParam pins the typed-wrapper
+// contract for endpoints that take query parameters (no
+// path param, no body). The In struct uses query:"…"
+// tags; huma parses them from the URL.
+func TestRegisterWithInput_QueryParam(t *testing.T) {
+	_, api := humatest.New(t)
+
+	type listReq struct {
+		Limit  int `query:"limit"`
+		Offset int `query:"offset"`
+	}
+	type listResp struct {
+		Count int `json:"count"`
+	}
+
+	var called bool
+	var gotLimit, gotOffset int
+	registerWithInput[listReq, listResp](api, humaOpGET("/list", "List things"),
+		func(_ context.Context, in *listReq) (*listResp, error) {
+			called = true
+			gotLimit = in.Limit
+			gotOffset = in.Offset
+			return &listResp{Count: in.Limit + in.Offset}, nil
+		})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/list?limit=10&offset=5", nil)
+	api.Adapter().ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code)
+	assert.True(t, called, "handler should have been invoked")
+	assert.Equal(t, 10, gotLimit)
+	assert.Equal(t, 5, gotOffset)
+	assert.Contains(t, resp.Body.String(), `"count":15`)
+}
+
 // TestRegisterPOST_ValidationError pins the contract: when
 // the request body fails validation (required field missing),
 // huma returns its standard 422 and the handler is NOT called.
