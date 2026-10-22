@@ -152,14 +152,67 @@ type flowState struct {
 
 // flowStateStore is the in-memory map of pending OAuth
 // flows. Same concurrency rules as sessionStore: RWMutex
-// around the map, lazy eviction on Get.
+// around the map, lazy eviction on Get plus a background
+// ticker that GC's entries whose CreatedAt is older than
+// oauthFlowStateTTL. The ticker matters because the
+// state cookie expires on the browser side; a flow whose
+// cookie is abandoned (operator closes the chooser
+// without completing login) was leaking forever before
+// the ticker. Audit finding 13.
 type flowStateStore struct {
 	mu      sync.RWMutex
 	entries map[string]*flowState
+	stop    chan struct{}
+	done    chan struct{}
 }
 
 func newFlowStateStore() *flowStateStore {
-	return &flowStateStore{entries: make(map[string]*flowState)}
+	s := &flowStateStore{
+		entries: make(map[string]*flowState),
+		stop:    make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	go s.gcLoop()
+	return s
+}
+
+// Stop signals the GC goroutine to exit and waits for it.
+// Idempotent.
+func (s *flowStateStore) Stop() {
+	select {
+	case <-s.stop:
+		return
+	default:
+		close(s.stop)
+	}
+	<-s.done
+}
+
+// gcLoop runs until Stop closes s.stop. Sweeps every minute.
+func (s *flowStateStore) gcLoop() {
+	defer close(s.done)
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			s.gc()
+		}
+	}
+}
+
+// gc deletes entries older than oauthFlowStateTTL.
+func (s *flowStateStore) gc() {
+	cutoff := time.Now().Add(-oauthFlowStateTTL)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for state, entry := range s.entries {
+		if entry.createdAt.Before(cutoff) {
+			delete(s.entries, state)
+		}
+	}
 }
 
 // Put stores a flow keyed by state. Caller must set
@@ -840,37 +893,71 @@ func fetchGitHubPrimaryEmail(ctx context.Context, c *http.Client, tok *oauth2.To
 	return ""
 }
 
+// userInfoFromGET is the shared body of every provider-
+// specific userInfoFn that follows the "GET
+// <baseURL><path>, decode JSON, map to userInfo" pattern.
+// GitLab and Forgejo are near-copies of this shape (audit
+// finding 9); the differences are the JSON field names
+// (GitLab uses `username`/`name`, Forgejo uses
+// `login`/`full_name`). All four candidate fields are
+// decoded; mapToUserInfo picks the populated one for
+// the canonical userInfo.Username and userInfo.Name.
+type userInfoJSON struct {
+	ID       int64  `json:"id"`
+	Login    string `json:"login"`
+	Username string `json:"username"`
+	Name     string `json:"name"`
+	FullName string `json:"full_name"`
+	Email    string `json:"email"`
+}
+
+func userInfoFromGET(
+	ctx context.Context, c *http.Client, tok *oauth2.Token,
+	baseURL, path string,
+) (userInfo, error) {
+	url := baseURL + path
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	res, err := c.Do(req)
+	if err != nil {
+		return userInfo{}, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK {
+		return userInfo{}, &httpStatusError{status: res.StatusCode, url: url}
+	}
+	var u userInfoJSON
+	if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
+		return userInfo{}, err
+	}
+	// Pick the more-populated of the two candidates for
+	// each field. Providers that ship both fields (a
+	// future GitLab-fork) populate both; current providers
+	// populate exactly one. firstNonEmpty keeps the populated
+	// one without a per-provider branch.
+	return userInfo{
+		Subject:  strconv.FormatInt(u.ID, 10),
+		Username: firstNonEmpty(u.Username, u.Login),
+		Name:     firstNonEmpty(u.Name, u.FullName),
+		Email:    u.Email,
+	}, nil
+}
+
+// firstNonEmpty returns a if a != "", otherwise b. Used
+// to pick the more populated of two optional JSON fields.
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
 // gitlabUserInfo returns a userInfoFn that talks to the
 // GitLab /api/v4/user endpoint. baseURL is the GitLab
 // root (https://gitlab.com or a self-hosted BaseURL).
 func gitlabUserInfo(baseURL string) func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
 	return func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v4/user", nil)
-		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-		res, err := c.Do(req)
-		if err != nil {
-			return userInfo{}, err
-		}
-		defer func() { _ = res.Body.Close() }()
-		if res.StatusCode != http.StatusOK {
-			return userInfo{}, &httpStatusError{status: res.StatusCode, url: baseURL + "/api/v4/user"}
-		}
-		var u struct {
-			ID       int64  `json:"id"`
-			Username string `json:"username"`
-			Name     string `json:"name"`
-			Email    string `json:"email"`
-		}
-		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-			return userInfo{}, err
-		}
-
-		return userInfo{
-			Subject:  strconv.FormatInt(u.ID, 10),
-			Username: u.Username,
-			Email:    u.Email,
-			Name:     u.Name,
-		}, nil
+		return userInfoFromGET(ctx, c, tok, baseURL, "/api/v4/user")
 	}
 }
 
@@ -880,32 +967,7 @@ func gitlabUserInfo(baseURL string) func(ctx context.Context, c *http.Client, to
 // Validate method).
 func forgejoUserInfo(baseURL string) func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
 	return func(ctx context.Context, c *http.Client, tok *oauth2.Token) (userInfo, error) {
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/v1/user", nil)
-		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-		res, err := c.Do(req)
-		if err != nil {
-			return userInfo{}, err
-		}
-		defer func() { _ = res.Body.Close() }()
-		if res.StatusCode != http.StatusOK {
-			return userInfo{}, &httpStatusError{status: res.StatusCode, url: baseURL + "/api/v1/user"}
-		}
-		var u struct {
-			ID       int64  `json:"id"`
-			Login    string `json:"login"`
-			FullName string `json:"full_name"`
-			Email    string `json:"email"`
-		}
-		if err := json.NewDecoder(res.Body).Decode(&u); err != nil {
-			return userInfo{}, err
-		}
-
-		return userInfo{
-			Subject:  strconv.FormatInt(u.ID, 10),
-			Username: u.Login,
-			Email:    u.Email,
-			Name:     u.FullName,
-		}, nil
+		return userInfoFromGET(ctx, c, tok, baseURL, "/api/v1/user")
 	}
 }
 

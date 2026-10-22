@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -242,12 +243,25 @@ func (t *AuthToken) UnmarshalYAML(node *yaml.Node) error {
 // both places (typically during a rotation grace window)
 // gets exactly one match and the constant-time compare
 // loop does not double-bill.
+//
+// Comparison is case-sensitive to match matchBearer's
+// subtle.ConstantTimeCompare. Tokens are typically
+// auto-generated opaque secrets, so case-different
+// entries almost always mean an operator typo rather than
+// intent. The caseFoldDuplicate log line surfaces the
+// situation at startup without forcing an error — a
+// legitimate "abc" + "ABC" pair (rare) still works, the
+// operator just sees a warning telling them which one
+// matches which client case.
 func (s ServerConfig) EffectiveAuthTokens() []AuthToken {
 	out := make([]AuthToken, 0, len(s.AuthTokens)+1)
 	seen := make(map[string]bool, len(out))
+	caseFold := make(map[string]string, len(out))
 	if s.AuthToken != "" {
-		out = append(out, AuthToken{Value: s.AuthToken})
-		seen[s.AuthToken] = true
+		v := s.AuthToken
+		out = append(out, AuthToken{Value: v})
+		seen[v] = true
+		caseFold[v] = v
 	}
 	for _, t := range s.AuthTokens {
 		if t.Value == "" || seen[t.Value] {
@@ -255,6 +269,13 @@ func (s ServerConfig) EffectiveAuthTokens() []AuthToken {
 		}
 		out = append(out, t)
 		seen[t.Value] = true
+		caseFold[t.Value] = t.Value
+	}
+	for _, t := range s.AuthTokens {
+		low := strings.ToLower(t.Value)
+		if other, ok := caseFold[low]; ok && other != t.Value {
+			log.Printf("config: case-different auth token detected (%q vs %q); bearer comparison is case-sensitive", other, t.Value)
+		}
 	}
 	return out
 }

@@ -82,7 +82,3 @@ func parseNDJSON(raw []byte) ([]ingestBatchItem, error) {
 	}
 	return items, nil
 }
-
-// (placeholder removed — package compiles without
-// extra anchor now that batch_ingest_parse.go's exported
-// symbols are all referenced from production code.)

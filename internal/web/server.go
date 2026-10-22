@@ -474,13 +474,15 @@ func (s *Server) installMiddleware() {
 	s.router.Use(redactAccessLogMiddleware)
 	s.router.Use(middleware.Logger)
 	s.router.Use(middleware.Recoverer)
-	s.router.Use(middleware.RealIP)
-	// clientIPMiddleware runs immediately after chi's RealIP
+	s.router.Use(safeRealIP)
+	// clientIPMiddleware runs immediately after safeRealIP
 	// so r.RemoteAddr has already been rewritten from
-	// X-Forwarded-For / X-Real-IP headers. The middleware
-	// extracts the host portion and stores it on the
-	// request context; downstream callers (audit log,
-	// rate-limit) read it via ClientIPFromContext.
+	// X-Forwarded-For / X-Real-IP headers (when the
+	// connection comes from a loopback proxy — see the
+	// safeRealIP godoc). The middleware extracts the host
+	// portion and stores it on the request context;
+	// downstream callers (audit log, rate-limit) read it
+	// via ClientIPFromContext.
 	s.router.Use(clientIPMiddleware())
 	s.router.Use(maxBytesReaderMiddleware)
 	s.router.Use(middleware.Timeout(middlewareTimeout))
@@ -889,6 +891,20 @@ func (s *Server) Stop(ctx context.Context) error {
 	// monitor via the job status endpoint.)
 	if s.ingestQueue != nil {
 		s.ingestQueue.Stop()
+	}
+
+	// Stop the per-store GC goroutines so they exit cleanly.
+	// Idempotent Stop on nil-safe receivers means the
+	// guards below only matter for the case where OAuth
+	// was never initialized.
+	if s.sessions != nil {
+		s.sessions.Stop()
+	}
+	if s.oauthHandlers != nil && s.oauthHandlers.flows != nil {
+		s.oauthHandlers.flows.Stop()
+	}
+	if s.service != nil {
+		s.service.StopChatSessionsGC()
 	}
 
 	if s.server != nil {

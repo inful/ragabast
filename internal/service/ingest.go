@@ -162,7 +162,15 @@ func (s *Service) IngestDocument(ctx context.Context, content string) (*models.D
 	// whole-cache clear — operators see a brief hit-rate
 	// dip during heavy ingest, which is the right
 	// tradeoff vs serving stale rankings.
-	s.cache.Clear()
+	//
+	// Deferred so a partial-write failure in
+	// chunkAndIngest (vector half committed, keyword
+	// half not, or vice-versa) still evicts the cache.
+	// A 5-minute stale-cache window after a partial write
+	// would let callers see search results from before
+	// the partial state, which is the hard-to-debug
+	// failure mode. Audit finding 6.
+	defer s.cache.Clear()
 	return doc, nil
 }
 

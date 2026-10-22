@@ -164,10 +164,10 @@ func (l *llmRateLimiter) retryAfter(ip string) time.Duration {
 // not count against the bucket" property.
 
 // clientIP extracts the client IP from the request. Order of
-// preference: r.RemoteAddr's host part. chi's middleware.RealIP
-// has already populated r.RemoteAddr with the X-Forwarded-For
-// value (when behind a trusted proxy), so we just split the
-// host:port.
+// preference: r.RemoteAddr's host part. The server's safeRealIP
+// middleware has already populated r.RemoteAddr with the
+// X-Forwarded-For value when the connection is from a loopback
+// proxy; we just split host:port.
 //
 // Falls back to a constant when RemoteAddr is empty (it never
 // is for real http.Request values, but defensive against

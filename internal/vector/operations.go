@@ -3,6 +3,7 @@ package vector
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/ragabast/internal/models"
 )
@@ -23,6 +24,38 @@ type VectorOperations struct {
 	db          *VectorDB
 	embeddings  EmbeddingClient
 	searchIndex *SearchIndex
+
+	// ingestMu serializes concurrent ingest on the same
+	// doc.ID. The check-then-write race (audit finding 4)
+	// was: T1 and T2 both see exists+needsUpdate, T1 deletes
+	// + adds, T2 deletes (clearing T1's add) + adds. The
+	// deterministic chunk IDs save the final state from
+	// being double-written, but interleaving can still
+	// obscure the self-heal claim and complicate debugging.
+	//
+	// Map entries are kept forever — a per-doc leak bounded
+	// by the number of distinct doc.IDs ever ingested, which
+	// is the same lifetime as the vector DB itself. Mutexes
+	// are ~24 bytes each so the steady-state cost is negligible.
+	ingestMu     sync.Mutex // guards ingestMuByID
+	ingestMuByID map[string]*sync.Mutex
+}
+
+// lockForDoc returns (and lazily creates) the per-doc
+// mutex for id. The lookup is quick and never errors; the
+// returned mutex is always non-nil.
+func (vo *VectorOperations) lockForDoc(id string) *sync.Mutex {
+	vo.ingestMu.Lock()
+	defer vo.ingestMu.Unlock()
+	m, ok := vo.ingestMuByID[id]
+	if !ok {
+		m = &sync.Mutex{}
+		if vo.ingestMuByID == nil {
+			vo.ingestMuByID = make(map[string]*sync.Mutex)
+		}
+		vo.ingestMuByID[id] = m
+	}
+	return m
 }
 
 // NewVectorOperations creates a new vector operations handler.
@@ -54,6 +87,16 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 	if err := doc.Validate(); err != nil {
 		return fmt.Errorf("document validation failed: %w", err)
 	}
+
+	// Per-document lock (audit finding 4). Two concurrent
+	// ingest calls for the same doc.ID would otherwise race
+	// the DocumentNeedsUpdate / DeleteDocument / AddChunksBatch
+	// triplet; deterministic chunk IDs save the final state
+	// but the interleaving produces confusing side effects.
+	// The lock is released on every return path via defer.
+	docMu := vo.lockForDoc(doc.ID)
+	docMu.Lock()
+	defer docMu.Unlock()
 
 	needsUpdate, exists, err := vo.db.DocumentNeedsUpdate(ctx, doc.ID, doc.Fingerprint)
 	if err != nil {

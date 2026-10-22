@@ -191,7 +191,7 @@ func (s *Server) handleChatMessage(w http.ResponseWriter, r *http.Request) {
 		// sources" — matches the post-filter's empty-means-
 		// no-op semantics.
 		Filters: vector.SearchFilters{
-			SourceKinds: parseSourceKindsForm(r),
+			SourceKinds: kinds,
 		},
 	})
 	if err != nil {
