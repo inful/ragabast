@@ -66,6 +66,11 @@ type ChatSessionStore struct {
 	// from any goroutine without a race between Stop and
 	// the GC's select.
 	stop chan struct{}
+	// stopOnce guards close(stop) so concurrent Stop callers
+	// cannot both reach the close and panic. A select on the
+	// channel is NOT sufficient: two goroutines can observe
+	// the open state simultaneously and both execute close().
+	stopOnce sync.Once
 	// done is closed when the GC goroutine returns. Used
 	// only from tests to synchronize shutdown assertions.
 	done chan struct{}
@@ -99,14 +104,11 @@ func NewChatSessionStore(cfg ChatSessionStoreConfig) *ChatSessionStore {
 }
 
 // Stop signals the GC goroutine to exit and waits for it.
-// Idempotent — a second call is a no-op.
+// Idempotent and safe for concurrent callers: stopOnce
+// guarantees the channel is closed exactly once even when
+// several goroutines call Stop at the same moment.
 func (s *ChatSessionStore) Stop() {
-	select {
-	case <-s.stop:
-		// already stopped
-	default:
-		close(s.stop)
-	}
+	s.stopOnce.Do(func() { close(s.stop) })
 	<-s.done
 }
 

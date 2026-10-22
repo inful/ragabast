@@ -160,10 +160,11 @@ type flowState struct {
 // without completing login) was leaking forever before
 // the ticker. Audit finding 13.
 type flowStateStore struct {
-	mu      sync.RWMutex
-	entries map[string]*flowState
-	stop    chan struct{}
-	done    chan struct{}
+	mu       sync.RWMutex
+	entries  map[string]*flowState
+	stop     chan struct{}
+	stopOnce sync.Once
+	done     chan struct{}
 }
 
 func newFlowStateStore() *flowStateStore {
@@ -177,14 +178,11 @@ func newFlowStateStore() *flowStateStore {
 }
 
 // Stop signals the GC goroutine to exit and waits for it.
-// Idempotent.
+// Idempotent and safe for concurrent callers: stopOnce
+// guarantees close happens exactly once even when several
+// goroutines call Stop at the same moment.
 func (s *flowStateStore) Stop() {
-	select {
-	case <-s.stop:
-		return
-	default:
-		close(s.stop)
-	}
+	s.stopOnce.Do(func() { close(s.stop) })
 	<-s.done
 }
 

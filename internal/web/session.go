@@ -159,6 +159,7 @@ type sessionStore struct {
 	entries    map[string]*Session
 	defaultTTL time.Duration
 	stop       chan struct{}
+	stopOnce   sync.Once
 	done       chan struct{}
 }
 
@@ -178,14 +179,11 @@ func newSessionStore(defaultTTL time.Duration) *sessionStore {
 }
 
 // Stop signals the sweep goroutine to exit and waits for
-// it. Idempotent.
+// it. Idempotent and safe for concurrent callers: stopOnce
+// guarantees close happens exactly once even when several
+// goroutines call Stop at the same moment.
 func (s *sessionStore) Stop() {
-	select {
-	case <-s.stop:
-		return
-	default:
-		close(s.stop)
-	}
+	s.stopOnce.Do(func() { close(s.stop) })
 	<-s.done
 }
 
