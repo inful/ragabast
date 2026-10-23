@@ -79,9 +79,21 @@ func clientIPMiddleware() func(http.Handler) http.Handler {
 //     because the connection's TCP peer is the malicious
 //     client itself, not the loopback address — the
 //     header is silently ignored.
-//   - Only the leftmost XFF entry is considered (same as
-//     chi's behavior). X-Real-IP is checked when XFF is
-//     absent.
+//   - The RIGHTMOST XFF entry is taken, not the leftmost.
+//     XFF is an append-to header: each proxy adds the address
+//     of the peer it received from, on the right. The
+//     rightmost entry is therefore the one the nearest proxy
+//     actually observed on the TCP connection — the only value
+//     in the header the client cannot forge. The leftmost
+//     entry is the original client as reported by the proxy,
+//     which for nginx's default $proxy_add_x_forwarded_for is
+//     whatever the client put in its own inbound XFF header.
+//     Taking the leftmost let a client mint a fresh
+//     rate-limiter bucket per request (audit finding 2).
+//   - Header values are validated as IP addresses before
+//     being written to r.RemoteAddr. The value becomes a
+//     rate-limiter bucket key and an audit field; a non-IP
+//     string would let a client vary the key at will.
 //
 // What this commit does NOT fix:
 //   - Multi-hop proxy chains (CDN -> nginx -> ragabast)
@@ -107,19 +119,41 @@ func safeRealIP(next http.Handler) http.Handler {
 		}
 
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			if i := strings.IndexByte(xff, ','); i >= 0 {
-				xff = xff[:i]
-			}
-			client := strings.TrimSpace(xff)
-			if client != "" {
-				r.RemoteAddr = client + ":0"
+			if client := rightmostIP(xff); client != "" {
+				r.RemoteAddr = net.JoinHostPort(client, "0")
 			}
 			next.ServeHTTP(w, r)
 			return
 		}
 		if xri := r.Header.Get("X-Real-IP"); xri != "" {
-			r.RemoteAddr = strings.TrimSpace(xri) + ":0"
+			if client := strings.TrimSpace(xri); net.ParseIP(client) != nil {
+				r.RemoteAddr = net.JoinHostPort(client, "0")
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rightmostIP returns the rightmost entry of an X-Forwarded-For
+// header when that entry is a valid IP address, and "" otherwise.
+//
+// The rightmost entry is the address the nearest proxy observed
+// on the TCP connection. Every entry to its left was supplied by
+// the client (directly, or through earlier hops) and is
+// forgeable, so they are all ignored.
+//
+// A non-IP value returns "" rather than the raw string: the value
+// becomes a rate-limiter bucket key, so a client that could vary
+// it freely would mint unlimited buckets.
+func rightmostIP(xff string) string {
+	// Scan from the right: the last comma-separated entry.
+	entry := xff
+	if i := strings.LastIndexByte(xff, ','); i >= 0 {
+		entry = xff[i+1:]
+	}
+	entry = strings.TrimSpace(entry)
+	if net.ParseIP(entry) == nil {
+		return ""
+	}
+	return entry
 }
