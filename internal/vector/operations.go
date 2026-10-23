@@ -33,10 +33,24 @@ type VectorOperations struct {
 	// being double-written, but interleaving can still
 	// obscure the self-heal claim and complicate debugging.
 	//
-	// Map entries are kept forever — a per-doc leak bounded
-	// by the number of distinct doc.IDs ever ingested, which
-	// is the same lifetime as the vector DB itself. Mutexes
-	// are ~24 bytes each so the steady-state cost is negligible.
+	// Map entries are kept for the life of the process. The
+	// bound is the number of DISTINCT doc.IDs ingested, not the
+	// number of ingest calls: re-ingesting a document reuses its
+	// entry, so a corpus of N documents costs N entries once.
+	//
+	// Entries are not released when a document is deleted.
+	// Removing a mutex from the map while another goroutine may
+	// be blocked on it is the classic "delete a lock someone is
+	// waiting on" bug: the waiter holds a pointer to a mutex
+	// that is no longer the one the map hands out, and the next
+	// caller gets a fresh mutex — the two then run concurrently
+	// and the serialization this lock exists to provide is
+	// silently lost. The map is rebuilt from scratch on restart,
+	// so the growth is bounded by one process's ingest history.
+	//
+	// The per-entry cost is the ID string plus a mutex, roughly
+	// 60 bytes for a UUID — negligible next to the document
+	// and its chunks.
 	ingestMu     sync.Mutex // guards ingestMuByID
 	ingestMuByID map[string]*sync.Mutex
 }
