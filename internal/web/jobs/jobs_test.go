@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -39,7 +41,13 @@ func (f *fakeService) IngestDocument(_ context.Context, content string) (string,
 		return "", 0, err
 	}
 	f.calls = append(f.calls, content)
-	return "doc-" + content, 3, nil
+	// Realistic document ID: the production Service returns
+	// doc.ID, which is a short hash of the content — NOT the
+	// body itself. Echoing the content back would put a
+	// 200 KB body into document_id on every finished job,
+	// which masks whether the content-drop fix works.
+	sum := sha256.Sum256([]byte(content))
+	return "doc-" + hex.EncodeToString(sum[:4]), 3, nil
 }
 
 func (f *fakeService) callCount() int {
@@ -75,7 +83,11 @@ func TestQueue_SubmitAndProcess(t *testing.T) {
 
 	got, err := q.Get(j.ID)
 	require.NoError(t, err)
-	require.Equal(t, "doc-hello", got.DocumentID)
+	// fakeService now returns a short hash of the content as
+	// the document ID (matching production, where doc.ID is a
+	// hash and never the body). sha256("hello")[:8] =
+	// 2cf24dba.
+	require.Equal(t, "doc-2cf24dba", got.DocumentID)
 	require.Equal(t, 3, got.Chunks)
 	require.NotNil(t, got.StartedAt)
 	require.NotNil(t, got.CompletedAt)

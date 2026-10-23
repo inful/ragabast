@@ -551,18 +551,19 @@ func (q *Queue) recoverUnfinished(audit AuditFunc) {
 		j.StartedAt = nil
 		j.CompletedAt = nil
 
-		// Move the file to its canonical .json path
-		// (idempotent if already there) before enqueuing.
 		if sourcePath != q.path(id) {
-			if rerr := os.Rename(sourcePath, q.path(id)); rerr != nil && audit != nil {
-				audit("jobs.recover_rename_error", "job_id", id, "error", rerr.Error())
+			// Stale .processing.json: rewrite the reset state
+			// in place, THEN move it to its canonical path.
+			if !q.rewriteAndMove(j, id, sourcePath, audit) {
 				continue
 			}
 		}
-		if werr := q.write(j); werr != nil && audit != nil {
-			audit("jobs.recover_write_error", "job_id", id, "error", werr.Error())
-			continue
-		}
+		// A .json source is already pending and claimable, so
+		// the file is left untouched. Rewriting it would
+		// resurrect a job a worker had already claimed (the
+		// worker renamed .json -> .processing.json) between
+		// our read and our write — and a second worker would
+		// then ingest the same document a second time.
 
 		select {
 		case q.pending <- j.ID:
@@ -570,6 +571,33 @@ func (q *Queue) recoverUnfinished(audit AuditFunc) {
 			return
 		}
 	}
+}
+
+// rewriteAndMove writes the job to sourcePath and then renames
+// it to its canonical .json path.
+//
+// The write comes first on purpose. q.write re-creates the file
+// it writes, so writing .json after the rename would publish a
+// second claimable copy of a job — and a worker that claimed the
+// original in between would have its in-flight file clobbered by
+// the copy.
+//
+// Only ever called for a stale .processing.json, which by the
+// mtime fence no live worker holds.
+func (q *Queue) rewriteAndMove(j *Job, id, sourcePath string, audit AuditFunc) bool {
+	if werr := q.writeAtPath(j, sourcePath); werr != nil {
+		if audit != nil {
+			audit("jobs.recover_write_error", "job_id", id, "error", werr.Error())
+		}
+		return false
+	}
+	if rerr := os.Rename(sourcePath, q.path(id)); rerr != nil {
+		if audit != nil {
+			audit("jobs.recover_rename_error", "job_id", id, "error", rerr.Error())
+		}
+		return false
+	}
+	return true
 }
 
 // worker is the goroutine that drains the pending channel. Each
@@ -638,6 +666,41 @@ func (q *Queue) processOne(id string, ctx context.Context, svc Service, audit Au
 		return
 	}
 
+	// Re-read the claimed file. The rename alone does not
+	// prove we won the race: a worker that lost can still
+	// succeed here, because the winner moves .processing.json
+	// back to .json when it finishes, and our rename then
+	// picks up the FINISHED job. The interleaving:
+	//
+	//   loser reads .json   -> status pending
+	//   winner claims, ingests, renames .processing.json -> .json
+	//   loser's rename succeeds (winner put .json back)
+	//   loser ingests the same document a second time
+	//
+	// Re-reading tells us whether the file we now hold is
+	// still ours to process. If it is already finished, we
+	// lost: restore the record to .json so readers can still
+	// see it, and do not ingest.
+	claimed, cerr := q.getAtProcessingPath(id)
+	if cerr != nil {
+		// Unreadable: we cannot prove ownership, so we must
+		// not ingest. Put the file back where it was and let
+		// recovery retry it.
+		_ = os.Rename(q.processingPath(id), q.path(id))
+		if audit != nil {
+			audit("jobs.claim_unreadable", "job_id", id, "error", cerr.Error())
+		}
+		return
+	}
+	if claimed.Status == StatusCompleted || claimed.Status == StatusFailed {
+		_ = os.Rename(q.processingPath(id), q.path(id))
+		if audit != nil {
+			audit("jobs.claim_lost", "job_id", id, "status", string(claimed.Status))
+		}
+		return
+	}
+	j = claimed
+
 	// Mark processing; StartedAt is the audit signal that
 	// work has begun. We write to .processing.json (the
 	// file we just claimed) so a crash mid-ingest preserves
@@ -670,6 +733,17 @@ func (q *Queue) processOne(id string, ctx context.Context, svc Service, audit Au
 			audit("jobs.completed", append(jobAuditFields(j), "document_id", docID, "chunks", chunks)...)
 		}
 	}
+
+	// Drop the document body before persisting the final state.
+	// Nothing reads Content once a job is finished:
+	// buildJobResponseBody does not use it, and Get on a
+	// completed job only surfaces status/timestamps. Keeping it
+	// costs disk for the whole retention window (7 days
+	// completed, 30 failed) and makes List() — which reads and
+	// JSON-parses every file in the directory — parse megabytes
+	// of document bodies to return 50 rows.
+	// Pinned by TestQueue_CompletedJobFileDropsContent.
+	j.Content = ""
 
 	// Persist final state to .processing.json, then atomic
 	// rename back to .json. The rename is the moment the
