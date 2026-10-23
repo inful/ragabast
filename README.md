@@ -307,6 +307,8 @@ ragabast search "kubernetes ingress tls" \
 The keyword index lives at `<vectordb.persistence_dir>/search/` next to
 the vector DB. `ragabast vector reset --force` wipes both stores in one
 go; the next `ragabast ingest` rebuilds them from source documents.
+If you relocated the keyword index with `vectordb.keyword_index_dir`
+(see the filesystem note below), the reset wipes that copy too.
 
 > **Filesystem note:** both stores assume a local filesystem with
 > sub-second clock skew. bleve uses mmap for reads, which performs

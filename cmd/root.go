@@ -416,6 +416,25 @@ func (c *VectorResetCmd) Run(ctx *kong.Context) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to recreate %s: %w", dir, err)
 	}
+
+	// The bleve keyword index normally lives INSIDE the
+	// persistence dir (<persistence_dir>/search), so the
+	// RemoveAll above already wiped it. But operators who
+	// split the stores — the documented setup for NFS, where
+	// bleve's mmap reads perform badly — point
+	// vectordb.keyword_index_dir at a local SSD. That copy
+	// survives the reset, leaving the keyword index holding
+	// chunks for documents whose vectors are gone: search
+	// results reference deleted documents.
+	//
+	// Wipe it too when it lives outside the persistence dir.
+	kwDir := vector.ResolveKeywordIndexPath("", cfg.VectorDB.KeywordIndexDir)
+	if kwDir != "" && !strings.HasPrefix(kwDir, dir+string(os.PathSeparator)) {
+		log.Printf("vector reset: removing keyword index %s\n", kwDir)
+		if err := os.RemoveAll(kwDir); err != nil {
+			return fmt.Errorf("failed to wipe keyword index %s: %w", kwDir, err)
+		}
+	}
 	log.Printf("vector reset: %s wiped. Run `ragabast ingest` to rebuild from source documents.\n", dir)
 	return nil
 }

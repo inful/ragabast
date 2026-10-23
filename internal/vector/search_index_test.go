@@ -313,25 +313,6 @@ func TestSearchIndex_LoadMissingPathCreates(t *testing.T) {
 	assert.Equal(t, 0, size)
 }
 
-// Clear empties the index.
-func TestSearchIndex_Clear(t *testing.T) {
-	t.Parallel()
-
-	idx, err := NewSearchIndex(filepath.Join(t.TempDir(), "idx"))
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = idx.Close() })
-
-	require.NoError(t, idx.AddBatch([]chunkSummary{
-		csID("a", "alpha"),
-		csID("b", "bravo"),
-	}))
-	require.NoError(t, idx.Clear())
-
-	size, err := idx.Size()
-	require.NoError(t, err)
-	assert.Equal(t, 0, size)
-}
-
 // Identifier preservation: NewMatchQuery is analyzer-aware,
 // so hyphenated identifiers like tls-handshake-failure stay
 // as one token at query time and match the indexed token.

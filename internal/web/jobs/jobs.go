@@ -761,27 +761,6 @@ func (q *Queue) path(id string) string {
 	return filepath.Join(q.dir, id+".json")
 }
 
-// RunCleanup walks the queue directory once and removes finished
-// jobs whose age exceeds the configured TTL. Returns the number
-// of files removed.
-//
-// A TTL of 0 disables cleanup entirely (operators use this to
-// pause the feature without removing the config keys). The
-// completed TTL applies to StatusCompleted jobs; the failed TTL
-// applies to StatusFailed jobs. Failed jobs default to a longer
-// retention so operators have time to investigate.
-//
-// Active processing is preserved: files ending in
-// `.processing.json` or `.tmp` are NEVER removed regardless of
-// age, even with TTL=1ns. The cleanup pass would otherwise race
-// with a worker holding a job and corrupt mid-ingest state.
-//
-// The audit hook is nil-safe — callers that don't care about
-// observability can pass nil.
-func (q *Queue) RunCleanup(completedTTL, failedTTL time.Duration) (int, error) {
-	return q.RunCleanupWithAudit(completedTTL, failedTTL, nil)
-}
-
 // RunCleanupWithAudit is the form that emits a summary audit
 // event after the sweep. The single event has event=
 // "jobs.cleanup_completed" with fields removed=<int>,
