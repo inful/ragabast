@@ -404,3 +404,19 @@ ragabast:
   # are in-memory only — restart drops them. Env:
   # RAGABAST_CHAT_SESSION_MAX_TURNS.
   chat_session_max_turns: 20
+
+  # How long a chat session may sit idle before the background
+  # GC drops it. Without a TTL, abandoned sessions accumulate
+  # forever: a browser that closes without logging out leaves no
+  # signal for the eviction to fire on.
+  #
+  # The default (24h) is longer than a typical browser session
+  # and short enough that an inactive operator's history does not
+  # pin memory indefinitely. Set to 0s to disable the GC entirely
+  # and rely on process restart instead.
+  #
+  # Note the unit: the value must be a duration string ("24h",
+  # "30m"), because YAML parses a bare 0 as an integer, which
+  # does not fit a duration field. Env:
+  # RAGABAST_CHAT_SESSION_IDLE_TTL.
+  chat_session_idle_ttl: 24h

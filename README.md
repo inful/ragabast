@@ -144,6 +144,7 @@ is equivalent to `DATA_DIR=$HOME/ragabast/data` / `VECTOR_DB_DIR=$HOME/vectors`.
 | `RAGABAST_QUERY_CACHE_SIZE` | `query_cache_size` | `512` | LRU cap for the search cache. `0` disables. |
 | `RAGABAST_QUERY_CACHE_TTL` | `query_cache_ttl` | `5m` | Per-entry TTL. |
 | `RAGABAST_CHAT_SESSION_MAX_TURNS` | `chat_session_max_turns` | `20` | FIFO-trimmed cap on the in-memory chat session store. Each turn is user + assistant. |
+| `RAGABAST_CHAT_SESSION_IDLE_TTL` | `chat_session_idle_ttl` | `24h` | How long a chat session may sit idle before the background GC drops it. `0s` disables the GC. |
 
 Notes:
 - Set `ollama.temperature` in YAML (or `OLLAMA_TEMPERATURE`) to control sampling.
@@ -1007,6 +1008,7 @@ chat session store does not persist to disk; see issue #77
 | Field | Default | Effect |
 |---|---|---|
 | `ragabast.chat_session_max_turns` | `20` | FIFO-trimmed cap. Each turn is user + assistant (≈40 messages). Env: `RAGABAST_CHAT_SESSION_MAX_TURNS`. |
+| `ragabast.chat_session_idle_ttl` | `24h` | Idle TTL for the chat session store. Sessions untouched for longer than this are dropped by the background GC. Without it, abandoned sessions accumulate forever — a browser that closes without logging out leaves no signal to evict on. Set to `0s` to disable the GC. Env: `RAGABAST_CHAT_SESSION_IDLE_TTL`. |
 
 `/chat/clear` is the privacy affordance — operators who want a clean
 slate tap it and the prior context is gone immediately, both in

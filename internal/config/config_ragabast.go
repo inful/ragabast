@@ -72,6 +72,10 @@ type RagabastConfig struct {
 	// that an inactive operator's history doesn't pin memory
 	// indefinitely. Set to 0 to disable the GC and rely on
 	// process restart (the v0.16 behavior).
+	//
+	// The default is set in DefaultConfig; this field's zero
+	// value means "no GC", which is the opposite of the
+	// documented default and was the bug.
 	ChatSessionIdleTTL time.Duration `env:"RAGABAST_CHAT_SESSION_IDLE_TTL" yaml:"chat_session_idle_ttl,omitempty"`
 }
 

@@ -163,6 +163,19 @@ func DefaultConfig() *Config {
 			// override with a custom on-disk set.
 			TemplatesDir: "",
 		},
+		Ragabast: RagabastConfig{
+			// These two knobs were documented with defaults
+			// but never set here, so the zero value reached
+			// the chat-session store. For MaxTurns a zero
+			// meant "use 20" (the store clamps it), but for
+			// IdleTTL a zero means "no GC at all" — the
+			// opposite of the documented default. An operator
+			// who changed nothing got chat sessions that
+			// accumulated forever instead of being evicted
+			// after a day.
+			ChatSessionMaxTurns: 20,
+			ChatSessionIdleTTL:  24 * time.Hour,
+		},
 	}
 }
 
@@ -302,6 +315,16 @@ func (c *Config) ApplyEnvOverrides() {
 			c.Ragabast.LogChatRequests = true
 		case "0", "false", "f", "no", "n", "off":
 			c.Ragabast.LogChatRequests = false
+		}
+	}
+	if v, ok := os.LookupEnv("RAGABAST_CHAT_SESSION_MAX_TURNS"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Ragabast.ChatSessionMaxTurns = n
+		}
+	}
+	if v, ok := os.LookupEnv("RAGABAST_CHAT_SESSION_IDLE_TTL"); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Ragabast.ChatSessionIdleTTL = d
 		}
 	}
 
