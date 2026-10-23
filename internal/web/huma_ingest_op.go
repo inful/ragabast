@@ -6,6 +6,32 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 )
 
+// ingestBodyOverhead is the slack between the per-document cap and
+// the request-body cap on the ingest endpoints.
+//
+// The body carries the document plus the JSON / multipart framing
+// around it, so the body cap has to sit ABOVE the document cap: a
+// document of exactly the cap size would otherwise be rejected by
+// huma before the app's own check ran. 1 MiB of slack also covers
+// the GitLab envelope, whose issue JSON and notes do not occupy the
+// same number of bytes as the markdown they render to.
+const ingestBodyOverhead = 1 << 20
+
+// ingestBodyLimit returns the request-body cap for the ingest
+// endpoints: the per-document cap plus the framing slack.
+//
+// huma caps every operation's body at 1 MiB by default, and nothing
+// in the repo overrode it — so the operator's
+// server.max_ingest_document_bytes knob was dead above 1 MiB.
+func ingestBodyLimit(maxDocumentBytes int) int64 {
+	if maxDocumentBytes <= 0 {
+		// 0 means "use huma's own default" — huma treats a
+		// zero MaxBodyBytes as "not set" and applies 1 MiB.
+		return 0
+	}
+	return int64(maxDocumentBytes) + ingestBodyOverhead
+}
+
 // withIngestGuard is the shared preamble for the three ingest
 // endpoints (POST /api/ingest, /api/ingest/raw, /api/ingest/file)
 // and POST /api/ingest/gitlab/issue. It bundles the

@@ -757,7 +757,9 @@ Every response carries the defense headers below:
 
 Every request is also bounded:
 
-- Request body ≤ 10 MiB (enforced by `http.MaxBytesReader`; Huma endpoints use Huma's own cap).
+- Request body ≤ 10 MiB (enforced by `http.MaxBytesReader`). The ingest
+  endpoints carry their own cap: `server.max_ingest_document_bytes`
+  (1 MiB default) plus 1 MiB of JSON / multipart framing slack.
 - `ReadTimeout` / `WriteTimeout` from config; fixed `IdleTimeout = 120s`.
 - Handler-level `Timeout(60s)` (chi) cancels the handler context.
 

@@ -160,7 +160,7 @@ type ingestBatchResponseBody struct {
 // (server.async_ingest_queue_dir is empty), the async
 // endpoints return 503 — the synchronous path remains
 // available regardless.
-func registerIngestJobsOperations(api huma.API, router http.Handler, q *jobs.Queue) {
+func registerIngestJobsOperations(api huma.API, router http.Handler, q *jobs.Queue, maxDocumentBytes int) {
 	if q == nil {
 		// Async ingest disabled — register no-op handlers
 		// that return 503 so callers get a clear error.
@@ -185,6 +185,7 @@ func registerIngestJobsOperations(api huma.API, router http.Handler, q *jobs.Que
 			Summary:       "Submit a docbuilder document for async ingest",
 			Description:   "Returns 202 Accepted with a job ID immediately. The job is persisted to the async-ingest queue and processed by a background worker pool. Poll /api/ingest/jobs/{job_id} for status.",
 			DefaultStatus: http.StatusAccepted,
+			MaxBodyBytes:  ingestBodyLimit(maxDocumentBytes),
 		},
 		func(ctx context.Context, body *ingestAsyncRequestBody) (*ingestAsyncResponseBody, error) {
 			// Re-use the same per-document size check the sync

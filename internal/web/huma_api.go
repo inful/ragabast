@@ -38,5 +38,5 @@ func registerHumaOperations(router http.Handler, api huma.API, svc serviceAPI, l
 	registerDocumentsOperations(api, svc)
 	registerLinkSuggestionsOperation(api, svc)
 	registerFrontmatterOperation(api, svc)
-	registerIngestJobsOperations(api, router, ingestQueue)
+	registerIngestJobsOperations(api, router, ingestQueue, maxIngestDocumentBytes)
 }

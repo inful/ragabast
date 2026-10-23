@@ -108,7 +108,7 @@ func TestBatchIngest_AllAccepted(t *testing.T) {
 	defer cleanup()
 
 	router, api := humatest.New(t)
-	registerIngestJobsOperations(api, router, q)
+	registerIngestJobsOperations(api, router, q, 0)
 
 	// Three well-formed docs.
 	items := make([]batchIngestEntry, 3)
@@ -139,7 +139,7 @@ func TestBatchIngest_EmptyArrayReturnsEmptyItems(t *testing.T) {
 	defer cleanup()
 
 	router, api := humatest.New(t)
-	registerIngestJobsOperations(api, router, q)
+	registerIngestJobsOperations(api, router, q, 0)
 
 	w := api.Post("/api/ingest/batch", []batchIngestEntry{})
 	require.Equal(t, http.StatusOK, w.Code)
@@ -163,7 +163,7 @@ func TestBatchIngest_PartialFailure_OversizedDoc(t *testing.T) {
 	defer cleanup()
 
 	router, api := humatest.New(t)
-	registerIngestJobsOperations(api, router, q)
+	registerIngestJobsOperations(api, router, q, 0)
 
 	big := strings.Repeat("a", 200)
 	items := []batchIngestEntry{
@@ -204,7 +204,7 @@ func TestBatchIngest_RateLimitAppliesToWholeBatch(t *testing.T) {
 
 	router, api := humatest.New(t)
 	limiter := NewIngestLimiter(100, 1*time.Second)
-	registerIngestJobsOperations(api, router, q)
+	registerIngestJobsOperations(api, router, q, 0)
 	_ = limiter // limiter is installed via NewServer; this test
 	//           exercises the batch endpoint directly without it.
 	//           The point is just that the batch itself
@@ -234,7 +234,7 @@ func TestBatchIngest_NDJSONStream(t *testing.T) {
 	defer cleanup()
 
 	router, api := humatest.New(t)
-	registerIngestJobsOperations(api, router, q)
+	registerIngestJobsOperations(api, router, q, 0)
 
 	body := bytes.NewBufferString(
 		`{"content":"---\nuid: doc-1\n---\nhello"}

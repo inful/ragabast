@@ -207,10 +207,12 @@ server:
   # upstream tokens. Env: SERVER_RATE_LIMIT_BURST.
   rate_limit_burst: 5
   # Per-document size cap for both the sync and async ingest
-  # paths. The 10 MiB request-body limit caps the whole
-  # request, but a single ingest request is one document —
-  # the smaller per-document cap protects the chunker and
-  # embedding model from being pinned by one giant input.
+  # paths. The request-body limit on the ingest endpoints is this
+  # value plus 1 MiB of JSON / multipart framing slack, so a
+  # document of exactly this size still fits — but a single ingest
+  # request is one document, and the smaller per-document cap
+  # protects the chunker and embedding model from being pinned by
+  # one giant input.
   # Env: SERVER_MAX_INGEST_DOCUMENT_BYTES.
   max_ingest_document_bytes: 1048576
   # On-disk directory for the async ingest queue (see
