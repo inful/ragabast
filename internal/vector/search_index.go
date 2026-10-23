@@ -401,31 +401,23 @@ func (s *SearchIndex) DeleteDocument(documentID string) error {
 	if err != nil {
 		return fmt.Errorf("scan document_id=%s: %w", documentID, err)
 	}
-	for _, hit := range res.Hits {
-		if err := s.index.Delete(hit.ID); err != nil {
-			return fmt.Errorf("delete chunk %s: %w", hit.ID, err)
-		}
+	if len(res.Hits) == 0 {
+		return nil
 	}
-	return nil
-}
 
-// Clear empties the index. Used by the vector-reset path
-// (mirrors chromem-go's Clear).
-func (s *SearchIndex) Clear() error {
-	if s == nil || s.index == nil {
-		return errors.New("search index not initialized")
+	// Delete every chunk in ONE batch. The old implementation
+	// called index.Delete once per chunk, so a document with N
+	// chunks cost N index round-trips — each one a separate
+	// write to the on-disk index. A bulk delete of a 500-chunk
+	// document meant 500 writes where a single batch does the
+	// same work in one.
+	batch := s.index.NewBatch()
+	for _, hit := range res.Hits {
+		batch.Delete(hit.ID)
 	}
-	// bleve exposes Close on the index; recreating the
-	// directory is the simplest way to drop every document.
-	_ = s.index.Close()
-	if err := os.RemoveAll(s.path); err != nil {
-		return fmt.Errorf("clear search index: %w", err)
+	if err := s.index.Batch(batch); err != nil {
+		return fmt.Errorf("delete chunks of document_id=%s: %w", documentID, err)
 	}
-	idx, err := NewSearchIndex(s.path)
-	if err != nil {
-		return err
-	}
-	s.index = idx.index
 	return nil
 }
 

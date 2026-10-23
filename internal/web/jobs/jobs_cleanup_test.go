@@ -27,7 +27,7 @@ func TestQueue_RunCleanup_RemovesOldCompletedJobs(t *testing.T) {
 	old := writeJobAtMtime(t, q, "old-completed", StatusCompleted, time.Now().Add(-1*time.Hour))
 	fresh := writeJobAtMtime(t, q, "fresh-completed", StatusCompleted, time.Now().Add(-1*time.Minute))
 
-	removed, err := q.RunCleanup(30*time.Minute, 0)
+	removed, err := q.RunCleanupWithAudit(30*time.Minute, 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, removed,
 		"exactly one stale completed job should be removed")
@@ -54,7 +54,7 @@ func TestQueue_RunCleanup_KeepsFailedLongerThanCompleted(t *testing.T) {
 	// success at this age; failedTTL=2h keeps it.
 	failed := writeJobAtMtime(t, q, "recently-failed", StatusFailed, time.Now().Add(-1*time.Hour))
 
-	removed, err := q.RunCleanup(30*time.Minute, 2*time.Hour)
+	removed, err := q.RunCleanupWithAudit(30*time.Minute, 2*time.Hour, nil)
 	require.NoError(t, err)
 	require.Zero(t, removed,
 		"the failed job is within its TTL — nothing should be removed")
@@ -74,7 +74,7 @@ func TestQueue_RunCleanup_RemovesOldFailedJobs(t *testing.T) {
 	oldFailed := writeJobAtMtime(t, q, "ancient-failed", StatusFailed, time.Now().Add(-72*time.Hour))
 	freshFailed := writeJobAtMtime(t, q, "recent-failed", StatusFailed, time.Now().Add(-1*time.Minute))
 
-	removed, err := q.RunCleanup(30*time.Minute, 24*time.Hour)
+	removed, err := q.RunCleanupWithAudit(30*time.Minute, 24*time.Hour, nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, removed)
 
@@ -105,7 +105,7 @@ func TestQueue_RunCleanup_SkipsProcessingFiles(t *testing.T) {
 
 	// Even with TTL=1ns, the file must survive because
 	// it's a .processing.json file, not a finished job.
-	removed, err := q.RunCleanup(1*time.Nanosecond, 1*time.Nanosecond)
+	removed, err := q.RunCleanupWithAudit(1*time.Nanosecond, 1*time.Nanosecond, nil)
 	require.NoError(t, err)
 	require.Zero(t, removed,
 		".processing.json files must never be swept")
@@ -132,7 +132,7 @@ func TestQueue_RunCleanup_ZeroTTLDisablesCleanup(t *testing.T) {
 	// swept immediately.
 	ancient := writeJobAtMtime(t, q, "ancient-completed", StatusCompleted, time.Now().Add(-10*365*24*time.Hour))
 
-	removed, err := q.RunCleanup(0, 0)
+	removed, err := q.RunCleanupWithAudit(0, 0, nil)
 	require.NoError(t, err)
 	require.Zero(t, removed,
 		"TTL=0 must disable cleanup entirely")
@@ -209,7 +209,7 @@ func TestQueue_RunCleanup_ManyStaleJobs(t *testing.T) {
 
 	// Failed TTL of 1h catches every seeded job.
 	start := time.Now()
-	removed, err := q.RunCleanup(30*time.Minute, 1*time.Hour)
+	removed, err := q.RunCleanupWithAudit(30*time.Minute, 1*time.Hour, nil)
 	elapsed := time.Since(start)
 	require.NoError(t, err)
 	require.Equal(t, n, removed,
