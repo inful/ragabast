@@ -179,7 +179,7 @@ func (c *OpenAILLMClient) ValidateConnection(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to create validation request: %w", err)
 		}
-		c.applyAuth(req)
+		applyAuth(req, c.apiKey)
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
@@ -246,7 +246,7 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	c.applyAuth(httpReq)
+	applyAuth(httpReq, c.apiKey)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -294,10 +294,6 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 	}
 
 	return content, nil
-}
-
-func (c *OpenAILLMClient) applyAuth(req *http.Request) {
-	applyAuth(req, c.apiKey)
 }
 
 // buildChatBody marshals the request, then merges OpenAIChatRequest.Options

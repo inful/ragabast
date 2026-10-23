@@ -20,40 +20,6 @@ func uxPolishTestServer(t *testing.T) *Server {
 	return s
 }
 
-// uxPolishChatFallbackBody executes the chat
-// landing fallback template and returns the HTML.
-func uxPolishChatFallbackBody(t *testing.T, s *Server) string {
-	t.Helper()
-	data := chatFallbackData{
-		Title:     "Chat",
-		CsrfToken: "",
-		SessionID: "session-test",
-		Header: pageHeaderData{
-			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
-		},
-	}
-	var buf strings.Builder
-	require.NoError(t, s.fallback.chat.Execute(&buf, data))
-	return buf.String()
-}
-
-// uxPolishDocumentsFallbackBody executes the
-// documents page fallback template and returns
-// the HTML.
-func uxPolishDocumentsFallbackBody(t *testing.T, s *Server) string {
-	t.Helper()
-	data := documentsFallbackData{
-		Title:     "Documents",
-		CsrfToken: "",
-		Header: pageHeaderData{
-			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
-		},
-	}
-	var buf strings.Builder
-	require.NoError(t, s.fallback.documents.Execute(&buf, data))
-	return buf.String()
-}
-
 // templatesFSReadFile reads a file from the
 // embedded templates FS (used by the Phase 6
 // grep test). The error message is intentionally
@@ -138,7 +104,7 @@ func TestUx_EmptyStateCopyImproves(t *testing.T) {
 	// Documents empty state. We render the page
 	// with no documents and check for the new
 	// tone + the ingest guide CTA.
-	docsBody := uxPolishDocumentsFallbackBody(t, uxPolishTestServer(t))
+	docsBody := renderDocumentsFallbackBody(t, uxPolishTestServer(t))
 
 	// The pre-Phase-6 phrasing "No documents
 	// ingested yet" is gone. The new tone is
@@ -173,7 +139,7 @@ func TestUx_EmptyStateCopyImproves(t *testing.T) {
 // contract is "the data-tooltip attribute
 // exists".
 func TestUx_TooltipOnIconOnlyButtons(t *testing.T) {
-	body := uxPolishChatFallbackBody(t, uxPolishTestServer(t))
+	body := renderChatFallbackBody(t, uxPolishTestServer(t))
 
 	// The jump-to-latest button is the canonical
 	// icon-only button in the app. It has no

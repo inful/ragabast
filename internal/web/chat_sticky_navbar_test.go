@@ -20,23 +20,6 @@ func chatStickyNavbarTestServer(t *testing.T) *Server {
 	return s
 }
 
-// renderChatStickyNavbarFallback executes the chat
-// landing fallback template and returns the HTML.
-func renderChatStickyNavbarFallback(t *testing.T, s *Server) string {
-	t.Helper()
-	data := chatFallbackData{
-		Title:     "Chat",
-		CsrfToken: "",
-		SessionID: "session-test",
-		Header: pageHeaderData{
-			AuthEnabled: false, SignedIn: false, ShowSignIn: false,
-		},
-	}
-	var buf strings.Builder
-	require.NoError(t, s.fallback.chat.Execute(&buf, data))
-	return buf.String()
-}
-
 // TestChat_NavbarIsSticky pins the Phase 2.4 contract from
 // plans/ux-overhaul.md: the chat landing page's navbar is
 // sticky to the top of the viewport so long chat sessions
@@ -61,7 +44,7 @@ func renderChatStickyNavbarFallback(t *testing.T, s *Server) string {
 // doesn't need it. TestChatBody_NoStickyNavbarGap in
 // chat_landing_test.go pins the body class absence.
 func TestChat_NavbarIsSticky(t *testing.T) {
-	body := renderChatStickyNavbarFallback(t, chatStickyNavbarTestServer(t))
+	body := renderChatFallbackBody(t, chatStickyNavbarTestServer(t))
 
 	// The <nav> element must carry sticky + top-0.
 	// daisyUI's navbar class + Tailwind's sticky /
