@@ -197,12 +197,14 @@ Every response, regardless of route, carries:
 > Note: the CSP is strictly self-hosted and uses neither `'unsafe-inline'` nor `'unsafe-eval'`. Every page's styles live under `internal/web/static/` and are served from `/static/*`; templates and fallback renderers never emit an inline `<style>` block, and chat.js wires the loading-state UX via DOM event listeners instead of `hx-on::*` (which htmx would evaluate with `eval()`/`new Function()`). The htmx config `<meta name="htmx-config" content='{"allowEval":false}'>` is set on every page that loads htmx, so the runtime never tries to evaluate attribute JS even if a future contributor re-introduces `hx-on`. The historical build whitelisted `https://unpkg.com` and `https://cdn.jsdelivr.net` for daisyUI's CSS framework and htmx; bundling them, then moving page-specific styles to `/static/chat.css` and `/static/login.css`, removed both those CDN allowances and the inline-script / inline-style requirements that drove the `unsafe-*` exemptions in the first place.
 - `Strict-Transport-Security: max-age=63072000; includeSubDomains`
 
-Every request body is capped at 10 MiB (Huma endpoints use Huma's own
-cap; form endpoints use `http.MaxBytesReader` in
-`internal/web/max_bytes.go`). The `http.Server` literal applies the
-configured `ReadTimeout` and `WriteTimeout`, plus a fixed 120 s
-`IdleTimeout` — slowloris and slow-body attacks cannot pin
-connections open.
+Every request body is capped: the ingest endpoints carry
+`server.max_ingest_document_bytes` (1 MiB default) plus 1 MiB of
+JSON / multipart framing slack, the other Huma endpoints use Huma's
+own 1 MiB per-operation cap, and the form endpoints use
+`http.MaxBytesReader` in `internal/web/max_bytes.go` (10 MiB). The
+`http.Server` literal applies the configured `ReadTimeout` and
+`WriteTimeout`, plus a fixed 120 s `IdleTimeout` — slowloris and
+slow-body attacks cannot pin connections open.
 
 ## LLM reply sanitization
 
