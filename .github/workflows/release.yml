@@ -36,7 +36,14 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          # Bind to go.mod, like the CI test job does. The
+          # hardcoded 1.25 this replaced was older than go.mod's
+          # `go 1.26.9` directive, so the release build only
+          # worked because Go silently downloaded a newer
+          # toolchain — a hidden network dependency on the
+          # release path, and a mismatch with the compiler CI
+          # actually tests with.
+          go-version-file: go.mod
           cache: true
 
       - name: Set up QEMU
