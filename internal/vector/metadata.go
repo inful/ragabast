@@ -113,32 +113,13 @@ func metadataToChunk(meta map[string]string, content string) *models.Chunk {
 	}
 }
 
-// splitMetadataList splits a metadata value that was stored as
+// splitNonEmptyLines splits a metadata value that was stored as
 // newline-joined items into a slice with empty entries filtered out.
-// Returns nil for empty input so the SearchResult keeps the
-// `omitempty` JSON contract.
-func splitMetadataList(raw string) []string {
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, "\n")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		out = append(out, p)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-// splitNonEmptyLines is the same shape as splitMetadataList
-// but returns an empty slice (not nil) for empty input, which is
-// what the metadata→chunk conversion expects (a nil slice there
-// would JSON-encode as null inside the chunk).
+//
+// One helper serves both readers: the chunk and search-result list
+// fields carry `omitempty`, so nil and an empty slice serialize the
+// same way — the previous nil-vs-empty split between the two readers
+// only produced inconsistent chunks for the same document.
 func splitNonEmptyLines(s string) []string {
 	if s == "" {
 		return []string{}

@@ -272,11 +272,15 @@ type DocumentMetadataPatch struct {
 // always an explicit operator declaration.
 //
 // The implementation walks GetChunksByDocument, mutates
-// each chunk's metadata, deletes the old chunks from
-// chromem-go, and re-adds them with the SAME chunk IDs
-// and embeddings + the new metadata. Embeddings are not
+// each chunk's metadata, and re-adds them with the SAME chunk
+// IDs and embeddings + the new metadata. Embeddings are not
 // re-computed (metadata-only update). The chunk_id is
 // stable across the update.
+//
+// No delete step is needed: chromem-go replaces a stored
+// document by ID, so re-adding the chunks overwrites them in
+// place. That also means there is no window in which the
+// document is missing from the store.
 //
 // Returns models.ErrNotFound when no chunks match
 // documentID so callers can surface "no such document"
@@ -315,18 +319,15 @@ func (db *VectorDB) UpdateDocumentMetadata(ctx context.Context, patch DocumentMe
 		applyMetadataPatch(chunk, patch)
 	}
 
-	// Delete the old chunks, then re-add with the SAME
-	// IDs + same embeddings + updated metadata. Re-adding
-	// with the same IDs overwrites chromem-go's view of
-	// those chunks; the embeddings are unchanged so the
-	// similarity scores stay identical.
-	if err := db.collection.Delete(ctx, nil, map[string]string{"document_id": patch.DocumentID}); err != nil {
-		return fmt.Errorf("delete old chunks: %w", err)
-	}
-
-	// Use the existing AddChunksBatch path so dimension
-	// checking + the same error wrapping apply.
-	if err := db.AddChunksBatch(ctx, chunks, embeddings); err != nil {
+	// Re-add with the SAME IDs + same embeddings + updated
+	// metadata. chromem-go replaces by ID, so the metadata
+	// update lands in place; the embeddings are unchanged so
+	// the similarity scores stay identical.
+	//
+	// The locked variant is used because this method already
+	// holds db.mu — the exported AddChunksBatch takes the
+	// same (non-reentrant) lock itself.
+	if err := db.addChunksBatchLocked(ctx, chunks, embeddings); err != nil {
 		return fmt.Errorf("re-add with new metadata: %w", err)
 	}
 	return nil
@@ -344,7 +345,7 @@ func (db *VectorDB) getChunksByDocumentLocked(ctx context.Context, documentID st
 	dummyEmbedding := make([]float32, db.embeddingDimension)
 	options := chromem.QueryOptions{
 		QueryEmbedding: dummyEmbedding,
-		NResults:       min(count, 1000),
+		NResults:       count,
 		Where:          map[string]string{"document_id": documentID},
 	}
 	results, err := db.collection.QueryWithOptions(ctx, options)
@@ -353,7 +354,7 @@ func (db *VectorDB) getChunksByDocumentLocked(ctx context.Context, documentID st
 	}
 	chunks := make([]*models.Chunk, len(results))
 	for i, result := range results {
-		chunks[i] = chunkFromResult(result)
+		chunks[i] = metadataToChunk(result.Metadata, result.Content)
 	}
 	return chunks, nil
 }
@@ -362,7 +363,7 @@ func (db *VectorDB) getChunksByDocumentLocked(ctx context.Context, documentID st
 // getChunksByDocumentLocked but only to extract the
 // embedding vector from each result. Used by
 // UpdateDocumentMetadata so the embeddings survive the
-// delete + re-add cycle.
+// re-add.
 func (db *VectorDB) embeddingsForChunksLocked(ctx context.Context, chunks []*models.Chunk) ([][]float32, error) {
 	count := db.collection.Count()
 	if count == 0 {
@@ -375,7 +376,7 @@ func (db *VectorDB) embeddingsForChunksLocked(ctx context.Context, chunks []*mod
 	dummyEmbedding := make([]float32, db.embeddingDimension)
 	options := chromem.QueryOptions{
 		QueryEmbedding: dummyEmbedding,
-		NResults:       min(count, 1000),
+		NResults:       count,
 		Where:          map[string]string{"document_id": chunks[0].DocumentID},
 	}
 	results, err := db.collection.QueryWithOptions(ctx, options)
@@ -451,27 +452,6 @@ func copySlice(s []string) []string {
 	return out
 }
 
-// chunkFromResult converts a chromem-go query result into a
-// models.Chunk using the metadata's stored chunk_id.
-// Exported by the existing chunk parsing logic above; we
-// just call into it from the locked variants.
-func chunkFromResult(result chromem.Result) *models.Chunk {
-	return &models.Chunk{
-		ID:                 result.Metadata["chunk_id"],
-		DocumentID:         result.Metadata["document_id"],
-		Content:            result.Content,
-		HeaderPath:         result.Metadata["header_path"],
-		Level:              0,
-		DocumentTitle:      result.Metadata["document_title"],
-		DocumentURLs:       splitMetadataList(result.Metadata["document_urls"]),
-		DocumentTags:       splitMetadataList(result.Metadata["document_tags"]),
-		DocumentCategories: splitMetadataList(result.Metadata["document_categories"]),
-		ParentID:           result.Metadata["parent_id"],
-		UID:                result.Metadata["uid"],
-		Fingerprint:        result.Metadata["fingerprint"],
-	}
-}
-
 // AddChunksBatch adds multiple chunks in a batch operation.
 func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, embeddings [][]float32) error {
 	if len(chunks) != len(embeddings) {
@@ -491,6 +471,15 @@ func (db *VectorDB) AddChunksBatch(ctx context.Context, chunks []*models.Chunk, 
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
+	return db.addChunksBatchLocked(ctx, chunks, embeddings)
+}
+
+// addChunksBatchLocked is the lock-free variant of AddChunksBatch —
+// the caller must already hold db.mu. UpdateDocumentMetadata uses it
+// because db.mu is a sync.RWMutex (not reentrant): calling the
+// exported AddChunksBatch from a method that already holds the write
+// lock deadlocks.
+func (db *VectorDB) addChunksBatchLocked(ctx context.Context, chunks []*models.Chunk, embeddings [][]float32) error {
 	docs := make([]chromem.Document, len(chunks))
 	for i, chunk := range chunks {
 		if chunk == nil {
@@ -629,9 +618,9 @@ func (db *VectorDB) Search(ctx context.Context, queryEmbedding []float32, limit 
 			StartLine:          startLine,
 			EndLine:            endLine,
 			DocumentTitle:      result.Metadata["document_title"],
-			DocumentURLs:       splitMetadataList(result.Metadata["document_urls"]),
-			DocumentTags:       splitMetadataList(result.Metadata["document_tags"]),
-			DocumentCategories: splitMetadataList(result.Metadata["document_categories"]),
+			DocumentURLs:       splitNonEmptyLines(result.Metadata["document_urls"]),
+			DocumentTags:       splitNonEmptyLines(result.Metadata["document_tags"]),
+			DocumentCategories: splitNonEmptyLines(result.Metadata["document_categories"]),
 			ParentID:           result.Metadata["parent_id"],
 			Similarity:         result.Similarity,
 			Fingerprint:        result.Metadata["fingerprint"],
@@ -690,7 +679,7 @@ func (db *VectorDB) GetChunksByDocument(ctx context.Context, documentID string) 
 
 	options := chromem.QueryOptions{
 		QueryEmbedding: dummyEmbedding,
-		NResults:       min(count, 1000),
+		NResults:       count,
 		Where:          map[string]string{"document_id": documentID},
 	}
 
@@ -742,7 +731,7 @@ func (db *VectorDB) DeleteDocument(ctx context.Context, documentID string) error
 	dummyEmbedding := make([]float32, db.embeddingDimension)
 	options := chromem.QueryOptions{
 		QueryEmbedding: dummyEmbedding,
-		NResults:       min(count, 1000),
+		NResults:       count,
 		Where:          map[string]string{"document_id": documentID},
 	}
 
@@ -820,7 +809,7 @@ func (db *VectorDB) SampleEmbeddingLength(ctx context.Context) (int, bool, error
 	return len(results[0].Embedding), true, nil
 }
 
-// splitMetadataList moved to metadata.go.
+// splitNonEmptyLines and parseRFC3339 moved to metadata.go.
 
 // DocumentFingerprintInfo is the metadata a DocumentFingerprint
 // call returns. Fingerprint is the content hash stored at

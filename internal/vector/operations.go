@@ -320,8 +320,37 @@ func (vo *VectorOperations) GetUniqueDocuments(ctx context.Context) ([]models.Do
 // when no chunks match (operator got the document_id
 // wrong). Embeddings are not re-computed — this is a
 // metadata-only update.
+//
+// The keyword index is re-indexed with the patched chunks so
+// both stores agree on the document's tags and categories.
+// bleve replaces a document by ID, so re-indexing is enough —
+// no delete step is needed.
 func (vo *VectorOperations) UpdateDocumentMetadata(ctx context.Context, patch DocumentMetadataPatch) error {
-	return vo.db.UpdateDocumentMetadata(ctx, patch)
+	if err := vo.db.UpdateDocumentMetadata(ctx, patch); err != nil {
+		return err
+	}
+	if vo.searchIndex == nil {
+		return nil
+	}
+	chunks, err := vo.db.GetChunksByDocument(ctx, patch.DocumentID)
+	if err != nil {
+		return fmt.Errorf("read chunks for keyword reindex: %w", err)
+	}
+	summaries := make([]chunkSummary, 0, len(chunks))
+	for _, c := range chunks {
+		summaries = append(summaries, chunkSummary{
+			ID:         c.ID,
+			Content:    c.Content,
+			Title:      c.DocumentTitle,
+			DocumentID: c.DocumentID,
+			Tags:       c.DocumentTags,
+			Categories: c.DocumentCategories,
+		})
+	}
+	if err := vo.searchIndex.AddBatch(summaries); err != nil {
+		return fmt.Errorf("re-index chunks for keyword search: %w", err)
+	}
+	return nil
 }
 
 // GetUniqueDocumentsPaged returns a page of unique
