@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"time"
 
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service/querycache"
@@ -48,17 +49,9 @@ type LLMOptions struct {
 // that need pure semantic behavior and for the search-tests
 // that pin v0.3.0 semantics.
 func (s *Service) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
-	key := querycache.KeyOf(querycache.Key{
-		Query:    query,
-		DocID:    filters.DocumentID,
-		Tag:      filters.Tag,
-		Category: filters.Category,
-		Limit:    limit,
-		Mode:     "semantic", // Search is the v0.3.0 semantic-only path
-		Model:    s.embedModel,
-	})
+	key := s.searchCacheKey(query, limit, filters, "semantic") // Search is the v0.3.0 semantic-only path
 	results, _, err := s.cache.Get(ctx, key, func(ctx context.Context) ([]models.SearchResult, error) {
-		return s.vectorOps.Search(ctx, query, limit, filters.ToWhere())
+		return s.vectorOps.Search(ctx, query, limit, filters)
 	})
 	if err != nil {
 		return nil, wrapCorruptionError(err)
@@ -97,15 +90,7 @@ func (s *Service) HybridSearch(
 	filters SearchFilters,
 	mode SearchMode,
 ) ([]models.SearchResult, error) {
-	key := querycache.KeyOf(querycache.Key{
-		Query:    query,
-		DocID:    filters.DocumentID,
-		Tag:      filters.Tag,
-		Category: filters.Category,
-		Limit:    limit,
-		Mode:     mode.String(),
-		Model:    s.embedModel,
-	})
+	key := s.searchCacheKey(query, limit, filters, mode.String())
 	results, _, err := s.cache.Get(ctx, key, func(ctx context.Context) ([]models.SearchResult, error) {
 		return s.vectorOps.SearchHybrid(ctx, query, limit, filters, mode)
 	})
@@ -123,6 +108,39 @@ func (s *Service) HybridSearch(
 	s.enrichWithDocbuilderURLs(results)
 	s.enrichWithCitationURLs(results)
 	return results, nil
+}
+
+// searchCacheKey builds the query-cache key for a retrieval.
+//
+// Every input that can change the result set belongs in the key: the
+// query text, the filters, the limit, the ranking mode and the
+// embedding model. The source-kind scope and the date ranges used to
+// be missing, so two requests that differed only in those filters
+// shared one entry.
+func (s *Service) searchCacheKey(query string, limit int, filters SearchFilters, mode string) string {
+	return querycache.KeyOf(querycache.Key{
+		Query:         query,
+		DocID:         filters.DocumentID,
+		Tag:           filters.Tag,
+		Category:      filters.Category,
+		Limit:         limit,
+		Mode:          mode,
+		Model:         s.embedModel,
+		SourceKinds:   filters.SourceKinds,
+		CreatedAfter:  timeKey(filters.CreatedAfter),
+		CreatedBefore: timeKey(filters.CreatedBefore),
+		UpdatedAfter:  timeKey(filters.UpdatedAfter),
+		UpdatedBefore: timeKey(filters.UpdatedBefore),
+	})
+}
+
+// timeKey renders a date filter as an RFC 3339 string for the cache
+// key. An unset filter is the empty string.
+func timeKey(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
 }
 
 // enrichWithDocbuilderURLs populates the DocbuilderURL field on
@@ -197,34 +215,17 @@ func (s *Service) Query(ctx context.Context, query string, limit int) (string, e
 // debug information about the retrieved chunks and constructed prompt.
 //
 // See the note on Service.Query about the deprecation timeline.
+//
+// The retrieval goes through HybridSearch — the same path, the same
+// cache entry and the same ranking as /api/search. It used to call
+// vectorOps.Search directly, which meant the chat surface had
+// neither the keyword side (no exact-term recall) nor the query
+// cache.
 func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts LLMOptions) (string, *QueryDebugInfo, error) {
-	results, err := s.vectorOps.Search(ctx, query, limit, opts.Filters.ToWhere())
+	results, err := s.HybridSearch(ctx, query, limit, opts.Filters, ModeHybrid)
 	if err != nil {
 		return "", nil, fmt.Errorf("search failed: %w", err)
 	}
-	// Post-filter by source kind. Mirrors the post-filter in
-	// Search and HybridSearch: the chromem-go Where filter is
-	// equality-only, so per-kind scoping happens here against
-	// the kind populated on each chunk at read time (see
-	// inferSourceKind in the vector package).
-	results = applySourceKindFilters(results, opts.Filters)
-
-	// Populate DocbuilderURL on every result so the chat handler's
-	// InlineSourceLinks post-processor can convert the LLM's
-	// [src:N] markers into clickable links. Without this call,
-	// the post-processor falls into the "no URL → bare title text"
-	// branch and the user sees source titles concatenated with no
-	// links — the bug reported on 2026-09-20. Mirrors what
-	// Service.Search does at line 74; QueryDebugWithOptions uses
-	// vectorOps.Search directly so it has to do the enrichment
-	// itself.
-	s.enrichWithDocbuilderURLs(results)
-	// Populate CitationURL with the per-source-kind URL choice
-	// (DocumentURLs[0] for gitlab, DocbuilderURL for docbuilder).
-	// The chat sources panel and the search-results page both
-	// consume this so the dispatch logic stays out of the
-	// templates.
-	s.enrichWithCitationURLs(results)
 
 	if len(results) == 0 {
 		return "No relevant information found.", nil, nil

@@ -100,14 +100,19 @@ func (c *Chunker) splitByHeaders(doc *models.Document, headers []models.HeaderIn
 	for i, line := range lines {
 		// Check if this line is a header
 		if header, isHeader := headerMap[i]; isHeader {
-			// If we have content in current chunk and it's significant, save it
+			// If we have content in current chunk, save it.
+			//
+			// Every section is emitted, whatever its size:
+			// min_chunk_size is a merge threshold (handled by
+			// mergeSmallChunks below), never a drop threshold.
+			// Dropping short sections here silently removed
+			// them from the index — a document whose sections
+			// were all short produced zero chunks and the
+			// ingest still reported success.
 			if len(sectionLines) > 0 {
 				contentStr := strings.Join(sectionLines, "\n")
-				if len(contentStr) >= c.minSize {
-					// Create chunk from accumulated content
-					chunk := c.createChunkFromSection(currentChunk, contentStr, currentLine, i-1)
-					chunks = append(chunks, chunk)
-				}
+				chunk := c.createChunkFromSection(currentChunk, contentStr, currentLine, i-1)
+				chunks = append(chunks, chunk)
 			}
 
 			// Start new chunk for this header
@@ -125,10 +130,8 @@ func (c *Chunker) splitByHeaders(doc *models.Document, headers []models.HeaderIn
 	// Handle final section
 	if len(sectionLines) > 0 {
 		contentStr := strings.Join(sectionLines, "\n")
-		if len(contentStr) >= c.minSize {
-			chunk := c.createChunkFromSection(currentChunk, contentStr, currentLine, len(lines)-1)
-			chunks = append(chunks, chunk)
-		}
+		chunk := c.createChunkFromSection(currentChunk, contentStr, currentLine, len(lines)-1)
+		chunks = append(chunks, chunk)
 	}
 
 	// If chunks are too small, merge them
@@ -229,38 +232,34 @@ func (c *Chunker) buildHeaderPath(allHeaders []models.HeaderInfo, current models
 	return strings.Join(path, " > ")
 }
 
-// mergeSmallChunks merges chunks that are below the minimum size.
+// mergeSmallChunks folds chunks that are below the minimum size
+// into the chunk that precedes them.
+//
+// A chunk shorter than min_chunk_size cannot stand on its own, but
+// its text must never leave the index: the chunk is appended to the
+// previous chunk's content and the previous chunk's ID is
+// regenerated to match the new content. The folded chunk's ID is
+// kept in ChildrenIDs so the hierarchy still records it.
+//
+// The first chunk is always kept as-is: there is no previous chunk
+// to fold it into, and dropping it would drop the whole document.
 func (c *Chunker) mergeSmallChunks(chunks []*models.Chunk) []*models.Chunk {
 	if len(chunks) == 0 {
 		return chunks
 	}
 
-	var merged []*models.Chunk
-	var current *models.Chunk
-
+	merged := make([]*models.Chunk, 0, len(chunks))
 	for _, chunk := range chunks {
-		if len(chunk.Content) < c.minSize {
-			if current == nil {
-				current = chunk
-			} else {
-				// Merge with previous
-				current.Content += "\n" + chunk.Content
-				current.EndLine = chunk.EndLine
-				current.ChildrenIDs = append(current.ChildrenIDs, chunk.ID)
-				// Regenerate ID for merged chunk
-				current.ID = generateChunkID(current.DocumentID, current.HeaderPath, current.StartLine, current.EndLine, current.Content)
-			}
-		} else {
-			if current != nil {
-				merged = append(merged, current)
-				current = nil
-			}
+		if len(chunk.Content) >= c.minSize || len(merged) == 0 {
 			merged = append(merged, chunk)
+			continue
 		}
-	}
-
-	if current != nil {
-		merged = append(merged, current)
+		prev := merged[len(merged)-1]
+		prev.Content += "\n" + chunk.Content
+		prev.EndLine = chunk.EndLine
+		prev.ChildrenIDs = append(prev.ChildrenIDs, chunk.ID)
+		// Regenerate ID for the merged chunk.
+		prev.ID = generateChunkID(prev.DocumentID, prev.HeaderPath, prev.StartLine, prev.EndLine, prev.Content)
 	}
 
 	return merged

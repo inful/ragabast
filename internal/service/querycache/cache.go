@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/singleflight"
+
+	"github.com/ragabast/internal/models"
 )
 
 // Key is the set of inputs that distinguish a query
@@ -36,6 +38,11 @@ import (
 // intentionally NOT in the key — search results are
 // point-in-time, but operators don't expect re-running
 // the same query to ever return different chunks).
+//
+// Every input that can change the result set belongs
+// here. The source-kind scope and the date ranges used
+// to be missing, so two requests that differed only in
+// those filters shared one cache entry.
 type Key struct {
 	Query    string
 	DocID    string
@@ -44,6 +51,15 @@ type Key struct {
 	Limit    int
 	Mode     string // "hybrid" / "semantic" / "keyword"
 	Model    string // embedding model name (matters for cache correctness)
+	// SourceKinds scopes the retrieval to a set of source
+	// kinds. Empty means "all sources".
+	SourceKinds []models.SourceKind
+	// The date-range filters, as RFC 3339 strings. Empty
+	// means "no constraint on this side".
+	CreatedAfter  string
+	CreatedBefore string
+	UpdatedAfter  string
+	UpdatedBefore string
 }
 
 // KeyOf returns the deterministic cache key for k. Field
@@ -56,13 +72,18 @@ func KeyOf(k Key) string {
 	// returns (int, error) where the int is bytes written
 	// and the error is always nil for hash implementations.
 	// Ignoring both is safe and the standard idiom.
-	fmt.Fprintf(h, "q=%s\x00", k.Query)      //nolint:errcheck
-	fmt.Fprintf(h, "doc=%s\x00", k.DocID)    //nolint:errcheck
-	fmt.Fprintf(h, "tag=%s\x00", k.Tag)      //nolint:errcheck
-	fmt.Fprintf(h, "cat=%s\x00", k.Category) //nolint:errcheck
-	fmt.Fprintf(h, "limit=%d\x00", k.Limit)  //nolint:errcheck
-	fmt.Fprintf(h, "mode=%s\x00", k.Mode)    //nolint:errcheck
-	fmt.Fprintf(h, "model=%s\x00", k.Model)  //nolint:errcheck
+	fmt.Fprintf(h, "q=%s\x00", k.Query)          //nolint:errcheck
+	fmt.Fprintf(h, "doc=%s\x00", k.DocID)        //nolint:errcheck
+	fmt.Fprintf(h, "tag=%s\x00", k.Tag)          //nolint:errcheck
+	fmt.Fprintf(h, "cat=%s\x00", k.Category)     //nolint:errcheck
+	fmt.Fprintf(h, "limit=%d\x00", k.Limit)      //nolint:errcheck
+	fmt.Fprintf(h, "mode=%s\x00", k.Mode)        //nolint:errcheck
+	fmt.Fprintf(h, "model=%s\x00", k.Model)      //nolint:errcheck
+	fmt.Fprintf(h, "src=%v\x00", k.SourceKinds)  //nolint:errcheck
+	fmt.Fprintf(h, "ca=%s\x00", k.CreatedAfter)  //nolint:errcheck
+	fmt.Fprintf(h, "cb=%s\x00", k.CreatedBefore) //nolint:errcheck
+	fmt.Fprintf(h, "ua=%s\x00", k.UpdatedAfter)  //nolint:errcheck
+	fmt.Fprintf(h, "ub=%s\x00", k.UpdatedBefore) //nolint:errcheck
 	return hex.EncodeToString(h.Sum(nil))
 }
 

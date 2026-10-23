@@ -212,7 +212,11 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 }
 
 // Search performs a semantic search across all documents.
-func (vo *VectorOperations) Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error) {
+//
+// The tag and category filters are applied in Go after the retrieval
+// — see FilterByTagsAndCategories for why they cannot be pushed into
+// chromem's Where filter.
+func (vo *VectorOperations) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
 	if query == "" {
 		return nil, models.ErrSearchFailed
 	}
@@ -228,11 +232,15 @@ func (vo *VectorOperations) Search(ctx context.Context, query string, limit int,
 	}
 
 	// Search vector DB
-	results, err := vo.db.Search(ctx, embedding, limit, filters)
+	results, err := vo.db.Search(ctx, embedding, semanticFetchSize(limit, filters), filters.ToWhere())
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
+	results = FilterByTagsAndCategories(results, filters)
+	if len(results) > limit {
+		results = results[:limit]
+	}
 	return results, nil
 }
 
@@ -320,8 +328,37 @@ func (vo *VectorOperations) GetUniqueDocuments(ctx context.Context) ([]models.Do
 // when no chunks match (operator got the document_id
 // wrong). Embeddings are not re-computed — this is a
 // metadata-only update.
+//
+// The keyword index is re-indexed with the patched chunks so
+// both stores agree on the document's tags and categories.
+// bleve replaces a document by ID, so re-indexing is enough —
+// no delete step is needed.
 func (vo *VectorOperations) UpdateDocumentMetadata(ctx context.Context, patch DocumentMetadataPatch) error {
-	return vo.db.UpdateDocumentMetadata(ctx, patch)
+	if err := vo.db.UpdateDocumentMetadata(ctx, patch); err != nil {
+		return err
+	}
+	if vo.searchIndex == nil {
+		return nil
+	}
+	chunks, err := vo.db.GetChunksByDocument(ctx, patch.DocumentID)
+	if err != nil {
+		return fmt.Errorf("read chunks for keyword reindex: %w", err)
+	}
+	summaries := make([]chunkSummary, 0, len(chunks))
+	for _, c := range chunks {
+		summaries = append(summaries, chunkSummary{
+			ID:         c.ID,
+			Content:    c.Content,
+			Title:      c.DocumentTitle,
+			DocumentID: c.DocumentID,
+			Tags:       c.DocumentTags,
+			Categories: c.DocumentCategories,
+		})
+	}
+	if err := vo.searchIndex.AddBatch(summaries); err != nil {
+		return fmt.Errorf("re-index chunks for keyword search: %w", err)
+	}
+	return nil
 }
 
 // GetUniqueDocumentsPaged returns a page of unique

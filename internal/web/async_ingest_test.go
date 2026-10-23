@@ -133,7 +133,7 @@ func asyncIngestFixture(t *testing.T) (humatest.TestAPI, *fakeHumaService, *jobs
 		},
 		DefaultFormat: "application/json",
 	})
-	registerIngestJobsOperations(api, router, q)
+	registerIngestJobsOperations(api, router, q, 0)
 
 	return api, svc, q
 }

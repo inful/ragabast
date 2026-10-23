@@ -45,10 +45,11 @@ type gitlabIssueIngestResponse struct {
 // the right surface to guard.
 func registerIngestGitLabIssueOperation(api huma.API, svc serviceAPI, limiter *IngestLimiter, maxDocumentBytes int) {
 	huma.Register(api, huma.Operation{
-		OperationID: "ingest-gitlab-issue",
-		Method:      http.MethodPost,
-		Path:        "/api/ingest/gitlab/issue",
-		Summary:     "Ingest a GitLab issue (sender fetches; ragabast is a pure receiver)",
+		OperationID:  "ingest-gitlab-issue",
+		Method:       http.MethodPost,
+		Path:         "/api/ingest/gitlab/issue",
+		Summary:      "Ingest a GitLab issue (sender fetches; ragabast is a pure receiver)",
+		MaxBodyBytes: ingestBodyLimit(maxDocumentBytes),
 	}, func(ctx context.Context, input *struct {
 		RawBody []byte `contentType:"*/*" required:"true"`
 	},

@@ -35,10 +35,11 @@ type ingestResponseBody struct {
 func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimiter, maxDocumentBytes int) {
 	registerPOST[ingestRequestBody, ingestResponseBody](api,
 		huma.Operation{
-			OperationID: "ingest",
-			Method:      http.MethodPost,
-			Path:        "/api/ingest",
-			Summary:     "Ingest a docbuilder document",
+			OperationID:  "ingest",
+			Method:       http.MethodPost,
+			Path:         "/api/ingest",
+			Summary:      "Ingest a docbuilder document",
+			MaxBodyBytes: ingestBodyLimit(maxDocumentBytes),
 		},
 		func(ctx context.Context, body *ingestRequestBody) (*ingestResponseBody, error) {
 			content := strings.TrimSpace(body.Content)
@@ -74,10 +75,11 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 	// the multipart endpoint below and the GitLab endpoint
 	// in huma_ingest_gitlab.go).
 	huma.Register(api, huma.Operation{
-		OperationID: "ingest-raw",
-		Method:      http.MethodPost,
-		Path:        "/api/ingest/raw",
-		Summary:     "Ingest a docbuilder markdown document (raw body)",
+		OperationID:  "ingest-raw",
+		Method:       http.MethodPost,
+		Path:         "/api/ingest/raw",
+		Summary:      "Ingest a docbuilder markdown document (raw body)",
+		MaxBodyBytes: ingestBodyLimit(maxDocumentBytes),
 	}, func(ctx context.Context, input *struct {
 		RawBody []byte `contentType:"text/markdown" required:"true"`
 	},
@@ -114,10 +116,11 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 	// Stays on the verbose form for the same reason as
 	// /api/ingest/raw.
 	huma.Register(api, huma.Operation{
-		OperationID: "ingest-file",
-		Method:      http.MethodPost,
-		Path:        "/api/ingest/file",
-		Summary:     "Ingest a docbuilder markdown document (multipart upload)",
+		OperationID:  "ingest-file",
+		Method:       http.MethodPost,
+		Path:         "/api/ingest/file",
+		Summary:      "Ingest a docbuilder markdown document (multipart upload)",
+		MaxBodyBytes: ingestBodyLimit(maxDocumentBytes),
 	}, func(ctx context.Context, input *struct {
 		RawBody huma.MultipartFormFiles[struct {
 			File huma.FormFile `form:"file" required:"true"`

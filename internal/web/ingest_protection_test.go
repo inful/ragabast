@@ -78,6 +78,35 @@ func TestIngestDocumentSizeLimit_PinsClamp(t *testing.T) {
 		"oversized document content must be rejected with 413")
 }
 
+// TestIngestDocumentSizeLimit_HonoursTheConfiguredCap pins that the
+// operator's server.max_ingest_document_bytes knob works ABOVE
+// huma's 1 MiB default request-body cap.
+//
+// huma caps every operation's body at 1 MiB unless the operation
+// says otherwise, and nothing in the repo set it — so a 2 MiB
+// upload was rejected with "request body is too large
+// limit=1048576 bytes" even when the operator had raised the
+// document cap to 8 MiB.
+func TestIngestDocumentSizeLimit_HonoursTheConfiguredCap(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Server.MaxIngestDocumentBytes = 4 << 20 // 4 MiB
+	s := NewServer(cfg, &fakeHumaService{})
+
+	// Over huma's 1 MiB default body cap, under the configured
+	// 4 MiB document cap.
+	content := strings.Repeat("a", 1500*1024)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/ingest",
+		strings.NewReader(`{"content":"`+content+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "192.0.2.1:1234"
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	require.NotEqual(t, http.StatusRequestEntityTooLarge, w.Code,
+		"the configured document cap must not be cut short by huma's default body cap")
+}
+
 // TestIngestAuditLog_Emitted pins the audit-trail emission for
 // every successful ingest. The log line carries the operator's
 // forensic trail (who, when, what, how big) without logging

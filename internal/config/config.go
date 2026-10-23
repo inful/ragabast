@@ -282,7 +282,31 @@ func (c *Config) SaveConfig(path string) error {
 	return nil
 }
 
-// ApplyEnvOverrides applies environment variable overrides to config fields.
+// envBool reads a boolean environment variable.
+//
+// It accepts the common truthy and falsy spellings ("1", "true", "t",
+// "yes", "y", "on" and their negatives) so an operator doesn't need
+// to know our exact format. The second return value reports whether
+// the variable was set to a recognized value — an unset variable or
+// an unrecognized spelling leaves the config default in place.
+func envBool(name string) (value, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "t", "yes", "y", "on":
+		return true, true
+	case "0", "false", "f", "no", "n", "off":
+		return false, true
+	}
+	return false, false
+}
+
+// ApplyEnvOverrides applies the environment-variable overrides on top
+// of whatever the YAML file (or the defaults) produced.
+//
+// Every knob the config structs advertise with an `env:"..."` tag
+// must have a branch here. The reflection-driven test in
+// env_overrides_test.go walks the structs and fails if one is
+// missing, so a new knob cannot ship with a dead environment
+// variable.
 func (c *Config) ApplyEnvOverrides() {
 	// Capture the cwd-relative default for VectorDB.PersistenceDir
 	// so the DATA_DIR re-derivation step at the end of this
@@ -306,16 +330,8 @@ func (c *Config) ApplyEnvOverrides() {
 			c.Ragabast.QueryCacheTTL = d
 		}
 	}
-	if v := os.Getenv("RAGABAST_LOG_CHAT_REQUESTS"); v != "" {
-		// Accept the common truthy spellings so an operator
-		// doesn't need to know our exact format. Empty string
-		// is treated as false (the default).
-		switch strings.ToLower(strings.TrimSpace(v)) {
-		case "1", "true", "t", "yes", "y", "on":
-			c.Ragabast.LogChatRequests = true
-		case "0", "false", "f", "no", "n", "off":
-			c.Ragabast.LogChatRequests = false
-		}
+	if v, ok := envBool("RAGABAST_LOG_CHAT_REQUESTS"); ok {
+		c.Ragabast.LogChatRequests = v
 	}
 	if v, ok := os.LookupEnv("RAGABAST_CHAT_SESSION_MAX_TURNS"); ok {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -419,6 +435,18 @@ func (c *Config) ApplyEnvOverrides() {
 			maps.Copy(c.Ollama.Options, m)
 		}
 	}
+	if v, ok := os.LookupEnv("OLLAMA_EMBEDDING_DIMENSIONS"); ok {
+		// 0 disables the Matryoshka truncation request, so 0
+		// is a valid value here.
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.Ollama.EmbeddingDimensions = n
+		}
+	}
+	if v, ok := os.LookupEnv("OLLAMA_EMBEDDING_CONCURRENCY"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Ollama.EmbeddingConcurrency = n
+		}
+	}
 
 	// VectorDB config.
 	if dir := os.Getenv("VECTOR_DB_DIR"); dir != "" {
@@ -429,6 +457,11 @@ func (c *Config) ApplyEnvOverrides() {
 	}
 	if coll := os.Getenv("VECTOR_DB_COLLECTION"); coll != "" {
 		c.VectorDB.CollectionName = coll
+	}
+	if v, ok := os.LookupEnv("VECTOR_DB_DIMENSION"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.VectorDB.EmbeddingDimension = n
+		}
 	}
 
 	// Server config.
@@ -511,6 +544,39 @@ func (c *Config) ApplyEnvOverrides() {
 			}
 		}
 		c.Server.CORSOrigins = out
+	}
+	if v, ok := envBool("SERVER_ENABLE_CORS"); ok {
+		c.Server.EnableCORS = v
+	}
+	if v, ok := envBool("SERVER_MCP_HTTP_ENABLED"); ok {
+		c.Server.MCPHTTPEnabled = v
+	}
+	if v := os.Getenv("SERVER_READ_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.ReadTimeout = d
+		}
+	}
+	if v := os.Getenv("SERVER_WRITE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.Server.WriteTimeout = d
+		}
+	}
+
+	// Processing config.
+	if v, ok := os.LookupEnv("PROCESSING_MAX_CHUNK_SIZE"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			c.Processing.MaxChunkSize = n
+		}
+	}
+	if v, ok := os.LookupEnv("PROCESSING_MIN_CHUNK_SIZE"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.Processing.MinChunkSize = n
+		}
+	}
+	if v, ok := os.LookupEnv("PROCESSING_CHUNK_OVERLAP"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.Processing.ChunkOverlap = n
+		}
 	}
 
 	// Paths config.

@@ -1,6 +1,7 @@
 package chunker
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ragabast/internal/models"
@@ -36,6 +37,60 @@ func TestChunkIDsAreDeterministic(t *testing.T) {
 	}
 }
 
+// TestChunker_KeepsSectionsBelowMinSize pins that no section of a
+// document is ever dropped from the index.
+//
+// min_chunk_size is a MERGE threshold, not a DROP threshold: a
+// section shorter than it is folded into its neighbor, never
+// discarded. Before the fix, splitByHeaders only appended a section
+// when it was already >= minSize, so a document whose sections were
+// all short produced zero chunks — the ingest reported success and
+// the document was invisible to search.
+func TestChunker_KeepsSectionsBelowMinSize(t *testing.T) {
+	doc := models.NewDocument()
+	doc.ID = "doc-short"
+	doc.Title = "Short Doc"
+	doc.Fingerprint = "fp"
+	doc.UID = "uid-short"
+	doc.Content = "# Title\n\nShort intro.\n\n## Tiny\n\nOnly eleven chars.\n"
+
+	c := NewChunker(2000, 300, 150)
+	chunks, err := c.ChunkDocument(doc)
+	require.NoError(t, err)
+	require.NotEmpty(t, chunks, "a document whose sections are all below min_chunk_size must still be indexed")
+
+	joined := strings.Join(chunkContents(chunks), "\n")
+	require.Contains(t, joined, "Only eleven chars.",
+		"a section below min_chunk_size must be folded into a neighbor, not dropped")
+}
+
+// TestChunker_MergesShortSectionIntoPreviousChunk pins that a
+// short section lands in the chunk that precedes it, so the text
+// stays searchable and the chunk count stays close to the number of
+// real sections.
+func TestChunker_MergesShortSectionIntoPreviousChunk(t *testing.T) {
+	long := strings.Repeat("Long enough content for this section. ", 8)
+	doc := models.NewDocument()
+	doc.ID = "doc-mixed"
+	doc.Title = "Mixed Doc"
+	doc.Fingerprint = "fp"
+	doc.UID = "uid-mixed"
+	doc.Content = strings.Join([]string{
+		"# Long Section", "", long, "",
+		"## Tiny", "", "Only eleven chars.", "",
+		"## Another Long Section", "", long,
+	}, "\n")
+
+	c := NewChunker(2000, 300, 150)
+	chunks, err := c.ChunkDocument(doc)
+	require.NoError(t, err)
+	require.Len(t, chunks, 2, "the short section folds into its neighbor instead of adding a chunk")
+
+	joined := strings.Join(chunkContents(chunks), "\n")
+	require.Contains(t, joined, "Only eleven chars.",
+		"the short section's text must survive the merge")
+}
+
 // TestChunker_AcceptsCRLFLineEndings pins the chunker side of
 // the fix for issue #82. The parser normalizes CRLF to LF before
 // chunking, so the chunks we emit never carry a trailing `\r` on
@@ -62,4 +117,13 @@ func TestChunker_AcceptsCRLFLineEndings(t *testing.T) {
 		require.NotContains(t, chunk.Content, "\r",
 			"chunks must be LF-only after CRLF normalization (chunk ID %q)", chunk.ID)
 	}
+}
+
+// chunkContents returns the content of every chunk.
+func chunkContents(chunks []*models.Chunk) []string {
+	out := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		out = append(out, chunk.Content)
+	}
+	return out
 }

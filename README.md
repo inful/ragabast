@@ -82,7 +82,7 @@ YAML to find the knob they need.
 | `SERVER_RATE_LIMIT_BURST` | `rate_limit_burst` | `5` | Immediate requests allowed before the per-minute rate kicks in. |
 | `SERVER_MAX_INGEST_DOCUMENT_BYTES` | `max_ingest_document_bytes` | `1048576` (1 MiB) | Per-document size cap for both sync and async ingest paths. |
 | `SERVER_READ_TIMEOUT` | `read_timeout` | `15s` | `http.Server.ReadTimeout`. |
-| `SERVER_WRITE_TIMEOUT` | `write_timeout` | `15s` | `http.Server.WriteTimeout`. |
+| `SERVER_WRITE_TIMEOUT` | `write_timeout` | `60s` | `http.Server.WriteTimeout`. Must fit the slowest LLM call. |
 | `SERVER_MCP_HTTP_ENABLED` | `mcp_http_enabled` | `false` | Mount the MCP streamable-HTTP server at `/mcp`. Off by default. |
 | `SERVER_ASYNC_INGEST_QUEUE_DIR` | `async_ingest_queue_dir` | `data/jobs` | On-disk async job queue. Empty disables async ingest (endpoints 503). |
 | `SERVER_ASYNC_INGEST_WORKERS` | `async_ingest_workers` | `5` | Worker pool concurrency. `0` falls back to `1`. |
@@ -757,7 +757,9 @@ Every response carries the defense headers below:
 
 Every request is also bounded:
 
-- Request body ≤ 10 MiB (enforced by `http.MaxBytesReader`; Huma endpoints use Huma's own cap).
+- Request body ≤ 10 MiB (enforced by `http.MaxBytesReader`). The ingest
+  endpoints carry their own cap: `server.max_ingest_document_bytes`
+  (1 MiB default) plus 1 MiB of JSON / multipart framing slack.
 - `ReadTimeout` / `WriteTimeout` from config; fixed `IdleTimeout = 120s`.
 - Handler-level `Timeout(60s)` (chi) cancels the handler context.
 

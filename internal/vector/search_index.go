@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	goregexp "regexp"
+	"strings"
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
@@ -76,6 +77,38 @@ type SearchFilters struct {
 	// before they reach the caller. SourceKind on every chunk is
 	// populated at read time; see its docstring for the rule.
 	SourceKinds []models.SourceKind
+}
+
+// HasTagOrCategory reports whether a tag or a category filter is
+// active. The retrieval paths use it to decide whether they need to
+// over-fetch candidates before the filter is applied.
+func (f SearchFilters) HasTagOrCategory() bool {
+	return strings.TrimSpace(f.Tag) != "" || strings.TrimSpace(f.Category) != ""
+}
+
+// MatchesTagsAndCategories reports whether a chunk passes the tag
+// and category filters. An inactive filter matches everything.
+//
+// The comparison ignores case so it agrees with the bleve keyword
+// side, whose tags field is indexed through a lowercasing analyzer.
+func (f SearchFilters) MatchesTagsAndCategories(tags, categories []string) bool {
+	if t := strings.TrimSpace(f.Tag); t != "" && !containsFold(tags, t) {
+		return false
+	}
+	if c := strings.TrimSpace(f.Category); c != "" && !containsFold(categories, c) {
+		return false
+	}
+	return true
+}
+
+// containsFold reports whether values holds target, ignoring case.
+func containsFold(values []string, target string) bool {
+	for _, v := range values {
+		if strings.EqualFold(v, target) {
+			return true
+		}
+	}
+	return false
 }
 
 // SearchHit is one ranked result from a SearchIndex.Search.
@@ -483,17 +516,17 @@ func buildSearchQuery(userQuery string, f SearchFilters) query.Query {
 		main = mq
 	}
 	clauses := []query.Query{main}
-	if d := trimSpace(f.DocumentID); d != "" {
+	if d := strings.TrimSpace(f.DocumentID); d != "" {
 		t := bleve.NewTermQuery(d)
 		t.SetField("document_id")
 		clauses = append(clauses, t)
 	}
-	if t := trimSpace(f.Tag); t != "" {
+	if t := strings.TrimSpace(f.Tag); t != "" {
 		mq := bleve.NewMatchQuery(t)
 		mq.SetField("tags")
 		clauses = append(clauses, mq)
 	}
-	if c := trimSpace(f.Category); c != "" {
+	if c := strings.TrimSpace(f.Category); c != "" {
 		mq := bleve.NewMatchQuery(c)
 		mq.SetField("categories")
 		clauses = append(clauses, mq)
@@ -502,15 +535,4 @@ func buildSearchQuery(userQuery string, f SearchFilters) query.Query {
 		return main
 	}
 	return bleve.NewConjunctionQuery(clauses...)
-}
-
-func trimSpace(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			continue
-		}
-		out = append(out, r)
-	}
-	return string(out)
 }
