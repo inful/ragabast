@@ -471,7 +471,7 @@ func (s *Server) installMiddleware() {
 	// sensitive keys with "[REDACTED]") so the operator
 	// query/messages/text fields never land in the log.
 	s.router.Use(redactAccessLogMiddleware)
-	s.router.Use(middleware.Logger)
+	s.router.Use(middleware.RequestLogger(newRedactedLogFormatter()))
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(safeRealIP)
 	// clientIPMiddleware runs immediately after safeRealIP

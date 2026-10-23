@@ -1,10 +1,11 @@
 package web
 
 import (
+	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/chi/v5"
@@ -86,75 +87,60 @@ func TestRedactQueryString_PinsUnitBehavior(t *testing.T) {
 	}
 }
 
-// TestRedactAccessLogMiddleware_ReplacesURL is an integration
-// test that asserts the middleware actually rewrites the URL
-// on a real request. We replace chi's DefaultLogger with a
-// custom LogFormatter that captures each LogEntry so we can
-// assert on the rewritten URL.
+// TestRedactAccessLogMiddleware_RedactsTheLoggedURI is an
+// integration test that asserts the access log carries the redacted
+// query string while the handler still sees the real one.
 //
-// (chi's middleware.Logger uses a custom log.New instance
-// initialized in its init() function; redirecting the
-// standard log package does NOT intercept it. This test
-// drives chi's log formatter directly.)
-func TestRedactAccessLogMiddleware_ReplacesURL(t *testing.T) {
-	// captured is the side-channel the test formatter writes
-	// into. The test asserts on its final state after the
-	// middleware chain returns.
-	var capturedRawQuery string
+// chi's default formatter logs r.RequestURI, NOT r.URL.RawQuery.
+// The previous implementation rewrote r.URL.RawQuery in place,
+// which never reached the log line at all: the operator's query text
+// was logged verbatim. The old test drove a custom formatter that
+// read r.URL.RawQuery, so it passed while the real logger leaked.
+//
+// This test drives chi's REAL formatter and asserts on what it
+// writes.
+func TestRedactAccessLogMiddleware_RedactsTheLoggedURI(t *testing.T) {
+	var logged bytes.Buffer
+	formatter := redactedLogFormatter{
+		DefaultLogFormatter: chimw.DefaultLogFormatter{
+			Logger:  &captureLogger{buf: &logged},
+			NoColor: true,
+		},
+	}
 
+	var handlerQuery string
 	r := chi.NewRouter()
 	r.Use(redactAccessLogMiddleware)
-	r.Use(chimw.RequestLogger(&testLogFormatter{
-		onWrite: func(rawQuery string) { capturedRawQuery = rawQuery },
-	}))
-	r.Get("/search", func(w http.ResponseWriter, _ *http.Request) {
-		// dummy handler — the redaction is verified by the
-		// LogEntry the test formatter captures.
+	r.Use(chimw.RequestLogger(formatter))
+	r.Get("/search", func(_ http.ResponseWriter, req *http.Request) {
+		handlerQuery = req.URL.Query().Get("query")
 	})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequestWithContext(t.Context(), "GET", "/search?query=SECRET&tag=foo", nil)
 	r.ServeHTTP(w, req)
 
-	require.NotEmpty(t, capturedRawQuery,
-		"the LogEntry must capture the raw query chi was asked to log")
-
-	// The redaction middleware ran; chi's log entry should
-	// show the rewritten URL.
-	require.Contains(t, capturedRawQuery, "query=%5BREDACTED%5D",
-		"chi's log entry must show the redacted query value")
-	require.NotContains(t, capturedRawQuery, "SECRET",
-		"the secret query value must not appear in chi's log entry")
-	require.Contains(t, capturedRawQuery, "tag=foo",
+	require.Equal(t, "SECRET", handlerQuery,
+		"the handler must see the real query string")
+	require.NotContains(t, logged.String(), "SECRET",
+		"the secret query value must not appear in the access log")
+	require.Contains(t, logged.String(), "query=%5BREDACTED%5D",
+		"the access log must show the redacted query value")
+	require.Contains(t, logged.String(), "tag=foo",
 		"non-sensitive query keys must pass through unchanged")
 }
 
-// testLogFormatter is a chi LogFormatter that hands each
-// request's LogEntry a callback for the test to capture what
-// chi would log.
-type testLogFormatter struct {
-	onWrite func(rawQuery string)
+// captureLogger is a chi LoggerInterface that writes into a buffer
+// so the test can assert on the access-log line.
+type captureLogger struct {
+	buf *bytes.Buffer
 }
 
-func (f *testLogFormatter) NewLogEntry(r *http.Request) chimw.LogEntry {
-	return &testLogEntry{request: r, onWrite: f.onWrite}
-}
-
-// testLogEntry is the LogEntry our formatter returns. It
-// captures r.URL.RawQuery at Write time and forwards it to
-// the test callback.
-type testLogEntry struct {
-	request *http.Request
-	onWrite func(rawQuery string)
-}
-
-func (e *testLogEntry) Write(_ /*status*/, _ int, _ http.Header, _ time.Duration, _ any) {
-	if e.request != nil && e.request.URL != nil && e.onWrite != nil {
-		e.onWrite(e.request.URL.RawQuery)
+func (l *captureLogger) Print(v ...any) {
+	for _, item := range v {
+		fmt.Fprint(l.buf, item)
 	}
 }
-
-func (e *testLogEntry) Panic(_ any, _ []byte) {}
 
 // _ keeps huma import live so this test file compiles
 // alongside the existing test suite.
