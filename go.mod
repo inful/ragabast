@@ -1,6 +1,6 @@
 module github.com/ragabast
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/alecthomas/kong v1.13.0
