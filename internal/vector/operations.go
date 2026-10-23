@@ -212,7 +212,11 @@ func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Docu
 }
 
 // Search performs a semantic search across all documents.
-func (vo *VectorOperations) Search(ctx context.Context, query string, limit int, filters map[string]string) ([]models.SearchResult, error) {
+//
+// The tag and category filters are applied in Go after the retrieval
+// — see FilterByTagsAndCategories for why they cannot be pushed into
+// chromem's Where filter.
+func (vo *VectorOperations) Search(ctx context.Context, query string, limit int, filters SearchFilters) ([]models.SearchResult, error) {
 	if query == "" {
 		return nil, models.ErrSearchFailed
 	}
@@ -228,11 +232,15 @@ func (vo *VectorOperations) Search(ctx context.Context, query string, limit int,
 	}
 
 	// Search vector DB
-	results, err := vo.db.Search(ctx, embedding, limit, filters)
+	results, err := vo.db.Search(ctx, embedding, semanticFetchSize(limit, filters), filters.ToWhere())
 	if err != nil {
 		return nil, fmt.Errorf("search failed: %w", err)
 	}
 
+	results = FilterByTagsAndCategories(results, filters)
+	if len(results) > limit {
+		results = results[:limit]
+	}
 	return results, nil
 }
 

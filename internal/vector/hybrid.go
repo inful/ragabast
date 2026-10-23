@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/ragabast/internal/models"
 )
@@ -167,9 +168,13 @@ func (vo *VectorOperations) searchSemanticOnly(
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate query embedding: %w", err)
 	}
-	results, err := vo.db.Search(ctx, embedding, limit, filters.ToWhere())
+	results, err := vo.db.Search(ctx, embedding, semanticFetchSize(limit, filters), filters.ToWhere())
 	if err != nil {
 		return nil, fmt.Errorf("semantic search failed: %w", err)
+	}
+	results = FilterByTagsAndCategories(results, filters)
+	if len(results) > limit {
+		results = results[:limit]
 	}
 	return results, nil
 }
@@ -233,8 +238,12 @@ func (vo *VectorOperations) searchHybridRRF(
 	if vo.embeddings != nil {
 		embedding, err := vo.embeddings.EmbedQuery(ctx, query)
 		if err == nil {
-			results, err := vo.db.Search(ctx, embedding, limit*headroom, filters.ToWhere())
+			results, err := vo.db.Search(ctx, embedding, semanticFetchSize(limit*headroom, filters), filters.ToWhere())
 			if err == nil {
+				// Apply the tag and category filters to the
+				// semantic side BEFORE the fusion so both
+				// rankings agree on which documents exist.
+				results = FilterByTagsAndCategories(results, filters)
 				semanticIDs = make([]string, 0, len(results))
 				for _, r := range results {
 					semanticIDs = append(semanticIDs, r.ChunkID)
@@ -341,33 +350,71 @@ func chunkToSearchResult(chunk *models.Chunk, score float32) models.SearchResult
 	}
 }
 
-// ToWhere translates SearchFilters into the chromem-go
-// Where map. Exported because the service.SearchFilters type
-// alias exposes this method to the service package; if it
-// were package-private the alias would not give service code
-// access to it (Go method visibility follows the package that
-// declared the method, not the type's aliasing package).
+// ToWhere translates SearchFilters into the chromem-go Where map.
+//
+// Only the document ID is translated. chromem's Where filter is exact
+// equality on the metadata value, and the tag and category lists are
+// stored as one newline-joined string — an exact match on "go" only
+// matched documents whose tag list was exactly {"go"}, so every
+// multi-tag document was silently dropped from the result. The tag
+// and category filters are applied in Go after the retrieval instead
+// (see FilterByTagsAndCategories).
+//
+// Exported because the service.SearchFilters type alias exposes
+// this method to the service package; if it were package-private
+// the alias would not give service code access to it (Go method
+// visibility follows the package that declared the method, not the
+// type's aliasing package).
 func (f SearchFilters) ToWhere() map[string]string {
 	out := map[string]string{}
-	if d := trim(f.DocumentID); d != "" {
+	if d := strings.TrimSpace(f.DocumentID); d != "" {
 		out["document_id"] = d
-	}
-	if t := trim(f.Tag); t != "" {
-		out["document_tags"] = t
-	}
-	if c := trim(f.Category); c != "" {
-		out["document_categories"] = c
 	}
 	return out
 }
 
-func trim(s string) string {
-	out := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
-			continue
-		}
-		out = append(out, r)
+// FilterByTagsAndCategories drops the results whose tags or
+// categories do not match the filter.
+//
+// Why a Go-side filter instead of chromem-go's Where filter?
+// chromem's Where is exact equality on the metadata value, and the
+// tag list is stored as one newline-joined string ("go\napi"). An
+// exact match on "go" therefore only matched documents whose tag
+// list was exactly {"go"} — every multi-tag document disappeared
+// from the result. The bleve keyword side has no such problem (its
+// tags field is analyzed), so the two sides of the RRF fusion
+// disagreed about which documents exist.
+func FilterByTagsAndCategories(results []models.SearchResult, f SearchFilters) []models.SearchResult {
+	if !f.HasTagOrCategory() {
+		return results
 	}
-	return string(out)
+	out := make([]models.SearchResult, 0, len(results))
+	for _, r := range results {
+		if f.MatchesTagsAndCategories(r.DocumentTags, r.DocumentCategories) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// semanticFilterHeadroom over-fetches the candidates on the semantic
+// side when a tag or category filter is active.
+//
+// Those filters are applied in Go after the retrieval (chromem's
+// Where cannot express "this document has this tag"), so the
+// candidate pool is fetched larger and then filtered down to the
+// requested limit.
+//
+// shortcut: 10x. A corpus where the filtered tag covers less than
+// 10% of the chunks can still return fewer than `limit` results.
+// Upgrade to an exact-match tag index if that matters.
+const semanticFilterHeadroom = 10
+
+// semanticFetchSize returns how many candidates the semantic side
+// should retrieve for the given limit.
+func semanticFetchSize(limit int, filters SearchFilters) int {
+	if !filters.HasTagOrCategory() {
+		return limit
+	}
+	return limit * semanticFilterHeadroom
 }

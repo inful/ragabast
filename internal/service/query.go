@@ -58,7 +58,7 @@ func (s *Service) Search(ctx context.Context, query string, limit int, filters S
 		Model:    s.embedModel,
 	})
 	results, _, err := s.cache.Get(ctx, key, func(ctx context.Context) ([]models.SearchResult, error) {
-		return s.vectorOps.Search(ctx, query, limit, filters.ToWhere())
+		return s.vectorOps.Search(ctx, query, limit, filters)
 	})
 	if err != nil {
 		return nil, wrapCorruptionError(err)
@@ -198,7 +198,7 @@ func (s *Service) Query(ctx context.Context, query string, limit int) (string, e
 //
 // See the note on Service.Query about the deprecation timeline.
 func (s *Service) QueryDebugWithOptions(ctx context.Context, query string, limit int, opts LLMOptions) (string, *QueryDebugInfo, error) {
-	results, err := s.vectorOps.Search(ctx, query, limit, opts.Filters.ToWhere())
+	results, err := s.vectorOps.Search(ctx, query, limit, opts.Filters)
 	if err != nil {
 		return "", nil, fmt.Errorf("search failed: %w", err)
 	}

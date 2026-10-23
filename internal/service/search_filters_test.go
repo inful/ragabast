@@ -12,13 +12,14 @@ import (
 // map[string]string Where filter. The conversion rules:
 //
 //   - DocumentID becomes the "document_id" key
-//   - Tag is matched against "document_tags" (substring; chromem
-//     matches anywhere in the joined "\n"-separated value)
-//   - Category is matched against "document_categories"
+//   - Tag and Category are NOT translated: chromem's Where filter
+//     is exact equality on the metadata value and the tag list is
+//     stored as one newline-joined string, so an exact match only
+//     hit documents whose tag list was exactly the filtered value.
+//     Every multi-tag document was silently dropped from the
+//     result. They are applied in Go after the retrieval instead
+//     (see vector.FilterByTagsAndCategories).
 //   - Empty fields are omitted
-//
-// DocumentID and Tag/Category are independent; setting multiple
-// produces an AND across the populated keys.
 func TestSearchFilters_ToWhere(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -36,27 +37,23 @@ func TestSearchFilters_ToWhere(t *testing.T) {
 			want:    map[string]string{"document_id": "doc-1"},
 		},
 		{
-			name:    "only tag",
+			name:    "only tag produces no where",
 			filters: SearchFilters{Tag: "go"},
-			want:    map[string]string{"document_tags": "go"},
+			want:    map[string]string{},
 		},
 		{
-			name:    "only category",
+			name:    "only category produces no where",
 			filters: SearchFilters{Category: "Guides"},
-			want:    map[string]string{"document_categories": "Guides"},
+			want:    map[string]string{},
 		},
 		{
-			name: "all three combine as AND across keys",
+			name: "the document id is the only key",
 			filters: SearchFilters{
 				DocumentID: "doc-1",
 				Tag:        "go",
 				Category:   "Guides",
 			},
-			want: map[string]string{
-				"document_id":         "doc-1",
-				"document_tags":       "go",
-				"document_categories": "Guides",
-			},
+			want: map[string]string{"document_id": "doc-1"},
 		},
 		{
 			name:    "whitespace-only fields are treated as empty",

@@ -41,7 +41,7 @@ func TestChunkIDsAreDeterministic(t *testing.T) {
 // document is ever dropped from the index.
 //
 // min_chunk_size is a MERGE threshold, not a DROP threshold: a
-// section shorter than it is folded into its neighbour, never
+// section shorter than it is folded into its neighbor, never
 // discarded. Before the fix, splitByHeaders only appended a section
 // when it was already >= minSize, so a document whose sections were
 // all short produced zero chunks — the ingest reported success and
@@ -59,12 +59,9 @@ func TestChunker_KeepsSectionsBelowMinSize(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, chunks, "a document whose sections are all below min_chunk_size must still be indexed")
 
-	joined := ""
-	for _, chunk := range chunks {
-		joined += chunk.Content + "\n"
-	}
+	joined := strings.Join(chunkContents(chunks), "\n")
 	require.Contains(t, joined, "Only eleven chars.",
-		"a section below min_chunk_size must be folded into a neighbour, not dropped")
+		"a section below min_chunk_size must be folded into a neighbor, not dropped")
 }
 
 // TestChunker_MergesShortSectionIntoPreviousChunk pins that a
@@ -87,12 +84,9 @@ func TestChunker_MergesShortSectionIntoPreviousChunk(t *testing.T) {
 	c := NewChunker(2000, 300, 150)
 	chunks, err := c.ChunkDocument(doc)
 	require.NoError(t, err)
-	require.Len(t, chunks, 2, "the short section folds into its neighbour instead of adding a chunk")
+	require.Len(t, chunks, 2, "the short section folds into its neighbor instead of adding a chunk")
 
-	joined := ""
-	for _, chunk := range chunks {
-		joined += chunk.Content + "\n"
-	}
+	joined := strings.Join(chunkContents(chunks), "\n")
 	require.Contains(t, joined, "Only eleven chars.",
 		"the short section's text must survive the merge")
 }
@@ -123,4 +117,13 @@ func TestChunker_AcceptsCRLFLineEndings(t *testing.T) {
 		require.NotContains(t, chunk.Content, "\r",
 			"chunks must be LF-only after CRLF normalization (chunk ID %q)", chunk.ID)
 	}
+}
+
+// chunkContents returns the content of every chunk.
+func chunkContents(chunks []*models.Chunk) []string {
+	out := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		out = append(out, chunk.Content)
+	}
+	return out
 }

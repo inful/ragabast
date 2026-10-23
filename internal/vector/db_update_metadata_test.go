@@ -99,7 +99,7 @@ func TestVectorDB_GetChunksByDocument_ReturnsEveryChunk(t *testing.T) {
 	const total = 1200
 	chunks := make([]*models.Chunk, 0, total)
 	embeddings := make([][]float32, 0, total)
-	for i := 0; i < total; i++ {
+	for i := range total {
 		chunks = append(chunks, &models.Chunk{
 			ID:         "chunk-" + strconv.Itoa(i),
 			DocumentID: "doc-big",

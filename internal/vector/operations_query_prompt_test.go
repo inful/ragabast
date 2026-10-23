@@ -77,7 +77,7 @@ func TestVectorOperations_Search_PrependsQueryPrompt(t *testing.T) {
 	// the one with prompts configured.
 	vo.embeddings = embeddings
 
-	_, _ = vo.Search(context.Background(), "what is ragabast", 5, nil)
+	_, _ = vo.Search(context.Background(), "what is ragabast", 5, SearchFilters{})
 
 	require.NotEmpty(t, *seen, "Search must POST to /v1/embeddings")
 	require.Equal(t, "task: search result | query:what is ragabast", (*seen)[0],
