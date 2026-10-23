@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -835,8 +834,22 @@ func (s *Server) registerRoutes() {
 	}
 }
 
-// Start starts the web server.
+// Start starts the web server and blocks until ctx is cancelled
+// or the process receives SIGINT/SIGTERM.
 func (s *Server) Start() error {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	return s.startAndWait(ctx)
+}
+
+// startAndWait runs the HTTP listener until ctx is cancelled, then
+// shuts the server down.
+//
+// It is the body of Start, split out so the shutdown path can be
+// exercised without sending the process a real signal. Both entry
+// points go through here, so the signal path and the explicit
+// Stop path release exactly the same resources (audit finding 3).
+func (s *Server) startAndWait(ctx context.Context) error {
 	addr := s.config.Server.ListenAddr()
 
 	// ReadTimeout/WriteTimeout/IdleTimeout are read from the
@@ -865,24 +878,33 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	<-ctx.Done()
 
 	fmt.Println("🛑 Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// The incoming ctx is already cancelled, so it cannot be
+	// the parent of the shutdown deadline. WithoutCancel keeps
+	// its values (for tracing) while dropping the cancellation.
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 
-	if err := s.server.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server shutdown failed: %w", err)
-	}
-
-	return nil
+	return s.shutdown(shutdownCtx)
 }
 
-// Stop gracefully stops the server.
-func (s *Server) Stop(ctx context.Context) error {
+// shutdown releases every resource the server owns: the HTTP
+// listener, the async ingest queue, and the per-store GC
+// goroutines (session sweep, OAuth flow sweep, chat-session
+// idle-TTL).
+//
+// The GC goroutines are the reason this is a shared path rather
+// than two copies. Each one owns a ticker loop that exits only
+// when its store's Stop is called; the previous Start() shut the
+// listener down and returned, leaving all three running. In a
+// process that exits right after that was invisible, but in a
+// long-lived host (tests, an embedding application, a
+// supervisor that restarts the server in-process) the goroutines
+// accumulated.
+func (s *Server) shutdown(ctx context.Context) error {
 	// Drain the async ingest queue FIRST so workers finish
 	// whatever jobs are in flight before we close the HTTP
 	// listener. (Stop on the queue signals workers to exit
@@ -911,6 +933,11 @@ func (s *Server) Stop(ctx context.Context) error {
 		return s.server.Shutdown(ctx)
 	}
 	return nil
+}
+
+// Stop gracefully stops the server.
+func (s *Server) Stop(ctx context.Context) error {
+	return s.shutdown(ctx)
 }
 
 // jobsServiceAdapter adapts the web-layer serviceAPI to the
