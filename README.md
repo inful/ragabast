@@ -327,6 +327,78 @@ search gets exact-term recall right but cannot paraphrase. RRF fuses
 the two rankings so a chunk that ranks #1 in either list is surfaced,
 and a chunk that ranks highly in both rises to the top.
 
+### Algolia DocSearch compatibility
+
+ragabast serves the Algolia Search API contract, so
+[DocSearch](https://docsearch.algolia.com/) — the search widget
+Algolia ships for documentation sites — can point at a ragabast
+instance instead of Algolia's cloud.
+
+Two endpoints are mounted:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /1/indexes/{indexName}/queries` | The batched multi-query endpoint. This is the one `docsearch.js` calls. |
+| `POST /1/indexes/{indexName}/query` | The canonical single-index search endpoint. |
+
+Every index name maps to the same ragabast corpus — ragabast has one
+knowledge base. The response carries the Algolia envelope (`hits`,
+`nbHits`, `page`, `nbPages`, `hitsPerPage`, `processingTimeMS`,
+`query`, `params`, `index`) and each hit is a DocSearch record:
+`objectID`, `content`, `type`, `url`, `url_without_anchor`, `anchor`,
+`hierarchy.lvl0` … `hierarchy.lvl6`, plus the `_highlightResult` and
+`_snippetResult` maps the DocSearch UI renders.
+
+Wiring the widget up:
+
+```js
+import docsearch from '@docsearch/react';
+
+docsearch({
+  container: '#docsearch',
+  appId: 'ragabast',
+  apiKey: '<ragabast auth token>',
+  indexName: 'ragabast',
+  // Point the Algolia client at ragabast instead of Algolia's
+  // hosts. The client hard-codes the Algolia hostnames, so this
+  // override is what redirects the traffic.
+  transformSearchClient: (client) => {
+    client.transporter.hosts = [
+      { url: 'ragabast.example.com', protocol: 'https', accept: 3 },
+    ];
+    return client;
+  },
+});
+```
+
+**Authentication.** The DocSearch client sends the API key in the
+`x-algolia-api-key` header (or in the query string when it runs with
+`authMode=withinQueryParameters`); ragabast accepts it as an
+alternative to the `Authorization: Bearer` header and matches it
+against the same `server.auth_token` / `server.auth_tokens` list.
+There is no separate search-only credential — reuse an existing
+token, and remember that an Algolia search key is public by design
+(it ships to every visitor of the docs site).
+
+**CORS.** The DocSearch widget runs in the browser of your docs
+site, so add that origin to `server.cors_origins` and enable
+`server.enable_cors`. The Algolia headers are on the CORS
+allow-list already.
+
+**Differences from Algolia's hosted service.**
+
+- `nbHits` is the number of hits the search returned, not the size of
+  the corpus — ragabast ranks on demand and has no cheap total count,
+  so `exhaustiveNbHits` is reported as `false`.
+- An empty query returns an empty page. Algolia would answer with
+  every record in the index.
+- Only `hitsPerPage`, `page`, `attributesToRetrieve`,
+  `attributesToHighlight`, `attributesToSnippet`, `highlightPreTag`,
+  `highlightPostTag` and `snippetEllipsisText` are honoured. Facets,
+  filters and typo tolerance are not implemented.
+- Chunk bodies are HTML-escaped. The DocSearch client renders hit
+  attributes as HTML, and an ingested document is not trusted input.
+
 ## Security
 
 ragabast ships hardened for safe local-dev use and for non-loopback

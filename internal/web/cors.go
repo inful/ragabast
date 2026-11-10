@@ -79,7 +79,12 @@ func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
 			}
 
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			// The Algolia headers are custom headers, so a
+			// browser sends a preflight for them. They must be
+			// allow-listed or the DocSearch client cannot reach
+			// the endpoint at all.
+			w.Header().Set("Access-Control-Allow-Headers",
+				"Content-Type, Authorization, "+algoliaAPIKeyHeader+", "+algoliaAppIDHeader+", X-Algolia-Agent")
 
 			// Preflight: respond 204 without invoking the
 			// route handler. Browsers do not send credentials

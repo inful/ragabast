@@ -32,6 +32,9 @@ import (
 //     /api/ingest/file. May be many KiB.
 //   - document_id, docbuilder_base_url: path-shaped fields
 //     that may carry sensitive identifiers.
+//   - x-algolia-api-key: the Algolia DocSearch API key, when
+//     the client is configured with authMode=withinQueryParameters
+//     and sends it in the URL.
 //
 // The bearer token (Authorization header) is NEVER logged —
 // the logChatRequests path in internal/vector/openai.go writes
@@ -43,6 +46,7 @@ var redactedQueryKeys = map[string]struct{}{
 	"content":             {},
 	"document_id":         {},
 	"docbuilder_base_url": {},
+	"x-algolia-api-key":   {},
 }
 
 // redactQueryString returns a copy of rawQuery with every
