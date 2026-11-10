@@ -821,6 +821,16 @@ func (s *Server) registerRoutes() {
 	// itself.
 	s.registerAuthRoutes()
 
+	// Algolia DocSearch compatibility endpoints. docsearch.js
+	// posts to /1/indexes/*/queries (the literal asterisk is the
+	// path Algolia's client uses; the chi route pattern below
+	// matches it as an ordinary path segment). Auth is inherited
+	// from the global authMiddleware — the client sends the key
+	// in the x-algolia-api-key header, which authMiddleware
+	// accepts as an alternative bearer credential.
+	s.router.Post("/1/indexes/{indexName}/queries", algoliaDocSearchHandler(s.service))
+	s.router.Post("/1/indexes/{indexName}/query", algoliaDocSearchHandler(s.service))
+
 	// MCP HTTP transport — opt-in. When
 	// server.mcp_http_enabled is true, mount the streamable
 	// HTTP handler at /mcp on the same listen port. Auth

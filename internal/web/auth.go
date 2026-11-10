@@ -29,11 +29,14 @@ func AuthLabelFromContext(ctx context.Context) string {
 }
 
 // authMiddleware enforces authentication on the API and
-// form-mounted endpoints. It accepts one or both of:
+// form-mounted endpoints. It accepts one or more of:
 //
 //   - A shared-secret bearer token (server.auth_token /
 //     server.auth_tokens). Compared constant-time against
 //     the Authorization header.
+//   - The same shared-secret token in the x-algolia-api-key
+//     header, which is how Algolia's DocSearch client
+//     authenticates.
 //   - A session cookie (server.auth.cookie_name) issued by
 //     the OAuth callback handler. Resolved against the
 //     sessionStore.
@@ -51,6 +54,7 @@ func AuthLabelFromContext(ctx context.Context) string {
 //     session is still attached to the context so the
 //     handler can render the "signed in as" line.
 //  2. Bearer token matches → allow, stash the token label.
+//     2b. x-algolia-api-key matches → allow, stash the token label.
 //  3. Session cookie resolves to a live (non-expired)
 //     session → allow, stash the session, slide the
 //     expiry forward.
@@ -91,6 +95,12 @@ func authMiddleware(tokens []config.AuthToken, sessions *sessionStore, cookieNam
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The Algolia client can carry the API key in the
+			// query string (authMode=withinQueryParameters).
+			// Normalize it into the header so the rest of the
+			// chain only looks at one place.
+			algoliaNormalizeAPIKey(r)
+
 			// Public routes are always open. Listing them
 			// explicitly (rather than maintaining a "public
 			// prefix list") makes the security boundary
@@ -112,17 +122,16 @@ func authMiddleware(tokens []config.AuthToken, sessions *sessionStore, cookieNam
 				return
 			}
 
-			// Bearer token check first (programs).
-			if hasTokens {
-				if label, ok := matchBearer(r.Header.Get("Authorization"), tokens); ok {
-					if label != "" {
-						ctx := context.WithValue(r.Context(), authLabelKey{}, label)
-						r = r.WithContext(ctx)
-					}
-					next.ServeHTTP(w, r)
-
-					return
+			// Credential check: the bearer token first
+			// (programs), then the Algolia API-key header.
+			if label, ok := matchConfiguredToken(r, tokens); ok {
+				if label != "" {
+					ctx := context.WithValue(r.Context(), authLabelKey{}, label)
+					r = r.WithContext(ctx)
 				}
+				next.ServeHTTP(w, r)
+
+				return
 			}
 
 			// Session cookie check next (browsers).
@@ -315,4 +324,38 @@ func subtleCompare(a, b string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+// matchConfiguredToken matches the request's credential against the
+// configured tokens. Two headers are accepted: the Authorization
+// bearer token, and the x-algolia-api-key header the Algolia
+// DocSearch client uses. Same token list, same comparison.
+func matchConfiguredToken(r *http.Request, tokens []config.AuthToken) (label string, ok bool) {
+	if len(tokens) == 0 {
+		return "", false
+	}
+	if label, ok := matchBearer(r.Header.Get("Authorization"), tokens); ok {
+		return label, true
+	}
+	return matchAPIKey(r.Header.Get(algoliaAPIKeyHeader), tokens)
+}
+
+// matchAPIKey compares a raw API key against the configured
+// tokens. It is the credential check for clients that cannot set
+// an Authorization header — the Algolia DocSearch JS client sends
+// the key in x-algolia-api-key.
+//
+// The comparison is constant-time per token, the same as
+// matchBearer: the request latency must not leak the position of
+// the first differing byte.
+func matchAPIKey(presented string, tokens []config.AuthToken) (label string, ok bool) {
+	if presented == "" || len(tokens) == 0 {
+		return "", false
+	}
+	for _, t := range tokens {
+		if subtleCompare(presented, t.Value) {
+			return t.Label, true
+		}
+	}
+	return "", false
 }

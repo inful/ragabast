@@ -120,6 +120,8 @@ func csrfMiddleware(effectiveTokens []config.AuthToken) func(http.Handler) http.
 //   - the method is a state-changer (POST/PUT/PATCH/DELETE)
 //   - the request carries no Authorization header (so
 //     browsers could make it cross-origin)
+//   - the request carries no x-algolia-api-key header (the
+//     Algolia DocSearch client authenticates that way)
 //
 // All other requests (GET/HEAD/OPTIONS, plus
 // Authorization-bearing requests of any method) bypass
@@ -129,6 +131,12 @@ func csrfRequiresCheck(r *http.Request) bool {
 		return false
 	}
 	if r.Header.Get("Authorization") != "" {
+		return false
+	}
+	// A browser cannot attach a custom header to a cross-origin
+	// form post, so a request carrying the Algolia API key is
+	// as provably same-origin as one carrying Authorization.
+	if r.Header.Get(algoliaAPIKeyHeader) != "" {
 		return false
 	}
 	return true

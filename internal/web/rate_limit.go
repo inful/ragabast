@@ -218,6 +218,10 @@ var llmPathPrefixes = []string{
 	"/api/ingest",
 	"/api/ingest/raw",
 	"/api/ingest/file",
+	// The Algolia DocSearch compatibility endpoints. They run
+	// the same hybrid search as /api/search, so they carry the
+	// same embedding cost and take the same per-IP bucket.
+	"/1/indexes",
 }
 
 // llmPathMiddleware is the chi-level rate-limit middleware
