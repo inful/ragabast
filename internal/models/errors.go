@@ -10,7 +10,37 @@ var (
 	ErrMissingContent     = errors.New("document content is required")
 	ErrInvalidFrontmatter = errors.New("invalid frontmatter format")
 	ErrParseFailed        = errors.New("failed to parse document")
+
+	// ErrInvalidDocument marks a document the server refused
+	// because of its content: unparsable frontmatter, invalid
+	// YAML, a missing required field. Callers use errors.Is to
+	// tell a bad document (the caller's fault) from a
+	// server-side failure (the server's fault) and map them to
+	// different HTTP statuses.
+	ErrInvalidDocument = errors.New("invalid document")
 )
+
+// invalidDocumentError marks err as a document-level failure
+// without changing its message: the message is what operators and
+// clients read, and existing log lines match on it.
+type invalidDocumentError struct{ err error }
+
+func (e *invalidDocumentError) Error() string { return e.err.Error() }
+
+func (e *invalidDocumentError) Unwrap() error { return e.err }
+
+func (e *invalidDocumentError) Is(target error) bool { return target == ErrInvalidDocument }
+
+// InvalidDocument marks err as a document-level failure: the
+// document itself is bad, not the server. The message is preserved
+// verbatim; errors.Is(err, ErrInvalidDocument) is how callers
+// detect it.
+func InvalidDocument(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &invalidDocumentError{err: err}
+}
 
 // Database errors.
 var (

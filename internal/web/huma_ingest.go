@@ -3,7 +3,6 @@ package web
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -44,6 +43,8 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		func(ctx context.Context, body *ingestRequestBody) (*ingestResponseBody, error) {
 			content := strings.TrimSpace(body.Content)
 			if content == "" {
+				logIngestError(ctx, "ingest", "empty content", nil, ingestDocRef{})
+
 				return nil, huma.Error400BadRequest("content is required")
 			}
 			release, err := withIngestGuard(limiter, maxDocumentBytes, len(content))
@@ -54,8 +55,7 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 
 			doc, err := svc.IngestDocument(ctx, content)
 			if err != nil {
-				return nil, huma.Error400BadRequest(
-					fmt.Sprintf("failed to ingest: %s", err.Error()))
+				return nil, ingestFailure(ctx, "ingest", err, ingestDocRefFromContent([]byte(content), ""))
 			}
 
 			return &ingestResponseBody{
@@ -88,6 +88,8 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 	}, error,
 	) {
 		if len(bytes.TrimSpace(input.RawBody)) == 0 {
+			logIngestError(ctx, "ingest-raw", "empty body", nil, ingestDocRef{})
+
 			return nil, huma.Error400BadRequest("request body is required")
 		}
 		release, err := withIngestGuard(limiter, maxDocumentBytes, len(input.RawBody))
@@ -98,8 +100,7 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 
 		doc, err := svc.IngestDocument(ctx, string(input.RawBody))
 		if err != nil {
-			return nil, huma.Error400BadRequest(
-				fmt.Sprintf("failed to ingest: %s", err.Error()))
+			return nil, ingestFailure(ctx, "ingest-raw", err, ingestDocRefFromContent(input.RawBody, ""))
 		}
 
 		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{
@@ -133,10 +134,14 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 		form := input.RawBody.Data()
 		b, err := io.ReadAll(form.File)
 		if err != nil {
+			logIngestError(ctx, "ingest-file", "read failed", err, ingestDocRef{File: form.File.Filename})
+
 			return nil, huma.Error400BadRequest("failed to read uploaded file")
 		}
 
 		if len(bytes.TrimSpace(b)) == 0 {
+			logIngestError(ctx, "ingest-file", "empty file", nil, ingestDocRef{File: form.File.Filename})
+
 			return nil, huma.Error400BadRequest("file is empty")
 		}
 		release, err := withIngestGuard(limiter, maxDocumentBytes, len(b))
@@ -147,8 +152,7 @@ func registerIngestOperations(api huma.API, svc serviceAPI, limiter *IngestLimit
 
 		doc, err := svc.IngestDocument(ctx, string(b))
 		if err != nil {
-			return nil, huma.Error400BadRequest(
-				fmt.Sprintf("failed to ingest: %s", err.Error()))
+			return nil, ingestFailure(ctx, "ingest-file", err, ingestDocRefFromContent(b, form.File.Filename))
 		}
 
 		return &struct{ Body ingestResponseBody }{Body: ingestResponseBody{

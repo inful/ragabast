@@ -62,14 +62,14 @@ func registerIngestGitLabIssueOperation(api huma.API, svc serviceAPI, limiter *I
 		// a schema that's bigger than what we want to publish.
 		body := input.RawBody
 		if len(body) == 0 {
-			logIngestError(ctx, "empty body", nil, body)
+			logIngestError(ctx, "gitlab-ingest", "empty body", nil, ingestDocRef{})
 
 			return nil, huma.Error400BadRequest("request body is required")
 		}
 
 		var envelope gitlab.IssueEnvelope
 		if err := json.Unmarshal(body, &envelope); err != nil {
-			logIngestError(ctx, "invalid json", err, body)
+			logIngestError(ctx, "gitlab-ingest", "invalid json", err, ingestDocRef{Body: body})
 
 			return nil, huma.Error400BadRequest(
 				fmt.Sprintf("invalid GitLab issue envelope JSON: %s", err.Error()))
@@ -77,7 +77,7 @@ func registerIngestGitLabIssueOperation(api huma.API, svc serviceAPI, limiter *I
 
 		md, sysFiltered, err := gitlab.EnvelopeToDocbuilderMarkdown(envelope)
 		if err != nil {
-			logIngestError(ctx, "validation", err, body)
+			logIngestError(ctx, "gitlab-ingest", "validation", err, ingestDocRef{Body: body})
 
 			return nil, huma.Error400BadRequest(
 				fmt.Sprintf("invalid GitLab issue envelope: %s", err.Error()))
@@ -112,10 +112,13 @@ func registerIngestGitLabIssueOperation(api huma.API, svc serviceAPI, limiter *I
 
 		doc, err := svc.IngestDocument(ctx, md)
 		if err != nil {
-			logIngestError(ctx, "ingest failed", err, body)
+			// The log carries the uid from the rendered markdown
+			// but previews the wire envelope — that is what the
+			// sender sent, and it holds the issue's raw fields.
+			ref := ingestDocRefFromContent([]byte(md), "")
+			ref.Body = body
 
-			return nil, huma.Error400BadRequest(
-				fmt.Sprintf("failed to ingest: %s", err.Error()))
+			return nil, ingestFailure(ctx, "gitlab-ingest", err, ref)
 		}
 
 		return &gitlabIssueIngestResponse{Body: ingestResponseBody{

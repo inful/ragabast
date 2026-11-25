@@ -40,12 +40,12 @@ func (p *DocbuilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 	// Extract frontmatter and the markdown body that follows it.
 	frontmatter, body, err := p.extractFrontmatter(normalized)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract frontmatter: %w", err)
+		return nil, models.InvalidDocument(fmt.Errorf("failed to extract frontmatter: %w", err))
 	}
 
 	// Parse frontmatter
 	if err := p.parseFrontmatter(frontmatter, doc); err != nil {
-		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+		return nil, models.InvalidDocument(fmt.Errorf("failed to parse frontmatter: %w", err))
 	}
 
 	// Set content from the body (frontmatter already stripped).
@@ -63,7 +63,7 @@ func (p *DocbuilderParser) ParseDocument(rawContent []byte, filePath string) (*m
 
 	// Validate required fields
 	if err := doc.Validate(); err != nil {
-		return nil, fmt.Errorf("document validation failed: %w", err)
+		return nil, models.InvalidDocument(fmt.Errorf("document validation failed: %w", err))
 	}
 
 	return doc, nil

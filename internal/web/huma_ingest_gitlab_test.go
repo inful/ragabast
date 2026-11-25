@@ -499,11 +499,12 @@ func TestHumaAPI_IngestGitLabIssue_LogsMissingPath(t *testing.T) {
 // TestHumaAPI_IngestGitLabIssue_LogsIngestDocumentFailure pins
 // the log-line behavior for the case where the JSON parsed,
 // validation passed, but Service.IngestDocument returned an
-// error. These errors get wrapped as 400 today (matching the
-// /api/ingest/raw convention) but they're often server-side
-// failures in disguise — a chunker bug, a vector store hiccup.
-// The server log must carry the full chain so an operator can
-// distinguish "sender bug" from "internal failure".
+// error. These errors used to be wrapped as 400 (matching the
+// /api/ingest/raw convention), which blamed the sender for what
+// are usually server-side failures in disguise — a chunker bug, a
+// vector store hiccup, an embeddings server that is down. They
+// are now 500, and the server log must carry the full chain so an
+// operator can distinguish "sender bug" from "internal failure".
 func TestHumaAPI_IngestGitLabIssue_LogsIngestDocumentFailure(t *testing.T) {
 	router, api := humatest.New(t)
 	svc := &fakeHumaService{
@@ -534,7 +535,7 @@ func TestHumaAPI_IngestGitLabIssue_LogsIngestDocumentFailure(t *testing.T) {
 	resp, err := srv.Client().Do(req)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
-	require.Equal(t, 400, resp.StatusCode)
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
 
 	logs := logBuf.String()
 	assert.Contains(t, logs, "gitlab-ingest")
