@@ -171,6 +171,14 @@ The limiter capacity is `IngestLimiter.NewIngestLimiter(maxConcurrent,
 retryAfter)` and the constructor defaults to `1` concurrent ingest
 with a `1s` retry if the config is missing.
 
+A failed ingest answers **400** when the document itself was
+refused — bad frontmatter, invalid YAML, a missing `uid` — and the
+reason is in the response body. It answers **500** when the server
+failed (the embeddings provider is down, the vector store refused
+the write); the response body stays generic and the reason goes to
+the server log, which names the endpoint, the document, the
+caller's auth label, and the error.
+
 A separate async ingest path is also available for high-volume
 docbuilder imports — see `internal/web/jobs/` and
 `internal/web/huma_jobs.go`. POST `/api/ingest/async` returns 202
@@ -313,6 +321,8 @@ on disk both reflect the post-ingest state.
 | `Failed to ingest <path>: failed to call embeddings API: ...` | Embeddings server unreachable. | Start it (`ollama serve` or your provider's equivalent); check `ollama.base_url` and `ollama.timeout`. |
 | `vector: DIMENSION MISMATCH: configured EmbeddingDimensions=256 but embeddings server returned vectors of length 768` | The embeddings server ignored the `dimensions` field. | Either the model doesn't support truncation at that size (jina v5 supports 32/64/128/256/512/768/1024), or the server is older and the field is rejected. Set `embedding_dimensions: 0` to disable truncation, or pick a supported size. |
 | HTTP 429 `Retry-After: N` from `/api/ingest*` | The ingest limiter is saturated (default 1 concurrent ingest). | Wait `N` seconds, or raise the limiter capacity. |
+| HTTP 400 with `failed to ingest: ...` | The document was refused — bad frontmatter, invalid YAML, a missing `uid`. The reason is in the response body. | Fix the document. See the error text. |
+| HTTP 500 with `failed to ingest: internal error` | A server-side failure: the embeddings provider is down, the vector store refused the write, the chunker hit a bug. The details are in the server log, not the response. | Check the log line (`ingest-file: ingest failed label=... uid=... err=...`), fix the server, retry. |
 | CLI exits successfully but search returns no results | (a) Fingerprint matched an old, already-embedded version; nothing changed. (b) Storage was wiped but only a subset of files were re-ingested. | Check `GetStats` (doc count) and `GET /api/documents` (list). If the doc is there, the chunks are there — query against a phrase from the body to confirm embedding quality. |
 | CLI logs `Processed: 0, Failed: 0` for `--path` | Directory has no top-level `.md` files (subdirectories are skipped). | Pass the subdirectory explicitly, or pass the files positionally. |
 | HTTP 500 with no client-visible message | Server-side error during ingest. | The full error is logged server-side (see `internalError` in `internal/web/server.go`); check the server log. |

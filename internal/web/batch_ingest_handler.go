@@ -3,12 +3,26 @@ package web
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 
 	"github.com/ragabast/internal/reqid"
 	"github.com/ragabast/internal/web/jobs"
 )
+
+// batchReadError maps a body-read failure to an HTTP status and a
+// message. A body over the global cap (maxBytesReaderMiddleware) is
+// a size problem, not a malformed-body problem: the caller can fix
+// a malformed body but not an oversized one, so the two deserve
+// different statuses.
+func batchReadError(err error) (int, string) {
+	if maxErr, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		return http.StatusRequestEntityTooLarge, fmt.Sprintf("request body exceeds %d bytes", maxErr.Limit)
+	}
+	return http.StatusBadRequest, "read body: " + err.Error()
+}
 
 // handleIngestBatch is the raw http.Handler for
 // POST /api/ingest/batch. Lives outside the huma
@@ -41,12 +55,15 @@ func handleIngestBatch(w http.ResponseWriter, r *http.Request, q *jobs.Queue) {
 	// total is fine.
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+		status, msg := batchReadError(err)
+		log.Printf("ingest-batch: %s", msg)
+		http.Error(w, msg, status)
 		return
 	}
 
 	items, err := parseIngestBatchBody(raw)
 	if err != nil {
+		log.Printf("ingest-batch: malformed body: %v", err)
 		http.Error(w, "malformed batch body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -67,6 +84,8 @@ func handleIngestBatch(w http.ResponseWriter, r *http.Request, q *jobs.Queue) {
 			if errors.Is(subErr, jobs.ErrJobContentTooLarge) {
 				resp.Items[i].Error = "document exceeds server.max_ingest_document_bytes"
 			}
+			log.Printf("ingest-batch: item %d rejected uid=%q err=%q",
+				i, ingestDocRefFromContent([]byte(item.Content), "").UID, subErr.Error())
 			continue
 		}
 		resp.Items[i] = ingestBatchItemResponse{

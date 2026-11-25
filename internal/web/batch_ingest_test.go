@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,24 @@ import (
 // single-document endpoints.
 type batchIngestEntry struct {
 	Content string `json:"content"`
+}
+
+// TestBatchReadError_MaxBytesIs413 pins the status split for a
+// body the server refuses to read: an oversized body is a size
+// problem (413), a broken read is a bad request (400). Blaming
+// the caller's JSON for a body that was simply too big sends the
+// operator looking in the wrong place.
+func TestBatchReadError_MaxBytesIs413(t *testing.T) {
+	status, msg := batchReadError(&http.MaxBytesError{Limit: 10 << 20})
+	require.Equal(t, http.StatusRequestEntityTooLarge, status)
+	require.Contains(t, msg, "10485760")
+}
+
+// TestBatchReadError_OtherErrorIs400 pins the other half.
+func TestBatchReadError_OtherErrorIs400(t *testing.T) {
+	status, msg := batchReadError(errors.New("connection reset"))
+	require.Equal(t, http.StatusBadRequest, status)
+	require.Contains(t, msg, "connection reset")
 }
 
 // batchIngestItemResponse is the per-document response in

@@ -43,7 +43,11 @@ type documentIngester interface {
 func chunkAndIngest(ctx context.Context, ch documentChunker, ingester documentIngester, doc *models.Document) error {
 	chunks, err := ch.ChunkWithHierarchy(doc)
 	if err != nil {
-		return fmt.Errorf("failed to chunk document: %w", err)
+		// The chunker only fails on an empty document, which is a
+		// property of the document, not of the server. Marking it
+		// keeps the caller's status mapping honest: a bad
+		// document is a 4xx, an infrastructure failure a 5xx.
+		return models.InvalidDocument(fmt.Errorf("failed to chunk document: %w", err))
 	}
 
 	doc.Chunks = make([]models.Chunk, len(chunks))

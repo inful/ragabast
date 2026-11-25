@@ -1,14 +1,33 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"sort"
 	"testing"
 
+	"github.com/ragabast/internal/models"
+	"github.com/ragabast/internal/parser"
 	"github.com/stretchr/testify/require"
 )
+
+// TestIngestDocument_ParseFailureIsInvalidDocument pins the error
+// taxonomy at the service boundary: a document the parser refuses
+// is a document-level failure (models.ErrInvalidDocument), so the
+// HTTP layer answers 400 and blames the caller — not the server.
+func TestIngestDocument_ParseFailureIsInvalidDocument(t *testing.T) {
+	// Only the parser is needed: a parse failure short-circuits
+	// before the chunker and the vector store are touched.
+	svc := &Service{parser: parser.NewDocbuilderParser()}
+
+	_, err := svc.IngestDocument(context.Background(), "---\nuid: broken\n\n# Title\nHello\n")
+	require.Error(t, err)
+	require.ErrorIs(t, err, models.ErrInvalidDocument)
+	require.Contains(t, err.Error(), "frontmatter delimiter not found",
+		"the underlying reason must survive the wrapping")
+}
 
 // TestWalkMarkdownFiles_ProcessesOnlyMarkdown verifies the walker
 // filters out non-*.md files and counts successes.

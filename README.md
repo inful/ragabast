@@ -758,6 +758,26 @@ ingest job event=ingest.job.failed job_id=... error=...
 Tail the operator log to monitor the queue without needing a separate
 audit pipeline.
 
+### Sync ingest status codes
+
+`POST /api/ingest`, `/api/ingest/raw` and `/api/ingest/file` split
+their failures by cause, so a caller can tell "fix the document"
+from "retry later":
+
+| Status | Meaning | What the caller should do |
+|---|---|---|
+| `400 Bad Request` | The document was refused: unparsable frontmatter, invalid YAML, a missing `uid`, an empty file. The response body names the reason. | Fix the document — retrying unchanged content fails the same way. |
+| `413 Request Entity Too Large` | The document exceeds `server.max_ingest_document_bytes`. | Split the document or raise the cap. |
+| `429 Too Many Requests` | The ingest limiter is saturated; `Retry-After` says how long to wait. | Wait, then retry. |
+| `500 Internal Server Error` | The server failed: the embeddings provider is down, the vector store refused the write, the chunker hit a bug. The response body stays generic — the reason goes to the server log. | Retry later; the document is fine. |
+
+Every failure also writes one log line naming the endpoint, the
+document, the caller's auth label, and the underlying error:
+
+```
+ingest-file: ingest failed label="" uid="adr-001" file="adr-001.md" bytes=1024 err="failed to generate embeddings: ..."
+```
+
 ### Batch ingest
 
 For docbuilder imports that aren't quite at the queueing scale

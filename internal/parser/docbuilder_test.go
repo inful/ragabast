@@ -3,8 +3,37 @@ package parser
 import (
 	"testing"
 
+	"github.com/ragabast/internal/models"
 	"github.com/stretchr/testify/require"
 )
+
+// TestParseDocument_MarksContentFailuresAsInvalidDocument pins
+// the error taxonomy the HTTP layer maps to 400: a document the
+// server refuses because of its content is models.ErrInvalidDocument,
+// so the caller can tell it apart from a server-side failure
+// (500). The message must survive the wrapping — operators read
+// it.
+func TestParseDocument_MarksContentFailuresAsInvalidDocument(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"unterminated frontmatter", "---\nuid: sample\n\n# Title\nHello\n"},
+		{"invalid yaml", "---\nuid: [unclosed\n---\n\n# Title\nHello\n"},
+		{"missing uid", "---\ntitle: t\n---\n\n# Title\nHello\n"},
+		{"empty content", "---\nuid: sample\n---\n\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := p.ParseDocument([]byte(tc.raw), "test.md")
+			require.Error(t, err)
+			require.ErrorIs(t, err, models.ErrInvalidDocument)
+		})
+	}
+}
 
 func TestParseDocument_GeneratesFingerprintAndStableID(t *testing.T) {
 	p := NewDocbuilderParser()
