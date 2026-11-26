@@ -1248,6 +1248,40 @@ Key differences from the OpenAI-compat path:
 - **No `Authorization` header.** The `/v2/embed` endpoint is unauthenticated by convention. If your proxy requires auth, front it with a header-injecting middleware or extend the client.
 - **Response shape is probed.** The client accepts `{"embeddings":{"float":[[...]]}}` (canonical EmbeddingGemma / Cohere-style — this is what most production EmbeddingGemma servers return), `{"embeddings":[[...]]}` (bare parallel-of-texts), `{"results":[{"embedding":[...]}]}`, and `{"data":[{"embedding":[...]}]}`. Unknown shapes surface the raw body in the error so you can pin down what your server actually returns and either patch the client or your proxy.
 
+**A 404 from the embeddings server means the path is wrong.** The
+`embedding_gemma` client POSTs to `<base>/v2/embed`; the default
+client POSTs to `<base>/v1/embeddings`. A server that speaks the
+other shape answers `404 {"detail":"Not Found"}` — FastAPI's
+unknown-route response, and the most common way this misconfiguration
+shows up. The error names the URL that was called, so the fix is
+visible in the log:
+
+```
+ingest-file: ingest failed ... err="failed to generate embeddings:
+embeddings API returned status 404 for http://embedder:8080/v2/embed:
+{"detail":"Not Found"}. This client speaks POST /v2/embed; a 404
+usually means the server exposes the OpenAI shape
+(/v1/embeddings) instead — use the default provider with
+ollama.base_url and ollama.embedding_model, or point
+embedding_gemma.base_url at a server that speaks /v2/embed"
+```
+
+To find out which shape your server speaks:
+
+```bash
+# OpenAI-compatible (vLLM, llama.cpp, TEI, LM Studio):
+curl -sS http://embedder:8080/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"embeddinggemma-2","input":["ping"]}'
+
+# EmbeddingGemma /v2/embed shape:
+curl -sS http://embedder:8080/v2/embed \
+  -H 'Content-Type: application/json' \
+  -d '{"texts":["ping"]}'
+```
+
+Whichever answers with a vector is the one to configure.
+
 To switch an existing install to the EmbeddingGemma path:
 
 ```yaml
