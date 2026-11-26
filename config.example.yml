@@ -119,7 +119,10 @@ ollama:
 #   # task-name prefixes embedding-gemma expects. The
 #   # recommended values below mirror Google's docs; leave
 #   # both empty for non-prompted models.
-#   embedding_doc_prompt: "title: none | text: "
+#   # {title} is replaced with the document's title (the
+#   # frontmatter `title:` field), or "none" when the document
+#   # has none — the EmbeddingGemma convention.
+#   embedding_doc_prompt: "title: {title} | text: "
 #   embedding_query_prompt: "task: search result | query: "
 #   # Expected response dimension. 0 disables the mismatch
 #   # check. /v2/embed does NOT accept a `dimensions` request

@@ -110,6 +110,30 @@ func (c *Config) EffectiveEmbeddingDimensions() int {
 	return c.Ollama.EmbeddingDimensions
 }
 
+// EffectiveEmbeddingDocPrompt returns the doc-side task prefix the
+// configured provider prepends to every indexed chunk.
+//
+// The prefix is part of the corpus's identity: the vectors it
+// produces are not comparable with the ones an empty (or a
+// different) prefix produces, so the vector store records its
+// fingerprint and invalidates the corpus when it changes.
+func (c *Config) EffectiveEmbeddingDocPrompt() string {
+	if c.EmbeddingProvider == "embedding_gemma" {
+		return c.EmbeddingGemma.EmbeddingDocPrompt
+	}
+	return c.Ollama.EmbeddingDocPrompt
+}
+
+// EffectiveEmbeddingQueryPrompt returns the query-side task prefix.
+// It shapes the query vectors, not the corpus, so it is part of the
+// query cache key rather than of the store's identity.
+func (c *Config) EffectiveEmbeddingQueryPrompt() string {
+	if c.EmbeddingProvider == "embedding_gemma" {
+		return c.EmbeddingGemma.EmbeddingQueryPrompt
+	}
+	return c.Ollama.EmbeddingQueryPrompt
+}
+
 // DefaultConfig returns a configuration with sensible defaults.
 func DefaultConfig() *Config {
 	// Get current working directory.

@@ -51,6 +51,10 @@ type Key struct {
 	Limit    int
 	Mode     string // "hybrid" / "semantic" / "keyword"
 	Model    string // embedding model name (matters for cache correctness)
+	// QueryPrompt is the query-side task prefix. It matters for
+	// cache correctness: a different prefix embeds the query into
+	// a different place, so the results differ.
+	QueryPrompt string
 	// SourceKinds scopes the retrieval to a set of source
 	// kinds. Empty means "all sources".
 	SourceKinds []models.SourceKind
@@ -72,18 +76,19 @@ func KeyOf(k Key) string {
 	// returns (int, error) where the int is bytes written
 	// and the error is always nil for hash implementations.
 	// Ignoring both is safe and the standard idiom.
-	fmt.Fprintf(h, "q=%s\x00", k.Query)          //nolint:errcheck
-	fmt.Fprintf(h, "doc=%s\x00", k.DocID)        //nolint:errcheck
-	fmt.Fprintf(h, "tag=%s\x00", k.Tag)          //nolint:errcheck
-	fmt.Fprintf(h, "cat=%s\x00", k.Category)     //nolint:errcheck
-	fmt.Fprintf(h, "limit=%d\x00", k.Limit)      //nolint:errcheck
-	fmt.Fprintf(h, "mode=%s\x00", k.Mode)        //nolint:errcheck
-	fmt.Fprintf(h, "model=%s\x00", k.Model)      //nolint:errcheck
-	fmt.Fprintf(h, "src=%v\x00", k.SourceKinds)  //nolint:errcheck
-	fmt.Fprintf(h, "ca=%s\x00", k.CreatedAfter)  //nolint:errcheck
-	fmt.Fprintf(h, "cb=%s\x00", k.CreatedBefore) //nolint:errcheck
-	fmt.Fprintf(h, "ua=%s\x00", k.UpdatedAfter)  //nolint:errcheck
-	fmt.Fprintf(h, "ub=%s\x00", k.UpdatedBefore) //nolint:errcheck
+	fmt.Fprintf(h, "q=%s\x00", k.Query)             //nolint:errcheck
+	fmt.Fprintf(h, "doc=%s\x00", k.DocID)           //nolint:errcheck
+	fmt.Fprintf(h, "tag=%s\x00", k.Tag)             //nolint:errcheck
+	fmt.Fprintf(h, "cat=%s\x00", k.Category)        //nolint:errcheck
+	fmt.Fprintf(h, "limit=%d\x00", k.Limit)         //nolint:errcheck
+	fmt.Fprintf(h, "mode=%s\x00", k.Mode)           //nolint:errcheck
+	fmt.Fprintf(h, "model=%s\x00", k.Model)         //nolint:errcheck
+	fmt.Fprintf(h, "qprompt=%s\x00", k.QueryPrompt) //nolint:errcheck
+	fmt.Fprintf(h, "src=%v\x00", k.SourceKinds)     //nolint:errcheck
+	fmt.Fprintf(h, "ca=%s\x00", k.CreatedAfter)     //nolint:errcheck
+	fmt.Fprintf(h, "cb=%s\x00", k.CreatedBefore)    //nolint:errcheck
+	fmt.Fprintf(h, "ua=%s\x00", k.UpdatedAfter)     //nolint:errcheck
+	fmt.Fprintf(h, "ub=%s\x00", k.UpdatedBefore)    //nolint:errcheck
 	return hex.EncodeToString(h.Sum(nil))
 }
 

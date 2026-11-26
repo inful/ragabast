@@ -140,7 +140,7 @@ func (c *OpenAIEmbeddingClient) GenerateEmbedding(ctx context.Context, text stri
 	if text == "" {
 		return nil, models.ErrEmbeddingFailed
 	}
-	resp, err := c.embed(ctx, []string{c.applyDocPrompt(text)}, nil)
+	resp, err := c.embed(ctx, []string{applyDocPrompt(c.docPrompt, "", text)}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -167,16 +167,6 @@ func (c *OpenAIEmbeddingClient) EmbedQuery(ctx context.Context, query string) ([
 		return nil, models.ErrEmbeddingFailed
 	}
 	return resp[0], nil
-}
-
-// applyDocPrompt returns text with the doc prompt prepended.
-// Empty prompt = identity (no prepend, no allocation
-// thrash on the hot path).
-func (c *OpenAIEmbeddingClient) applyDocPrompt(text string) string {
-	if c.docPrompt == "" {
-		return text
-	}
-	return c.docPrompt + text
 }
 
 // applyQueryPrompt mirrors applyDocPrompt for queries.
@@ -344,6 +334,11 @@ func (c *OpenAIEmbeddingClient) ValidateConnection(ctx context.Context) error {
 // The configured docPrompt (if any) is prepended to every
 // chunk text before the POST. Empty prompt = identity (the
 // historical raw-text behavior).
+//
+// A {title} placeholder in the doc prompt is replaced with the
+// chunk's document title ("none" when the document has no title),
+// so a model that expects `title: {title} | text: {content}` gets
+// the real title rather than a static placeholder.
 func (c *OpenAIEmbeddingClient) GenerateChunkEmbeddings(ctx context.Context, chunks []*models.Chunk) ([][]float32, error) {
 	if len(chunks) == 0 {
 		return nil, models.ErrEmbeddingFailed
@@ -351,7 +346,7 @@ func (c *OpenAIEmbeddingClient) GenerateChunkEmbeddings(ctx context.Context, chu
 
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
-		texts[i] = c.applyDocPrompt(chunk.GetFullPath())
+		texts[i] = applyDocPrompt(c.docPrompt, chunk.DocumentTitle, chunk.GetFullPath())
 	}
 
 	return c.generateEmbeddingsBatch(ctx, texts)
@@ -363,7 +358,14 @@ func (c *OpenAIEmbeddingClient) GenerateChunkEmbedding(ctx context.Context, chun
 		return nil, models.ErrEmbeddingFailed
 	}
 
-	return c.GenerateEmbedding(ctx, chunk.GetFullPath())
+	resp, err := c.embed(ctx, []string{applyDocPrompt(c.docPrompt, chunk.DocumentTitle, chunk.GetFullPath())}, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) == 0 || len(resp[0]) == 0 {
+		return nil, models.ErrEmbeddingFailed
+	}
+	return resp[0], nil
 }
 
 // // — kept in the signature for callers that may want to

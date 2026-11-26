@@ -56,8 +56,8 @@ YAML to find the knob they need.
 | `EMBEDDING_GEMMA_TIMEOUT` | `timeout` | `30s` | Per-request HTTP timeout. |
 | `EMBEDDING_GEMMA_DIMENSIONS` | `embedding_dimensions` | `0` (off) | Expected response dimension. Mismatch logs a one-shot WARNING. |
 | `EMBEDDING_GEMMA_CONCURRENCY` | `embedding_concurrency` | `1` | Parallel `/v2/embed` requests in flight on the ingest path. |
-| `EMBEDDING_GEMMA_DOC_PROMPT` | `embedding_doc_prompt` | `""` | Task-name prefix for chunks being indexed. Recommended for embedding-gemma: `title: none | text: `. |
-| `EMBEDDING_GEMMA_QUERY_PROMPT` | `embedding_query_prompt` | `""` | Task-name prefix for user queries. Recommended for embedding-gemma: `task: search result | query: `. |
+| `EMBEDDING_GEMMA_DOC_PROMPT` | `embedding_doc_prompt` | `""` | Task-name prefix for chunks being indexed. Recommended for embedding-gemma: `title: {title} \| text: `. |
+| `EMBEDDING_GEMMA_QUERY_PROMPT` | `embedding_query_prompt` | `""` | Task-name prefix for user queries. Recommended for embedding-gemma: `task: search result \| query: `. |
 
 #### `vectordb` — vector store
 
@@ -1116,8 +1116,8 @@ the store and in the browser cookie.
 
 ```yaml
 ollama:
-  embedding_doc_prompt:    "search_document: "    # prepended to chunk text
-  embedding_query_prompt:  "search_query: "       # prepended to user query
+  embedding_doc_prompt:    "title: {title} | text: "    # prepended to chunk text
+  embedding_query_prompt:  "task: search result | query: "   # prepended to user query
 ```
 
 Env: `OLLAMA_EMBEDDING_DOC_PROMPT`, `OLLAMA_EMBEDDING_QUERY_PROMPT`.
@@ -1140,9 +1140,18 @@ one, retrieval quality drops measurably. The canonical prefixes:
 
 | Model | `embedding_doc_prompt` | `embedding_query_prompt` |
 |---|---|---|
-| `embeddinggemma` / `embedding-gemma` (v1 and v2) | `title: none | text: ` | `task: search result | query: ` |
+| `embeddinggemma` / `embedding-gemma` (v1 and v2) | `title: {title} \| text: ` | `task: search result \| query: ` |
 | OpenAI `text-embedding-3-*` | ` ` *(space)* | ` ` *(space)* |
 | jina v5 | `task=retrieval.passage: ` | `task=retrieval.query: ` |
+
+`{title}` is replaced with the document's title — the one from the
+frontmatter `title:` field, or `none` for a document that has none
+(which is what the EmbeddingGemma card prescribes for that case).
+The title tells the model what the chunk is *about*, which the chunk
+body alone often does not, so a titled document retrieves better
+than one embedded with a static `title: none`. A prompt without the
+placeholder is used verbatim, so models that take no task input are
+unaffected.
 
 OpenAI's `text-embedding-3-*` family accepts a "task" via prompt
 prefix too, but it's rarely useful in practice — set both prompts
@@ -1212,7 +1221,7 @@ embedding_gemma:
   base_url: https://embedder.local.net
   embedding_dimensions: 768        # must match what the server returns; mismatch logs a one-shot WARNING
   embedding_concurrency: 4         # parallel worker pool — same semantics as ollama.embedding_concurrency
-  embedding_doc_prompt: "title: none | text: "      # recommended for embedding-gemma
+  embedding_doc_prompt: "title: {title} | text: "      # recommended for embedding-gemma
   embedding_query_prompt: "task: search result | query: "
   timeout: 30s
 ```
@@ -1224,7 +1233,7 @@ EMBEDDING_PROVIDER=embedding_gemma
 EMBEDDING_GEMMA_BASE_URL=https://embedder.local.net
 EMBEDDING_GEMMA_MODEL=embeddinggemma-2
 EMBEDDING_GEMMA_DIMENSIONS=768
-EMBEDDING_GEMMA_DOC_PROMPT="title: none | text: "
+EMBEDDING_GEMMA_DOC_PROMPT="title: {title} | text: "
 EMBEDDING_GEMMA_QUERY_PROMPT="task: search result | query: "
 ```
 
@@ -1249,7 +1258,9 @@ ragabast handles this for you:
   OpenAI-compat path records `ollama.embedding_model`; the
   `/v2/embed` path has no model field on the wire, so it records
   `embedding_gemma.model` — set it, or ragabast cannot tell that
-  the embedder changed.
+  the embedder changed. The marker also records the doc prompt the
+  corpus was embedded with, so changing *that* invalidates the
+  corpus too.
 - When the recorded embedder differs from the configured one, the
   server **invalidates the stale corpus**: the store is moved
   aside to `data/vectors.stale-<timestamp>` (moved, not deleted —
@@ -1275,6 +1286,11 @@ Two things the marker does not cover:
 - **An undeclared embedder.** With `embedding_gemma.model` empty,
   ragabast has no name to compare and cannot notice a swap. Set
   it.
+- **A store written before the doc prompt was tracked.** Its marker
+  carries the model name only, so the prompt is "unknown" and the
+  prompt check is skipped — ragabast logs a warning instead. One
+  `ragabast vector reset --force` after the upgrade is enough to
+  make the marker complete.
 
 ## MCP (Model Context Protocol)
 

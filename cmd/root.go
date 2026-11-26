@@ -168,12 +168,14 @@ func (c *DoctorCmd) checkStoreEmbeddingDimension(cfg *config.Config) {
 		// empty path; nothing more to add.
 		return
 	}
-	db, err := vector.NewVectorDB(
-		cfg.VectorDB.CollectionName,
-		cfg.VectorDB.EmbeddingDimension,
-		dir,
-		cfg.EffectiveEmbeddingModel(),
-	)
+	db, err := vector.NewVectorDBWithOptions(vector.Options{
+		Name:                cfg.VectorDB.CollectionName,
+		EmbeddingDimension:  cfg.VectorDB.EmbeddingDimension,
+		PersistenceDir:      dir,
+		EmbeddingModel:      cfg.EffectiveEmbeddingModel(),
+		EmbeddingDocPrompt:  cfg.EffectiveEmbeddingDocPrompt(),
+		FailOnModelMismatch: true,
+	})
 	if err != nil {
 		// A model-mismatch error deserves a louder, more
 		// actionable message than a generic open-failed
