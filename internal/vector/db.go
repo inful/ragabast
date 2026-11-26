@@ -23,6 +23,7 @@ type VectorDB struct {
 	collection         *chromem.Collection
 	embeddingDimension int
 	embeddingModel     string
+	embeddingDocPrompt string
 	persistenceDir     string
 	mu                 sync.RWMutex
 }
@@ -38,6 +39,13 @@ type Options struct {
 	PersistenceDir     string
 	EmbeddingModel     string
 
+	// EmbeddingDocPrompt is the doc-side task prefix the corpus
+	// was embedded with. It is part of the store's identity: the
+	// vectors it produces sit in a different place than the ones
+	// an empty (or different) prompt produces, so a prompt change
+	// invalidates the corpus the same way a model change does.
+	EmbeddingDocPrompt string
+
 	// FailOnModelMismatch controls what happens when the
 	// persisted model's marker file carries a different
 	// model name than EmbeddingModel. True (the default)
@@ -49,14 +57,23 @@ type Options struct {
 }
 
 // modelMarkerFile is the on-disk marker that records which
-// embedding model produced the vectors in this persistence
-// directory. Read on every constructor call; written on the
-// first successful AddChunk / AddChunksBatch.
+// embedding model — and which doc prompt — produced the vectors in
+// this persistence directory. Read on every constructor call;
+// written on the first successful AddChunk / AddChunksBatch.
 //
 // Lives at the persistence root (next to chromem-go's own
 // files) so a single ls of the directory answers the
 // "what model is this?" question.
+//
+// Format: the model name on the first line, then optional
+// `key=value` lines. A marker written before the doc prompt was
+// tracked carries only the model name; the prompt is then
+// "unknown" and the prompt check is skipped.
 const modelMarkerFile = ".embedding_model"
+
+// docPromptMarkerKey is the marker key holding the doc prompt the
+// corpus was embedded with (stored quoted, so it stays on one line).
+const docPromptMarkerKey = "doc_prompt"
 
 // ErrModelMismatch is returned (wrapped) by NewVectorDB when
 // the persisted marker carries a different model name than the
@@ -68,10 +85,14 @@ var ErrModelMismatch = errors.New("vector DB embedding model mismatch")
 // shorthand for NewVectorDBWithOptions with FailOnModelMismatch
 // set to true (the safe default).
 //
-// The persistence directory, when non-empty, must contain
-// vectors from EmbeddingModel. A model swap requires wiping
-// the directory (`ragabast vector reset --force`) or setting
+// The persistence directory, when non-empty, must contain vectors
+// from EmbeddingModel. A model swap requires wiping the directory
+// (`ragabast vector reset --force`) or setting
 // FailOnModelMismatch=false in the Options form.
+//
+// The doc prompt is not part of this shorthand: callers that care
+// about prompt identity (the server, the doctor) use the Options
+// form and pass EmbeddingDocPrompt.
 func NewVectorDB(name string, embeddingDimension int, persistenceDir, embeddingModel string) (*VectorDB, error) {
 	return NewVectorDBWithOptions(Options{
 		Name:                name,
@@ -104,7 +125,7 @@ func NewVectorDBWithOptions(opts Options) (*VectorDB, error) {
 		// Check the model marker before opening chromem-go.
 		// We do this first so a mismatch returns the cleanest
 		// error path (no chromem-go state to clean up).
-		if err := checkModelMarker(opts.PersistenceDir, opts.EmbeddingModel, opts.FailOnModelMismatch); err != nil {
+		if err := checkModelMarker(opts.PersistenceDir, opts.EmbeddingModel, opts.EmbeddingDocPrompt, opts.FailOnModelMismatch); err != nil {
 			return nil, err
 		}
 
@@ -142,27 +163,44 @@ func NewVectorDBWithOptions(opts Options) (*VectorDB, error) {
 		collection:         collection,
 		embeddingDimension: opts.EmbeddingDimension,
 		embeddingModel:     opts.EmbeddingModel,
+		embeddingDocPrompt: opts.EmbeddingDocPrompt,
 		persistenceDir:     opts.PersistenceDir,
 	}, nil
 }
 
 // ModelMismatchError reports that the on-disk store was written by
-// a different embedding model than the one now configured. The
-// vectors live in the old model's vector space, so they cannot be
-// searched under the new one — the corpus has to be re-embedded.
+// a different embedding model — or with a different doc prompt —
+// than the one now configured. The vectors live in the old
+// embedder's vector space, so they cannot be searched under the
+// new one — the corpus has to be re-embedded.
 //
 // It wraps ErrModelMismatch, so `errors.Is(err, ErrModelMismatch)`
 // keeps working for callers that only care that a mismatch
-// happened; the typed fields let a caller name both models without
+// happened; the typed fields let a caller name both sides without
 // parsing the message.
 type ModelMismatchError struct {
 	// Persisted is the model name recorded in the store's marker.
 	Persisted string
 	// Configured is the model name the store is being opened with.
 	Configured string
+	// PersistedDocPrompt is the doc prompt the corpus was embedded
+	// with. Empty with a marker that predates prompt tracking
+	// means "unknown" — the prompt check is skipped then.
+	PersistedDocPrompt string
+	// ConfiguredDocPrompt is the doc prompt the store is being
+	// opened with.
+	ConfiguredDocPrompt string
+	// Reason names what did not match: "model" or "doc prompt".
+	Reason string
 }
 
 func (e *ModelMismatchError) Error() string {
+	if e.Reason == docPromptMarkerKey {
+		return fmt.Sprintf(
+			"the vector store was embedded with doc prompt %q but the configured doc prompt is %q; "+
+				"vectors from the old prompt cannot be searched safely under the new one",
+			e.PersistedDocPrompt, e.ConfiguredDocPrompt)
+	}
 	return fmt.Sprintf(
 		"persisted embedding model %q differs from configured %q; "+
 			"vectors from %q cannot be searched safely under %q",
@@ -217,7 +255,8 @@ func QuarantineStore(persistenceDir, keywordIndexDir string) (string, error) {
 }
 
 // checkModelMarker reads the on-disk marker file at persistDir
-// and compares its contents to configuredModel. Behavior:
+// and compares its contents to the configured model and doc
+// prompt. Behavior:
 //
 //   - Marker missing: nothing to check. Return nil. The first
 //     AddChunk call will write the marker.
@@ -226,12 +265,22 @@ func QuarantineStore(persistenceDir, keywordIndexDir string) (string, error) {
 //     operator who never declared a model name (the /v2/embed
 //     path has no model field on the wire) must not be blocked
 //     by a marker written under a different provider's name.
-//   - Marker present, matches configured: return nil.
-//   - Marker present, differs: if failOnMismatch is true,
-//     return an error wrapping ErrModelMismatch with both
-//     names. Otherwise log a warning and return nil so the
-//     constructor succeeds.
-func checkModelMarker(persistDir, configuredModel string, failOnMismatch bool) error {
+//   - Marker present, model matches, doc prompt matches (or the
+//     marker predates prompt tracking and the prompt is
+//     therefore unknown): return nil.
+//   - Marker present, model differs: error (or warning) naming
+//     both models.
+//   - Marker present, model matches but the doc prompt differs:
+//     error (or warning) naming both prompts. The vectors were
+//     produced under the old prompt, so they are not comparable
+//     with vectors produced under the new one.
+//
+// The doc-prompt check is skipped when the marker carries no
+// prompt at all: a store written before the prompt was tracked
+// cannot be judged, and refusing to open it would strand every
+// existing install. The warning tells the operator what to do
+// instead.
+func checkModelMarker(persistDir, configuredModel, configuredDocPrompt string, failOnMismatch bool) error {
 	if configuredModel == "" {
 		return nil
 	}
@@ -243,11 +292,37 @@ func checkModelMarker(persistDir, configuredModel string, failOnMismatch bool) e
 		}
 		return fmt.Errorf("read model marker at %s: %w", path, err)
 	}
-	persisted := strings.TrimSpace(string(data))
-	if persisted == configuredModel {
+
+	persistedModel, persistedDocPrompt, hasDocPrompt := parseModelMarker(data)
+	if persistedModel != configuredModel {
+		return reportMismatch(&ModelMismatchError{
+			Persisted:  persistedModel,
+			Configured: configuredModel,
+			Reason:     "model",
+		}, failOnMismatch)
+	}
+
+	if !hasDocPrompt {
+		log.Printf("⚠ the vector store at %s predates doc-prompt tracking; if you change the doc prompt, "+
+			"re-embed the corpus (`ragabast vector reset --force` then `ragabast ingest`) so every chunk "+
+			"carries the same prefix", persistDir)
 		return nil
 	}
-	mismatch := &ModelMismatchError{Persisted: persisted, Configured: configuredModel}
+	if persistedDocPrompt != configuredDocPrompt {
+		return reportMismatch(&ModelMismatchError{
+			Persisted:           persistedModel,
+			Configured:          configuredModel,
+			Reason:              docPromptMarkerKey,
+			PersistedDocPrompt:  persistedDocPrompt,
+			ConfiguredDocPrompt: configuredDocPrompt,
+		}, failOnMismatch)
+	}
+	return nil
+}
+
+// reportMismatch returns the mismatch error, or logs it and
+// returns nil when the operator asked for the lenient mode.
+func reportMismatch(mismatch *ModelMismatchError, failOnMismatch bool) error {
 	if failOnMismatch {
 		return fmt.Errorf("%w; recover with `ragabast vector reset --force` "+
 			"then `ragabast ingest` to rebuild from source documents", mismatch)
@@ -256,12 +331,45 @@ func checkModelMarker(persistDir, configuredModel string, failOnMismatch bool) e
 	return nil
 }
 
-// writeModelMarkerIfMissing stamps the embedding model on the
-// persistence directory the first time data is written.
+// parseModelMarker reads the marker file: the model name on the
+// first line, then `key=value` lines. The doc prompt is stored
+// quoted so a prompt containing a newline stays on one line.
+//
+// A marker written before the doc prompt was tracked carries only
+// the model name; hasDocPrompt comes back false ("unknown") and
+// the prompt check is skipped.
+func parseModelMarker(data []byte) (model string, docPrompt string, hasDocPrompt bool) {
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	model = strings.TrimSpace(lines[0])
+	for _, line := range lines[1:] {
+		value, ok := strings.CutPrefix(strings.TrimSpace(line), docPromptMarkerKey+"=")
+		if !ok {
+			continue
+		}
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			continue
+		}
+		docPrompt = unquoted
+		hasDocPrompt = true
+	}
+	return model, docPrompt, hasDocPrompt
+}
+
+// writeModelMarkerIfMissing stamps the embedding model — and the
+// doc prompt the corpus was embedded with — on the persistence
+// directory the first time data is written.
+//
 // Idempotent: subsequent calls observe the existing file and
 // do not re-write. The marker is only written when a chunk
 // successfully lands in the collection — a failed write
 // must not commit a model claim on data that isn't there.
+//
+// Not re-writing is deliberate: the marker records the embedder
+// configuration the CORPUS was built with. Re-stamping it on every
+// ingest would make a prompt change invisible — the first ingest
+// after the change would overwrite the fingerprint before anyone
+// looked.
 //
 // Does NOT take db.mu — the caller (AddChunk / AddChunksBatch)
 // already holds it, and the os.Stat + os.WriteFile sequence
@@ -281,7 +389,8 @@ func (db *VectorDB) writeModelMarkerIfMissing() {
 		// only "make sure there's a marker".
 		return
 	}
-	data := []byte(db.embeddingModel)
+	data := []byte(db.embeddingModel + "\n" +
+		docPromptMarkerKey + "=" + strconv.Quote(db.embeddingDocPrompt) + "\n")
 	// 0644: readable by the operator running `ls`; not
 	// world-writable because the marker is integrity
 	// information, not a shared resource.

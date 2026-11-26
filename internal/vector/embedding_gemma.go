@@ -146,7 +146,7 @@ func (c *EmbeddingGemmaClient) GenerateEmbedding(ctx context.Context, text strin
 	if text == "" {
 		return nil, models.ErrEmbeddingFailed
 	}
-	resp, err := c.embed(ctx, []string{c.applyDocPrompt(text)})
+	resp, err := c.embed(ctx, []string{applyDocPrompt(c.docPrompt, "", text)})
 	if err != nil {
 		return nil, err
 	}
@@ -175,16 +175,6 @@ func (c *EmbeddingGemmaClient) EmbedQuery(ctx context.Context, query string) ([]
 	return resp[0], nil
 }
 
-// applyDocPrompt returns text with the doc prompt prepended.
-// Empty prompt = identity (no prepend, no allocation
-// thrash on the hot path).
-func (c *EmbeddingGemmaClient) applyDocPrompt(text string) string {
-	if c.docPrompt == "" {
-		return text
-	}
-	return c.docPrompt + text
-}
-
 // applyQueryPrompt mirrors applyDocPrompt for queries.
 func (c *EmbeddingGemmaClient) applyQueryPrompt(query string) string {
 	if c.queryPrompt == "" {
@@ -194,11 +184,16 @@ func (c *EmbeddingGemmaClient) applyQueryPrompt(query string) string {
 }
 
 // GenerateChunkEmbeddings generates embeddings for a batch
-// of chunks. The configured docPrompt (if any) is prepended
-// to every chunk text before the POST. Empty prompt =
+// of chunks. The configured docPrompt (if any) is prepended to
+// every chunk text before the POST. Empty prompt =
 // identity (raw text). When concurrency > 1, the input is
 // split into min(concurrency, len(chunks)) sub-batches and
 // processed in parallel.
+//
+// A {title} placeholder in the doc prompt is replaced with the
+// chunk's document title ("none" when the document has no title),
+// so the model gets the `title: {title} | text: {content}` format
+// its card prescribes.
 func (c *EmbeddingGemmaClient) GenerateChunkEmbeddings(ctx context.Context, chunks []*models.Chunk) ([][]float32, error) {
 	if len(chunks) == 0 {
 		return nil, models.ErrEmbeddingFailed
@@ -206,7 +201,7 @@ func (c *EmbeddingGemmaClient) GenerateChunkEmbeddings(ctx context.Context, chun
 
 	texts := make([]string, len(chunks))
 	for i, chunk := range chunks {
-		texts[i] = c.applyDocPrompt(chunk.GetFullPath())
+		texts[i] = applyDocPrompt(c.docPrompt, chunk.DocumentTitle, chunk.GetFullPath())
 	}
 
 	return c.generateEmbeddingsBatch(ctx, texts)
@@ -219,7 +214,14 @@ func (c *EmbeddingGemmaClient) GenerateChunkEmbedding(ctx context.Context, chunk
 		return nil, models.ErrEmbeddingFailed
 	}
 
-	return c.GenerateEmbedding(ctx, chunk.GetFullPath())
+	resp, err := c.embed(ctx, []string{applyDocPrompt(c.docPrompt, chunk.DocumentTitle, chunk.GetFullPath())})
+	if err != nil {
+		return nil, err
+	}
+	if len(resp) == 0 || len(resp[0]) == 0 {
+		return nil, models.ErrEmbeddingFailed
+	}
+	return resp[0], nil
 }
 
 // generateEmbeddingsBatch generates embeddings for multiple

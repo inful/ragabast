@@ -42,6 +42,10 @@ type Service struct {
 	cache        *querycache.Cache[[]models.SearchResult]
 	chatSessions *ChatSessionStore
 	embedModel   string // captured at construction so the cache key stays stable
+	// embedQueryPrompt is the query-side task prefix, captured for
+	// the same reason as embedModel: it changes how the query is
+	// embedded, so it belongs in the cache key.
+	embedQueryPrompt string
 
 	// now is the reference clock for Hugo "don't publish"
 	// preflight checks (issue #97). Defaults to time.Now in
@@ -151,8 +155,9 @@ func NewService(cfg *config.Config) (*Service, error) {
 			MaxTurns: cfg.Ragabast.ChatSessionMaxTurns,
 			IdleTTL:  cfg.Ragabast.ChatSessionIdleTTL,
 		}),
-		embedModel: cfg.EffectiveEmbeddingModel(),
-		now:        time.Now,
+		embedModel:       cfg.EffectiveEmbeddingModel(),
+		embedQueryPrompt: cfg.EffectiveEmbeddingQueryPrompt(),
+		now:              time.Now,
 	}, nil
 }
 
@@ -172,12 +177,14 @@ func NewService(cfg *config.Config) (*Service, error) {
 // off: the server then refuses to start and names
 // `ragabast vector reset --force` as the fix.
 func openVectorDB(cfg *config.Config) (*vector.VectorDB, error) {
-	db, err := vector.NewVectorDB(
-		cfg.VectorDB.CollectionName,
-		cfg.VectorDB.EmbeddingDimension,
-		cfg.VectorDB.PersistenceDir,
-		cfg.EffectiveEmbeddingModel(),
-	)
+	db, err := vector.NewVectorDBWithOptions(vector.Options{
+		Name:                cfg.VectorDB.CollectionName,
+		EmbeddingDimension:  cfg.VectorDB.EmbeddingDimension,
+		PersistenceDir:      cfg.VectorDB.PersistenceDir,
+		EmbeddingModel:      cfg.EffectiveEmbeddingModel(),
+		EmbeddingDocPrompt:  cfg.EffectiveEmbeddingDocPrompt(),
+		FailOnModelMismatch: true,
+	})
 	if err == nil {
 		return db, nil
 	}
@@ -197,12 +204,14 @@ func openVectorDB(cfg *config.Config) (*vector.VectorDB, error) {
 	logStaleStorePath(stale)
 	log.Printf("service: re-ingest your documents (ragabast ingest, or let docbuilder re-push them) to rebuild the index")
 
-	db, err = vector.NewVectorDB(
-		cfg.VectorDB.CollectionName,
-		cfg.VectorDB.EmbeddingDimension,
-		cfg.VectorDB.PersistenceDir,
-		cfg.EffectiveEmbeddingModel(),
-	)
+	db, err = vector.NewVectorDBWithOptions(vector.Options{
+		Name:                cfg.VectorDB.CollectionName,
+		EmbeddingDimension:  cfg.VectorDB.EmbeddingDimension,
+		PersistenceDir:      cfg.VectorDB.PersistenceDir,
+		EmbeddingModel:      cfg.EffectiveEmbeddingModel(),
+		EmbeddingDocPrompt:  cfg.EffectiveEmbeddingDocPrompt(),
+		FailOnModelMismatch: true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize vector DB after invalidating the stale store: %w", err)
 	}

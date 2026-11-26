@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ragabast/internal/models"
@@ -35,8 +36,13 @@ func TestVectorDB_WritesModelMarkerOnFirstAdd(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(dir, modelMarkerFile))
 	require.NoError(t, err, "marker file must exist after first AddChunk")
-	assert.Equal(t, "nomic-embed-text:v1.5", string(data),
+
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	require.Len(t, lines, 2, "the marker carries the model and the doc prompt")
+	assert.Equal(t, "nomic-embed-text:v1.5", lines[0],
 		"marker must contain the configured embedding model")
+	assert.Equal(t, `doc_prompt=""`, lines[1],
+		"the marker must record the doc prompt the corpus was embedded with")
 }
 
 // TestVectorDB_NoMarkerForFreshOpen pins that opening a fresh

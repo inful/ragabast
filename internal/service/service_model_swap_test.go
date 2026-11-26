@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/ragabast/internal/config"
@@ -12,7 +13,7 @@ import (
 
 // modelSwapConfig returns a config whose vector store lives in a
 // temp dir and whose embedder is the declared /v2/embed model.
-func modelSwapConfig(t *testing.T, model string) *config.Config {
+func modelSwapConfig(t *testing.T) *config.Config {
 	t.Helper()
 
 	cfg := config.DefaultConfig()
@@ -20,7 +21,7 @@ func modelSwapConfig(t *testing.T, model string) *config.Config {
 	cfg.VectorDB.EmbeddingDimension = 768
 	cfg.EmbeddingProvider = "embedding_gemma"
 	cfg.EmbeddingGemma.BaseURL = "http://127.0.0.1:1"
-	cfg.EmbeddingGemma.Model = model
+	cfg.EmbeddingGemma.Model = "embeddinggemma-2"
 
 	return cfg
 }
@@ -35,6 +36,17 @@ func seedModelMarker(t *testing.T, dir, model string) {
 		[]byte(model), 0o600))
 }
 
+// seedModelMarkerWithPrompt writes a marker carrying the model and
+// the doc prompt the corpus was embedded with.
+func seedModelMarkerWithPrompt(t *testing.T, dir, model, docPrompt string) {
+	t.Helper()
+
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	marker := model + "\ndoc_prompt=" + strconv.Quote(docPrompt) + "\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".embedding_model"),
+		[]byte(marker), 0o600))
+}
+
 // TestNewService_EmbedderChange_InvalidatesStaleStore pins the
 // headline behavior: when the store on disk was embedded with a
 // different model, the stale vectors are invalidated (moved aside,
@@ -42,7 +54,7 @@ func seedModelMarker(t *testing.T, dir, model string) {
 // stale vectors live in the old model's vector space, so keeping
 // them would serve nonsense.
 func TestNewService_EmbedderChange_InvalidatesStaleStore(t *testing.T) {
-	cfg := modelSwapConfig(t, "embeddinggemma-2")
+	cfg := modelSwapConfig(t)
 	seedModelMarker(t, cfg.VectorDB.PersistenceDir, "embeddinggemma")
 
 	svc, err := NewService(cfg)
@@ -64,7 +76,7 @@ func TestNewService_EmbedderChange_InvalidatesStaleStore(t *testing.T) {
 // opt-out: an operator who would rather look before anything moves
 // gets the hard stop with the recovery command.
 func TestNewService_EmbedderChange_FailOnMismatchStopsStartup(t *testing.T) {
-	cfg := modelSwapConfig(t, "embeddinggemma-2")
+	cfg := modelSwapConfig(t)
 	cfg.VectorDB.FailOnModelMismatch = true
 	seedModelMarker(t, cfg.VectorDB.PersistenceDir, "embeddinggemma")
 
@@ -82,7 +94,7 @@ func TestNewService_EmbedderChange_FailOnMismatchStopsStartup(t *testing.T) {
 // TestNewService_SameEmbedder_KeepsStore pins the no-op case: the
 // same model on both sides must leave the corpus alone.
 func TestNewService_SameEmbedder_KeepsStore(t *testing.T) {
-	cfg := modelSwapConfig(t, "embeddinggemma-2")
+	cfg := modelSwapConfig(t)
 	seedModelMarker(t, cfg.VectorDB.PersistenceDir, "embeddinggemma-2")
 
 	_, err := NewService(cfg)
@@ -93,4 +105,39 @@ func TestNewService_SameEmbedder_KeepsStore(t *testing.T) {
 	assert.Empty(t, matches, "an unchanged embedder must not invalidate anything")
 	assert.FileExists(t, filepath.Join(cfg.VectorDB.PersistenceDir, ".embedding_model"),
 		"the marker must survive")
+}
+
+// TestNewService_DocPromptChange_InvalidatesStaleStore pins that a
+// doc-prompt change invalidates the corpus too: the vectors were
+// produced under the old prefix, so they are not comparable with
+// vectors produced under the new one.
+func TestNewService_DocPromptChange_InvalidatesStaleStore(t *testing.T) {
+	cfg := modelSwapConfig(t)
+	cfg.EmbeddingGemma.EmbeddingDocPrompt = "title: {title} | text: "
+	seedModelMarkerWithPrompt(t, cfg.VectorDB.PersistenceDir, "embeddinggemma-2", "title: none | text: ")
+
+	svc, err := NewService(cfg)
+	require.NoError(t, err, "a doc-prompt change must not block startup")
+	require.NotNil(t, svc)
+
+	matches, err := filepath.Glob(cfg.VectorDB.PersistenceDir + ".stale-*")
+	require.NoError(t, err)
+	assert.Len(t, matches, 1, "the stale store must be moved aside, not deleted")
+}
+
+// TestNewService_LegacyMarkerWithoutPrompt_KeepsStore pins the
+// upgrade path: a store written before the doc prompt was tracked
+// cannot be judged, so it is left alone (with a warning) instead of
+// being invalidated on every upgrade.
+func TestNewService_LegacyMarkerWithoutPrompt_KeepsStore(t *testing.T) {
+	cfg := modelSwapConfig(t)
+	cfg.EmbeddingGemma.EmbeddingDocPrompt = "title: {title} | text: "
+	seedModelMarker(t, cfg.VectorDB.PersistenceDir, "embeddinggemma-2")
+
+	_, err := NewService(cfg)
+	require.NoError(t, err)
+
+	matches, globErr := filepath.Glob(cfg.VectorDB.PersistenceDir + ".stale-*")
+	require.NoError(t, globErr)
+	assert.Empty(t, matches, "a store with an unknown prompt must not be invalidated")
 }
