@@ -52,6 +52,7 @@ YAML to find the knob they need.
 | Env var | YAML key | Default | Description |
 |---|---|---|---|
 | `EMBEDDING_GEMMA_BASE_URL` | `base_url` | `""` (required when provider=`embedding_gemma`) | Server root. Path `/v2/embed` is appended by the client. |
+| `EMBEDDING_GEMMA_MODEL` | `model` | `""` (unknown) | Model the server runs, e.g. `embeddinggemma-2`. Not sent on the wire — recorded in the store's model marker so a swap is noticed. |
 | `EMBEDDING_GEMMA_TIMEOUT` | `timeout` | `30s` | Per-request HTTP timeout. |
 | `EMBEDDING_GEMMA_DIMENSIONS` | `embedding_dimensions` | `0` (off) | Expected response dimension. Mismatch logs a one-shot WARNING. |
 | `EMBEDDING_GEMMA_CONCURRENCY` | `embedding_concurrency` | `1` | Parallel `/v2/embed` requests in flight on the ingest path. |
@@ -66,6 +67,7 @@ YAML to find the knob they need.
 | `VECTOR_DB_KEYWORD_INDEX_DIR` | `keyword_index_dir` | `""` (→ `<persistence_dir>/search`) | bleve keyword index path. Override when persistence is on NFS. |
 | `VECTOR_DB_COLLECTION` | `collection_name` | `ragabast` | chromem-go collection name. |
 | `VECTOR_DB_DIMENSION` | `embedding_dimension` | `768` | Embedding vector size. Must match the truncated dimension if `OLLAMA_EMBEDDING_DIMENSIONS > 0`. |
+| `VECTOR_DB_FAIL_ON_MODEL_MISMATCH` | `fail_on_model_mismatch` | `false` | When the store was embedded with a different model: `false` invalidates the stale corpus automatically (moved aside), `true` refuses to start. |
 
 #### `server` — HTTP layer
 
@@ -1138,7 +1140,7 @@ one, retrieval quality drops measurably. The canonical prefixes:
 
 | Model | `embedding_doc_prompt` | `embedding_query_prompt` |
 |---|---|---|
-| `embeddinggemma` / `embedding-gemma` | `search_document: ` | `search_query: ` |
+| `embeddinggemma` / `embedding-gemma` (v1 and v2) | `title: none | text: ` | `task: search result | query: ` |
 | OpenAI `text-embedding-3-*` | ` ` *(space)* | ` ` *(space)* |
 | jina v5 | `task=retrieval.passage: ` | `task=retrieval.query: ` |
 
@@ -1220,6 +1222,7 @@ Or via env vars:
 ```bash
 EMBEDDING_PROVIDER=embedding_gemma
 EMBEDDING_GEMMA_BASE_URL=https://embedder.local.net
+EMBEDDING_GEMMA_MODEL=embeddinggemma-2
 EMBEDDING_GEMMA_DIMENSIONS=768
 EMBEDDING_GEMMA_DOC_PROMPT="title: none | text: "
 EMBEDDING_GEMMA_QUERY_PROMPT="task: search result | query: "
@@ -1229,6 +1232,49 @@ EMBEDDING_GEMMA_QUERY_PROMPT="task: search result | query: "
 configured provider, so dimension mismatches show up there
 before the first ingest crashes with "vectors must have the
 same length".
+
+### Switching embedders
+
+Changing the embedder invalidates every vector in the store: the
+old vectors live in the old model's vector space, so they cannot
+answer a search under the new one. Re-ingesting the *same*
+documents is not enough on its own — ragabast dedupes on
+`(uid, fingerprint)`, and the documents have not changed, so the
+ingest would be a no-op and the old vectors would stay.
+
+ragabast handles this for you:
+
+- The store records the embedder that wrote it, in a marker file
+  (`.embedding_model`) at the persistence directory root. The
+  OpenAI-compat path records `ollama.embedding_model`; the
+  `/v2/embed` path has no model field on the wire, so it records
+  `embedding_gemma.model` — set it, or ragabast cannot tell that
+  the embedder changed.
+- When the recorded embedder differs from the configured one, the
+  server **invalidates the stale corpus**: the store is moved
+  aside to `data/vectors.stale-<timestamp>` (moved, not deleted —
+  a mistyped model name stays recoverable) and the server starts
+  with an empty store.
+- The corpus is rebuilt by the next ingest: `ragabast ingest`, or
+  docbuilder re-pushing the documents. docbuilder's fingerprint
+  preflight answers `404` for a document that is no longer in the
+  store, so it re-sends everything.
+
+Set `vectordb.fail_on_model_mismatch: true` (env
+`VECTOR_DB_FAIL_ON_MODEL_MISMATCH`) to turn the automatic
+invalidation off: the server then refuses to start and names
+`ragabast vector reset --force` as the fix, so you can look
+before anything moves.
+
+Two things the marker does not cover:
+
+- **A dimension change with the same model name.** The embedder
+  name matches, so the corpus is not invalidated, and the store
+  fails to open with a dimension error. Run
+  `ragabast vector reset --force` and re-ingest.
+- **An undeclared embedder.** With `embedding_gemma.model` empty,
+  ragabast has no name to compare and cannot notice a swap. Set
+  it.
 
 ## MCP (Model Context Protocol)
 

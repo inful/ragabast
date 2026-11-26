@@ -24,6 +24,26 @@ type EmbeddingGemmaConfig struct {
 	// either form).
 	BaseURL string `env:"EMBEDDING_GEMMA_BASE_URL" yaml:"base_url"`
 
+	// Model names the model the server runs, e.g.
+	// "embeddinggemma" or "embeddinggemma-2".
+	//
+	// The /v2/embed wire shape has no `model` field — the
+	// server picks the model itself — so this value is NOT
+	// sent on the wire. It exists so ragabast can record
+	// which model wrote the vector store: the store's
+	// model marker then catches a model swap at startup
+	// (the server refuses to open a store written by a
+	// different model and names `ragabast vector reset
+	// --force` as the fix). Without it, switching models
+	// is invisible to ragabast, and re-ingesting the same
+	// documents is a no-op because the (uid, fingerprint)
+	// dedupe skips them — leaving the old model's vectors
+	// in place.
+	//
+	// Optional: empty means "unknown", and the marker check
+	// is skipped.
+	Model string `env:"EMBEDDING_GEMMA_MODEL" yaml:"model,omitempty"`
+
 	// Timeout is the per-request HTTP timeout. Default
 	// 30s when <= 0.
 	Timeout time.Duration `env:"EMBEDDING_GEMMA_TIMEOUT" yaml:"timeout"`

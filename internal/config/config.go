@@ -72,6 +72,44 @@ type Config struct {
 	Auth AuthConfig `yaml:"auth,omitempty"`
 }
 
+// EffectiveEmbeddingModel returns the name of the embedding model
+// the configured provider talks to.
+//
+// The OpenAI-compat path names its model on the wire
+// (ollama.embedding_model). The /v2/embed path has no model field
+// — the server picks it — so the operator declares it via
+// embedding_gemma.model.
+//
+// The value is what the vector store's model marker records, which
+// is how ragabast notices that the corpus was embedded with a
+// different model: the store then refuses to open and names
+// `ragabast vector reset --force` as the fix. Empty means
+// "unknown" — the marker check is skipped rather than failing on
+// a name nobody declared.
+func (c *Config) EffectiveEmbeddingModel() string {
+	if c.EmbeddingProvider == "embedding_gemma" {
+		return c.EmbeddingGemma.Model
+	}
+	return c.Ollama.EmbeddingModel
+}
+
+// EffectiveEmbeddingDimensions returns the embedding dimension the
+// configured provider is expected to produce, or 0 when unknown.
+//
+// On the OpenAI-compat path a positive value is a Matryoshka
+// truncation request ("dimensions": N), so the server returns
+// exactly N dims. On the /v2/embed path there is no dimensions
+// field on the wire — the value is the operator's declaration of
+// what the server returns. Either way it is the dimension the
+// vector store must be sized for, so it wins over the model's
+// full-size dimension.
+func (c *Config) EffectiveEmbeddingDimensions() int {
+	if c.EmbeddingProvider == "embedding_gemma" {
+		return c.EmbeddingGemma.EmbeddingDimensions
+	}
+	return c.Ollama.EmbeddingDimensions
+}
+
 // DefaultConfig returns a configuration with sensible defaults.
 func DefaultConfig() *Config {
 	// Get current working directory.
@@ -356,6 +394,9 @@ func (c *Config) ApplyEnvOverrides() {
 	if v := os.Getenv("EMBEDDING_GEMMA_BASE_URL"); v != "" {
 		c.EmbeddingGemma.BaseURL = v
 	}
+	if v := os.Getenv("EMBEDDING_GEMMA_MODEL"); v != "" {
+		c.EmbeddingGemma.Model = v
+	}
 	if v := os.Getenv("EMBEDDING_GEMMA_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			c.EmbeddingGemma.Timeout = d
@@ -462,6 +503,9 @@ func (c *Config) ApplyEnvOverrides() {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			c.VectorDB.EmbeddingDimension = n
 		}
+	}
+	if v, ok := envBool("VECTOR_DB_FAIL_ON_MODEL_MISMATCH"); ok {
+		c.VectorDB.FailOnModelMismatch = v
 	}
 
 	// Server config.

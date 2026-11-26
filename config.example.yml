@@ -106,6 +106,15 @@ ollama:
 #      EMBEDDING_GEMMA_DOC_PROMPT, EMBEDDING_GEMMA_QUERY_PROMPT.
 # embedding_gemma:
 #   base_url: https://embedder.local.net
+#   # The model the server runs, e.g. "embeddinggemma" or
+#   # "embeddinggemma-2". The /v2/embed wire shape has no
+#   # `model` field — the server picks the model — so this is
+#   # only a declaration ragabast records. It lands in the
+#   # store's model marker, which is how a model swap is
+#   # noticed: the stale vectors are invalidated (moved
+#   # aside) and the corpus re-embedded. Leave it empty and
+#   # ragabast cannot tell that the embedder changed.
+#   model: embeddinggemma-2
 #   # EmbeddingDocPrompt and EmbeddingQueryPrompt are the
 #   # task-name prefixes embedding-gemma expects. The
 #   # recommended values below mirror Google's docs; leave
@@ -148,8 +157,26 @@ vectordb:
   #   - jina v5 at dimensions=256         256
   #   - bge-large-en-v1.5           1024
   #   - embedding-gemma (full)       768
+  #   - embedding-gemma-2 (full)     768
   # Changing this requires deleting data/vectors/ and re-ingesting.
   embedding_dimension: 768
+
+  # What happens when the store on disk was embedded with a
+  # different model than the one now configured. The vectors
+  # live in the old model's vector space, so they cannot answer
+  # a search under the new one.
+  #
+  # false (the default): ragabast invalidates the stale corpus
+  # by moving the store aside (data/vectors.stale-<timestamp>)
+  # and starting fresh. Nothing is deleted — the stale copy
+  # stays until you remove it — and the corpus is rebuilt by
+  # the next ingest (ragabast ingest, or docbuilder re-pushing).
+  #
+  # true: the server refuses to start and tells you to run
+  # `ragabast vector reset --force`. Use this if you would
+  # rather stop and look before anything moves.
+  # Env: VECTOR_DB_FAIL_ON_MODEL_MISMATCH.
+  fail_on_model_mismatch: false
 
 server:
   address: 0.0.0.0
