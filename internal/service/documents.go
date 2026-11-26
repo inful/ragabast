@@ -73,6 +73,24 @@ func (s *Service) GetDocument(ctx context.Context, documentID string) (*models.D
 	return doc, nil
 }
 
+// RelatedDocuments returns the documents most similar to the
+// document with the given UID, most similar first.
+//
+// The similarity is computed from the stored chunk embeddings, so
+// the call costs no embedding request and works even when the
+// embeddings server is unreachable. The queried document is never
+// in the answer.
+//
+// Returns vector.ErrNotFound when no document with that UID has
+// been ingested.
+func (s *Service) RelatedDocuments(ctx context.Context, uid string, limit int) ([]vector.RelatedDocument, error) {
+	uid = strings.TrimSpace(uid)
+	if uid == "" {
+		return nil, vector.ErrNotFound
+	}
+	return s.vectorOps.RelatedDocuments(ctx, uid, limit)
+}
+
 // DocumentFingerprintInfo mirrors vector.DocumentFingerprintInfo
 // at the service layer. The HTTP layer (GET /api/documents/{uid}/
 // fingerprint) returns this shape to ingest pipelines that want
