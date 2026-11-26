@@ -278,6 +278,10 @@ func (f *fakeHumaService) GetTagsAndCategories(ctx context.Context) (tags []stri
 // is a no-op.
 func (f *fakeHumaService) StopChatSessionsGC() {}
 
+// Close satisfies serviceAPI. The real Service closes the bleve
+// keyword index; test fakes hold no such resource.
+func (f *fakeHumaService) Close() error { return nil }
+
 // QueryCacheStats satisfies serviceAPI for /api/health/full
 // tests. Reports the cache disabled (capacity 0) so existing
 // tests don't have to wire cache plumbing; new tests
@@ -569,6 +573,10 @@ func (f *fakeService) GetTagsAndCategories(ctx context.Context) ([]string, []str
 // runs a chat-session idle-TTL GC; test fakes don't, so this
 // is a no-op.
 func (f *fakeService) StopChatSessionsGC() {}
+
+// Close satisfies serviceAPI. The real Service closes the bleve
+// keyword index; test fakes hold no such resource.
+func (f *fakeService) Close() error { return nil }
 
 // QueryCacheStats satisfies serviceAPI; reports zero values
 // (cache disabled) so existing tests don't have to wire

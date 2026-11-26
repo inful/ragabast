@@ -345,6 +345,12 @@ func LoadSearchIndex(path string) (*SearchIndex, error) {
 
 // Close releases the index's file handles. bleve stores its
 // state under path and reopens on next load.
+//
+// Bleve keeps a background writer alive until the index is closed,
+// so a caller that removes the index's directory (a test's temp
+// dir, a store reset) must close it first — otherwise the writer
+// recreates files mid-removal and the removal fails with
+// "directory not empty".
 func (s *SearchIndex) Close() error {
 	if s == nil || s.index == nil {
 		return nil

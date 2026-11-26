@@ -198,9 +198,7 @@ func openVectorDB(cfg *config.Config) (*vector.VectorDB, error) {
 	if qErr != nil {
 		return nil, fmt.Errorf("failed to invalidate the store written by %q: %w", mismatch.Persisted, qErr)
 	}
-	log.Printf("service: the vector store was embedded with %q but the configured embedder is %q. "+
-		"The old vectors cannot be searched under the new embedder, so they were invalidated",
-		mismatch.Persisted, mismatch.Configured)
+	logInvalidatedStore(mismatch)
 	logStaleStorePath(stale)
 	log.Printf("service: re-ingest your documents (ragabast ingest, or let docbuilder re-push them) to rebuild the index")
 
@@ -218,6 +216,20 @@ func openVectorDB(cfg *config.Config) (*vector.VectorDB, error) {
 	return db, nil
 }
 
+// logInvalidatedStore tells the operator why the corpus was
+// invalidated: the embedder changed, or the doc prompt did.
+func logInvalidatedStore(mismatch *vector.ModelMismatchError) {
+	if mismatch.Reason == vector.ReasonDocPrompt {
+		log.Printf("service: the vector store was embedded with doc prompt %q but the configured doc prompt is %q. "+
+			"Vectors from the old prompt cannot be searched under the new one, so they were invalidated",
+			mismatch.PersistedDocPrompt, mismatch.ConfiguredDocPrompt)
+		return
+	}
+	log.Printf("service: the vector store was embedded with %q but the configured embedder is %q. "+
+		"The old vectors cannot be searched under the new embedder, so they were invalidated",
+		mismatch.Persisted, mismatch.Configured)
+}
+
 // logStaleStorePath tells the operator where the invalidated store
 // went, so it can be inspected or deleted.
 func logStaleStorePath(stale string) {
@@ -225,6 +237,18 @@ func logStaleStorePath(stale string) {
 		return
 	}
 	log.Printf("service: the previous store was moved to %s. Delete it once the corpus has been re-ingested", stale)
+}
+
+// Close releases the resources the service holds, currently the
+// bleve keyword index behind the vector layer. Bleve keeps a
+// background writer alive until the index is closed, so a caller
+// that wipes the store (a reset, a test's temp dir) must close the
+// service first.
+func (s *Service) Close() error {
+	if s == nil {
+		return nil
+	}
+	return s.vectorOps.Close()
 }
 
 // SetNow replaces the service's clock for tests that need a

@@ -940,7 +940,16 @@ func (s *Server) shutdown(ctx context.Context) error {
 	}
 
 	if s.server != nil {
-		return s.server.Shutdown(ctx)
+		if err := s.server.Shutdown(ctx); err != nil {
+			return err
+		}
+	}
+	// Close the service AFTER the HTTP server is down: the bleve
+	// keyword index must stay readable for in-flight requests.
+	// Closing it releases bleve's background writer, which keeps
+	// the index directory alive until then.
+	if s.service != nil {
+		_ = s.service.Close()
 	}
 	return nil
 }

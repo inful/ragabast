@@ -168,6 +168,14 @@ func NewVectorDBWithOptions(opts Options) (*VectorDB, error) {
 	}, nil
 }
 
+// Reasons a store can stop matching the configuration.
+const (
+	// ReasonModel: the marker names a different embedding model.
+	ReasonModel = "model"
+	// ReasonDocPrompt: the marker names a different doc prompt.
+	ReasonDocPrompt = "doc_prompt"
+)
+
 // ModelMismatchError reports that the on-disk store was written by
 // a different embedding model — or with a different doc prompt —
 // than the one now configured. The vectors live in the old
@@ -195,7 +203,7 @@ type ModelMismatchError struct {
 }
 
 func (e *ModelMismatchError) Error() string {
-	if e.Reason == docPromptMarkerKey {
+	if e.Reason == ReasonDocPrompt {
 		return fmt.Sprintf(
 			"the vector store was embedded with doc prompt %q but the configured doc prompt is %q; "+
 				"vectors from the old prompt cannot be searched safely under the new one",
@@ -298,7 +306,7 @@ func checkModelMarker(persistDir, configuredModel, configuredDocPrompt string, f
 		return reportMismatch(&ModelMismatchError{
 			Persisted:  persistedModel,
 			Configured: configuredModel,
-			Reason:     "model",
+			Reason:     ReasonModel,
 		}, failOnMismatch)
 	}
 
@@ -312,7 +320,7 @@ func checkModelMarker(persistDir, configuredModel, configuredDocPrompt string, f
 		return reportMismatch(&ModelMismatchError{
 			Persisted:           persistedModel,
 			Configured:          configuredModel,
-			Reason:              docPromptMarkerKey,
+			Reason:              ReasonDocPrompt,
 			PersistedDocPrompt:  persistedDocPrompt,
 			ConfiguredDocPrompt: configuredDocPrompt,
 		}, failOnMismatch)

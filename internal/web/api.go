@@ -41,6 +41,12 @@ type serviceAPI interface {
 	// clean shutdown doesn't leave a hung goroutine. Tests
 	// can also call it; nil-safe on the receiver.
 	StopChatSessionsGC()
+
+	// Close releases the resources the service holds (the bleve
+	// keyword index behind the vector layer). The server calls it
+	// after the HTTP listener is down, so in-flight requests can
+	// still read the index.
+	Close() error
 }
 
 // Compile-time assertion that *service.Service satisfies serviceAPI.

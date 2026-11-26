@@ -79,9 +79,11 @@ func newHybridTestService(t *testing.T) *Service {
 	svc, err := NewService(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		// No explicit Close on Service yet; the in-memory
-		// vector DB and bleve index are GC'd with the temp
-		// dir. Bleve flushes on every batch.
+		// Close the service so bleve's background writer stops
+		// before the temp dir is removed. Without this the
+		// writer can recreate index files mid-removal and the
+		// cleanup fails with "directory not empty".
+		require.NoError(t, svc.Close())
 	})
 	return svc
 }

@@ -91,6 +91,17 @@ func (vo *VectorOperations) SetSearchIndex(idx *SearchIndex) {
 	vo.searchIndex = idx
 }
 
+// Close releases the resources held by the vector layer, currently
+// the bleve keyword index. Bleve's background writer keeps the index
+// directory alive until it is closed, so a caller that wipes the
+// store must close it first.
+func (vo *VectorOperations) Close() error {
+	if vo == nil {
+		return nil
+	}
+	return vo.searchIndex.Close()
+}
+
 // IngestDocument processes all chunks of a document.
 func (vo *VectorOperations) IngestDocument(ctx context.Context, doc *models.Document) error {
 	if doc == nil {
