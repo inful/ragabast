@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -106,6 +108,33 @@ func chatDebugLine(ctx context.Context, label, body string) string {
 // prompt bodies to every JSON log shipper in production.
 func writeChatDebugLog(ctx context.Context, label, body string) {
 	slog.Debug(chatDebugLine(ctx, label, body))
+}
+
+// chatTimeoutHint returns an operator-facing hint for a chat
+// request that timed out before the server sent response headers.
+//
+// The Go error alone ("context deadline exceeded (Client.Timeout
+// exceeded while awaiting headers)") names neither the knob that
+// controls the wait nor the usual cause. A gateway that loads the
+// model per request (or unloads it on idle) answers nothing until
+// the model is warm, so a timeout that fires on every request is
+// usually that, not a broken gateway.
+func chatTimeoutHint(err error, timeout time.Duration) string {
+	if err == nil || timeout <= 0 {
+		return ""
+	}
+	if !errors.Is(err, context.DeadlineExceeded) && !isTimeoutError(err) {
+		return ""
+	}
+	return fmt.Sprintf(". The chat API did not answer within %s (ollama.timeout) — "+
+		"raise it if the gateway loads the model per request, or keep the model warm",
+		timeout)
+}
+
+// isTimeoutError reports whether err is a network timeout.
+func isTimeoutError(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // NewOpenAILLMClientWithOptions is the fully-configurable constructor.
@@ -250,7 +279,7 @@ func (c *OpenAILLMClient) do(ctx context.Context, messages []OpenAIMessage, opti
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("failed to call chat API: %w", err)
+		return "", fmt.Errorf("failed to call chat API: %w%s", err, chatTimeoutHint(err, c.httpClient.Timeout))
 	}
 	defer func() {
 		if resp.Body != nil {
