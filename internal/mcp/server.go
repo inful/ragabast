@@ -17,10 +17,11 @@
 //
 // Tools exposed:
 //
-//   - search         wraps Service.HybridSearch
-//   - query          wraps Service.QueryDebugWithOptions (stateless)
-//   - list_documents wraps Service.ListDocumentsPaged
-//   - get_document   wraps Service.GetDocument
+//   - search            wraps Service.HybridSearch
+//   - query             wraps Service.QueryDebugWithOptions (stateless)
+//   - list_documents    wraps Service.ListDocumentsPaged
+//   - get_document      wraps Service.GetDocument
+//   - related_documents wraps Service.RelatedDocuments
 package mcp
 
 import (
@@ -31,6 +32,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/vector"
 )
 
 // mcpSvc is the service subset the MCP tools need. The
@@ -43,6 +45,7 @@ type mcpSvc interface {
 	QueryDebugWithOptions(ctx context.Context, query string, limit int, opts service.LLMOptions) (string, *service.QueryDebugInfo, error)
 	ListDocumentsPaged(ctx context.Context, limit, offset int) ([]models.DocumentInfo, int, error)
 	GetDocument(ctx context.Context, documentID string) (*models.Document, error)
+	RelatedDocuments(ctx context.Context, uid string, limit int) ([]vector.RelatedDocument, error)
 }
 
 // Server wraps the mcp-go server with ragabast-specific
@@ -134,5 +137,15 @@ func (s *Server) registerTools() {
 			mcp.WithString("document_id", mcp.Required(), mcp.Description("The document id.")),
 		),
 		s.getDocumentHandler,
+	)
+
+	s.tools = append(s.tools, "related_documents")
+	s.MCPServer.AddTool(
+		mcp.NewTool("related_documents",
+			mcp.WithDescription("Find the documents most similar to a given document — the corpus' own \"more like this\" map. Useful for navigation, for suggesting adjacent reading, and for finding the sibling of a document."),
+			mcp.WithString("uid", mcp.Required(), mcp.Description("The uid of the document to start from.")),
+			mcp.WithNumber("limit", mcp.Description("Maximum number of related documents. Defaults to 5, capped at 50.")),
+		),
+		s.relatedDocumentsHandler,
 	)
 }

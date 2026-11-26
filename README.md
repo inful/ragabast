@@ -1361,6 +1361,7 @@ Tools exposed:
 | `query` | Chat-mode RAG. Stateless — MCP clients manage conversation context themselves. Returns LLM answer + sources. |
 | `list_documents` | Paginated document list (limit/offset). |
 | `get_document` | Single-document fetch with chunk count, tags, categories, and URLs. |
+| `related_documents` | The documents most similar to a given uid — the corpus' own "more like this" map. Same answers as `GET /api/documents/{uid}/related`. |
 
 The HTTP transport is the primary integration point — central
 ragabast installs become reachable by remote MCP clients without
