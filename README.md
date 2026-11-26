@@ -1296,6 +1296,23 @@ embeddings endpoint:
   /v1/embeddings — point it at the server root instead
 ```
 
+**Leave `embedding_dimensions` unset unless the model really does
+Matryoshka truncation.** A positive value makes ragabast send
+`"dimensions": N` with every request, and strict proxies reject the
+field for models that do not support it:
+
+```
+embeddings API returned status 400 for http://llm-endpoint/v1/embeddings:
+{"error":{"message":"litellm.UnsupportedParamsError: Setting dimensions
+is not supported ... "}}
+```
+
+Unset it (`ollama.embedding_dimensions: 0`) and the model returns its
+natural size — for EmbeddingGemma 2 that is **768 dims**, which is
+what `vectordb.embedding_dimension` must match. The two knobs are
+different: `embedding_dimensions` asks the *server* to truncate,
+`vectordb.embedding_dimension` sizes the *store*.
+
 To switch an existing install to the EmbeddingGemma path:
 
 ```yaml

@@ -101,6 +101,30 @@ func TestOpenAIEmbeddingClient_ErrorResponseKeepsTheBody(t *testing.T) {
 		"the URL must be in the message too")
 }
 
+// TestOpenAIEmbeddingClient_DimensionsRejectedGetsHint pins the
+// hint for the strict-proxy case: LiteLLM and friends reject the
+// `dimensions` field for a model that does not support Matryoshka
+// truncation, and the server's message does not name the knob that
+// controls it.
+func TestOpenAIEmbeddingClient_DimensionsRejectedGetsHint(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"litellm.UnsupportedParamsError: Setting dimensions is not supported for OpenAI text-embedding-3 and later models. To drop it from the call, set litellm.drop_params = True."}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client := NewOpenAIEmbeddingClientWithOptions(srv.URL, "embeddinggemma-2", "", 5*time.Second, 768, 1, "", "")
+
+	_, err := client.GenerateEmbedding(context.Background(), "hello")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ollama.embedding_dimensions",
+		"the hint must name the knob to turn off")
+	assert.Contains(t, err.Error(), "vectordb.embedding_dimension",
+		"the hint must say which knob still sets the store's dimension")
+}
+
 // TestOpenAIEmbeddingClient_SuccessUnaffected pins that the happy
 // path is untouched by the diagnostics change.
 func TestOpenAIEmbeddingClient_SuccessUnaffected(t *testing.T) {

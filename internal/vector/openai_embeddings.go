@@ -9,6 +9,7 @@ import (
 	"log"
 	"maps"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -427,8 +428,9 @@ func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, optio
 				"embedding_provider to embedding_gemma if the server speaks /v2/embed",
 				httpReq.URL, string(respBody))
 		}
-		return nil, fmt.Errorf("embeddings API returned status %d for %s: %s",
-			resp.StatusCode, httpReq.URL, string(respBody))
+		return nil, fmt.Errorf("embeddings API returned status %d for %s: %s%s",
+			resp.StatusCode, httpReq.URL, string(respBody),
+			embeddingParamHint(resp.StatusCode, respBody))
 	}
 
 	var parsed openAIEmbeddingResponse
@@ -460,6 +462,28 @@ func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, optio
 	}
 
 	return out, nil
+}
+
+// embeddingParamHint returns an operator-facing hint for the
+// server errors that come from a request field ragabast can simply
+// stop sending.
+//
+// LiteLLM and other strict proxies reject the `dimensions` field
+// for a model that does not support Matryoshka truncation:
+// "Setting dimensions is not supported for OpenAI text-embedding-3
+// and later models". The server's message names the field but not
+// the knob that controls it, and that knob is easy to confuse with
+// the store's dimension — so spell the fix out.
+func embeddingParamHint(status int, body []byte) string {
+	if status != http.StatusBadRequest {
+		return ""
+	}
+	if !strings.Contains(strings.ToLower(string(body)), "dimensions") {
+		return ""
+	}
+	return " The server rejected the `dimensions` field: the model does not support Matryoshka " +
+		"truncation. Unset ollama.embedding_dimensions (0) so ragabast stops sending it — the model " +
+		"then returns its natural size, which is what vectordb.embedding_dimension must match."
 }
 
 // buildEmbeddingBody marshals the request, merging OpenAIEmbeddingRequest.Options
