@@ -1282,6 +1282,20 @@ curl -sS http://embedder:8080/v2/embed \
 
 Whichever answers with a vector is the one to configure.
 
+**Point the base URL at the server root, not at the endpoint.** The
+clients append their own path (`/v1/embeddings` or `/v2/embed`), so
+`base_url: https://llm-endpoint/v1/embeddings` makes ragabast ask for
+`https://llm-endpoint/v1/embeddings/v1/embeddings` — and the server
+answers 404 for every document, one at a time. `ragabast` refuses to
+start with a config error when the base URL already ends in an
+embeddings endpoint:
+
+```
+✗ config validates: ollama.base_url "https://llm-endpoint/v1/embeddings"
+  points at the embeddings endpoint itself, but the client appends
+  /v1/embeddings — point it at the server root instead
+```
+
 To switch an existing install to the EmbeddingGemma path:
 
 ```yaml
