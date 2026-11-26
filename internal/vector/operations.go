@@ -2,7 +2,9 @@ package vector
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/ragabast/internal/models"
@@ -258,6 +260,129 @@ func (vo *VectorOperations) Search(ctx context.Context, query string, limit int,
 // GetDocumentChunks retrieves all chunks for a document.
 func (vo *VectorOperations) GetDocumentChunks(ctx context.Context, documentID string) ([]*models.Chunk, error) {
 	return vo.db.GetChunksByDocument(ctx, documentID)
+}
+
+// RelatedDocument is one entry in a related-documents answer: the
+// UID of a document that resembles the queried one, its title, and
+// the similarity score of its best matching chunk.
+type RelatedDocument struct {
+	UID   string  `json:"uid"`
+	Title string  `json:"title,omitempty"`
+	Score float64 `json:"score"`
+}
+
+// relatedCandidateFactor is how many chunk hits are fetched per
+// requested document. A document contributes one hit per chunk, so
+// a handful of documents can occupy the top of the search results;
+// the multiplier is what gives the grouping enough candidates to
+// find the requested number of distinct documents.
+const relatedCandidateFactor = 10
+
+// relatedCandidateCap bounds the candidate search so a huge
+// collection cannot turn one request into a full scan.
+const relatedCandidateCap = 200
+
+// RelatedDocuments returns the documents most similar to the
+// document with the given UID.
+//
+// The query vector is the centroid of the document's own chunk
+// embeddings — the document as a whole, with no call to the
+// embeddings server. Candidates come from a vector search and are
+// then grouped by document: a document's score is its best chunk
+// hit. The queried document is never in the answer.
+//
+// Returns ErrNotFound when no document with that UID has been
+// ingested.
+func (vo *VectorOperations) RelatedDocuments(ctx context.Context, uid string, limit int) ([]RelatedDocument, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	chunks, err := vo.db.GetChunksByDocument(ctx, uid)
+	if err != nil {
+		return nil, err
+	}
+	if len(chunks) == 0 {
+		return nil, ErrNotFound
+	}
+
+	embeddings, err := vo.db.EmbeddingsForChunks(ctx, chunks)
+	if err != nil {
+		return nil, err
+	}
+	centroid, err := centroidEmbedding(embeddings)
+	if err != nil {
+		return nil, err
+	}
+
+	candidates := min(limit*relatedCandidateFactor, relatedCandidateCap)
+	hits, err := vo.db.Search(ctx, centroid, candidates, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Group the chunk hits by document: the best hit wins.
+	best := make(map[string]RelatedDocument, len(hits))
+	for _, hit := range hits {
+		if hit.DocumentID == "" || hit.DocumentID == uid {
+			continue
+		}
+		current, seen := best[hit.DocumentID]
+		if seen && current.Score >= float64(hit.Similarity) {
+			continue
+		}
+		best[hit.DocumentID] = RelatedDocument{
+			UID:   hit.UID,
+			Title: hit.DocumentTitle,
+			Score: float64(hit.Similarity),
+		}
+	}
+
+	out := make([]RelatedDocument, 0, len(best))
+	for _, doc := range best {
+		out = append(out, doc)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score == out[j].Score {
+			return out[i].UID < out[j].UID
+		}
+		return out[i].Score > out[j].Score
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// centroidEmbedding averages the given vectors into one query
+// vector. The result is not unit length — the vector store
+// normalizes the query before the cosine comparison, so there is
+// no need to normalize here.
+func centroidEmbedding(embeddings [][]float32) ([]float32, error) {
+	if len(embeddings) == 0 {
+		return nil, ErrNotFound
+	}
+	dim := len(embeddings[0])
+	if dim == 0 {
+		return nil, errors.New("stored embedding has no dimensions")
+	}
+
+	centroid := make([]float32, dim)
+	for _, vec := range embeddings {
+		if len(vec) != dim {
+			return nil, errors.New("stored embeddings have mixed dimensions")
+		}
+		for i, v := range vec {
+			centroid[i] += v
+		}
+	}
+	for i := range centroid {
+		centroid[i] /= float32(len(embeddings))
+	}
+	return centroid, nil
 }
 
 // GetChunk retrieves a specific chunk by ID.

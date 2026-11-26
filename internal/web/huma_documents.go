@@ -106,6 +106,28 @@ type documentFingerprintRequest struct {
 	UID string `path:"uid"`
 }
 
+// documentRelatedRequest carries the path parameter and the limit
+// query parameter for GET /api/documents/{uid}/related. Clamping
+// (default + cap) is the handler's job, like the document list.
+type documentRelatedRequest struct {
+	UID   string `path:"uid"`
+	Limit int    `doc:"Number of related documents to return; default 5, capped at 50." query:"limit,omitempty"`
+}
+
+// relatedDocument is one entry in the related-documents answer.
+type relatedDocument struct {
+	UID   string  `doc:"UID of the related document." json:"uid"`
+	Title string  `doc:"Title of the related document, when it has one." json:"title,omitempty"`
+	Score float64 `doc:"Similarity of the related document's best matching chunk." json:"score"`
+}
+
+// documentRelatedResponseBody is the JSON shape returned by
+// GET /api/documents/{uid}/related.
+type documentRelatedResponseBody struct {
+	UID     string            `doc:"UID of the queried document." json:"uid"`
+	Related []relatedDocument `doc:"Related documents, most similar first." json:"related"`
+}
+
 // registerDocumentsOperations wires GET /api/documents,
 // DELETE /api/documents/{id}, GET /api/documents/{uid}/fingerprint,
 // POST /api/documents/prune, and POST /api/documents/bulk-update.
@@ -202,6 +224,50 @@ func registerDocumentsOperations(api huma.API, svc serviceAPI) {
 				Fingerprint: info.Fingerprint,
 				IngestedAt:  info.IngestedAt,
 			}, nil
+		})
+
+	// GET /api/documents/{uid}/related — "more like this".
+	// Returns the UIDs of the documents that resemble the queried
+	// one, most similar first. The similarity comes from the stored
+	// chunk embeddings, so the call costs no embedding request.
+	registerWithInput[documentRelatedRequest, documentRelatedResponseBody](api,
+		huma.Operation{
+			OperationID: "document-related",
+			Method:      http.MethodGet,
+			Path:        "/api/documents/{uid}/related",
+			Summary:     "Find the documents most similar to an ingested document",
+			Description: "Returns the documents whose content is closest to the document with the given UID, most similar first (default 5, capped at 50). The score is the similarity of the related document's best matching chunk. The queried document is never in the answer. Returns 404 when no document with the UID has been ingested.",
+		},
+		func(ctx context.Context, in *documentRelatedRequest) (*documentRelatedResponseBody, error) {
+			uid := strings.TrimSpace(in.UID)
+			if uid == "" {
+				return nil, huma.Error400BadRequest("uid is required")
+			}
+			limit := in.Limit
+			if limit <= 0 {
+				limit = 5
+			}
+			if limit > 50 {
+				limit = 50
+			}
+
+			related, err := svc.RelatedDocuments(ctx, uid, limit)
+			if err != nil {
+				if errors.Is(err, vector.ErrNotFound) {
+					return nil, huma.Error404NotFound("document not found")
+				}
+				return nil, huma.Error500InternalServerError("find related documents failed")
+			}
+
+			out := make([]relatedDocument, 0, len(related))
+			for _, doc := range related {
+				out = append(out, relatedDocument{
+					UID:   doc.UID,
+					Title: doc.Title,
+					Score: doc.Score,
+				})
+			}
+			return &documentRelatedResponseBody{UID: uid, Related: out}, nil
 		})
 
 	registerPOST[pruneDocumentsRequestBody, pruneDocumentsResponseBody](api,

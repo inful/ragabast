@@ -933,6 +933,41 @@ hard-coded in the handler — they're not currently config knobs.
 Requests for `limit=0` get the default; requests for `limit > 1000`
 are silently clamped to 1000 (the spec was "clamp, don't reject").
 
+### Related documents ("more like this")
+
+`GET /api/documents/{uid}/related` returns the UIDs of the documents
+whose content is closest to the given one — the corpus' own
+"more like this" map, useful for navigation, for suggesting
+adjacent reading, and for finding the sibling of a document.
+
+```
+GET /api/documents/adr-001/related?limit=5
+```
+
+```json
+{
+  "uid": "adr-001",
+  "related": [
+    {"uid": "adr-002", "title": "Second ADR", "score": 0.91},
+    {"uid": "adr-014", "title": "Fourteenth ADR", "score": 0.78}
+  ]
+}
+```
+
+- `limit` defaults to 5 and is capped at 50 (over-asking is
+  clamped, not rejected).
+- `score` is the similarity of the related document's best matching
+  chunk.
+- The queried document is never in the answer.
+- `404` when no document with that UID has been ingested.
+
+The similarity comes from the **stored** chunk embeddings: the
+queried document is represented by the centroid of its own chunks,
+which is then run against the vector store. The call therefore
+costs no embedding request — it works even when the embeddings
+server is unreachable — and it reflects the corpus as it was
+embedded (change the embedder and the map changes with it).
+
 ### Bulk metadata updates
 
 For corpus-wide metadata edits (e.g. applying a new tag to 200

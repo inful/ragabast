@@ -39,6 +39,12 @@ type fakeHumaService struct {
 	appendedTurns     []appendedTurn        // issue #22: recorded exchanges the chat handler asked us to remember
 	frontmatterSug    service.FrontmatterSuggestion
 	frontmatterErr    error
+
+	// related / relatedUID / relatedErr back the
+	// related-documents endpoint tests.
+	related    []vector.RelatedDocument
+	relatedUID string
+	relatedErr error
 }
 
 func (f *fakeHumaService) CheckHealth(_ context.Context) (bool, error) {
@@ -281,6 +287,22 @@ func (f *fakeHumaService) StopChatSessionsGC() {}
 // Close satisfies serviceAPI. The real Service closes the bleve
 // keyword index; test fakes hold no such resource.
 func (f *fakeHumaService) Close() error { return nil }
+
+// RelatedDocuments satisfies serviceAPI. The real Service asks the
+// vector store for the documents closest to a UID; the fake returns
+// a canned list so the endpoint's wiring can be tested.
+func (f *fakeHumaService) RelatedDocuments(_ context.Context, uid string, limit int) ([]vector.RelatedDocument, error) {
+	if f.relatedErr != nil {
+		return nil, f.relatedErr
+	}
+	if f.relatedUID != "" && f.relatedUID != uid {
+		return nil, vector.ErrNotFound
+	}
+	if limit <= 0 || limit > len(f.related) {
+		limit = len(f.related)
+	}
+	return f.related[:limit], nil
+}
 
 // QueryCacheStats satisfies serviceAPI for /api/health/full
 // tests. Reports the cache disabled (capacity 0) so existing
@@ -577,6 +599,12 @@ func (f *fakeService) StopChatSessionsGC() {}
 // Close satisfies serviceAPI. The real Service closes the bleve
 // keyword index; test fakes hold no such resource.
 func (f *fakeService) Close() error { return nil }
+
+// RelatedDocuments satisfies serviceAPI; the fake has no corpus,
+// so it reports "not found".
+func (f *fakeService) RelatedDocuments(_ context.Context, _ string, _ int) ([]vector.RelatedDocument, error) {
+	return nil, vector.ErrNotFound
+}
 
 // QueryCacheStats satisfies serviceAPI; reports zero values
 // (cache disabled) so existing tests don't have to wire

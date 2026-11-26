@@ -888,6 +888,21 @@ func (db *VectorDB) GetChunksByDocument(ctx context.Context, documentID string) 
 	return chunks, nil
 }
 
+// EmbeddingsForChunks returns the stored embedding vectors for the
+// given chunks, in the order the chunks were given.
+//
+// The chunks must all belong to one document — the lookup filters
+// on the first chunk's document_id.
+func (db *VectorDB) EmbeddingsForChunks(ctx context.Context, chunks []*models.Chunk) ([][]float32, error) {
+	if len(chunks) == 0 {
+		return nil, nil
+	}
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	return db.embeddingsForChunksLocked(ctx, chunks)
+}
+
 // DeleteChunk removes a specific chunk from the database.
 func (db *VectorDB) DeleteChunk(ctx context.Context, chunkID string) error {
 	db.mu.Lock()
