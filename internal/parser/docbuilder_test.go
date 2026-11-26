@@ -35,6 +35,44 @@ func TestParseDocument_MarksContentFailuresAsInvalidDocument(t *testing.T) {
 	}
 }
 
+// TestParseDocument_FrontmatterAtEndOfFile pins the case a real
+// corpus hit: a document whose frontmatter runs to the end of the
+// file — no body, and no trailing newline after the closing "---".
+//
+// The parser trimmed the trailing whitespace and then looked for
+// "\n---\n", so the closing delimiter was never found and the file
+// was rejected with "frontmatter delimiter not found" even though
+// it was well formed.
+func TestParseDocument_FrontmatterAtEndOfFile(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\nuid: sample\ntitle: Sample\n---")
+	_, err := p.ParseDocument(raw, "test.md")
+	require.Error(t, err, "a document with no body has no content to index")
+	require.ErrorIs(t, err, models.ErrMissingContent,
+		"the frontmatter must still be parsed — the failure is the missing body, not a missing delimiter")
+
+	// With a body, the same shape parses cleanly.
+	raw = []byte("---\nuid: sample\ntitle: Sample\n---\n\n# Title\nHello\n")
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, "sample", doc.UID)
+	require.Equal(t, "Sample", doc.Title)
+	require.Equal(t, "# Title\nHello", doc.Content)
+}
+
+// TestParseDocument_StillRejectsUnterminatedFrontmatter pins that
+// the relaxed end-of-file rule did not weaken the strict one: a
+// file that opens frontmatter and never closes it is still an
+// error.
+func TestParseDocument_StillRejectsUnterminatedFrontmatter(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	_, err := p.ParseDocument([]byte("---\nuid: sample\n\n# Title\nHello\n"), "test.md")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "frontmatter delimiter not found")
+}
+
 func TestParseDocument_GeneratesFingerprintAndStableID(t *testing.T) {
 	p := NewDocbuilderParser()
 

@@ -79,17 +79,29 @@ func (p *DocbuilderParser) extractFrontmatter(raw []byte) ([]byte, []byte, error
 		return nil, content, nil
 	}
 
-	// Find the end of frontmatter
-	endIdx := bytes.Index(content[4:], []byte("\n---\n"))
-	if endIdx == -1 {
-		return nil, nil, errors.New("frontmatter delimiter not found")
+	rest := content[4:]
+
+	// Find the end of the frontmatter.
+	//
+	// The closing delimiter normally sits on its own line with a
+	// newline after it ("\n---\n"). A document whose frontmatter
+	// runs to the end of the file — no body, no trailing newline —
+	// ends with "\n---" instead, because the trailing whitespace
+	// was trimmed above. That is a valid document, so accept it:
+	// rejecting it reported "frontmatter delimiter not found" for
+	// files that were perfectly well formed.
+	before, after, ok := bytes.Cut(rest, []byte("\n---\n"))
+	if ok {
+		frontmatter := bytes.TrimSpace(before)
+		markdown := bytes.TrimSpace(after)
+		return frontmatter, markdown, nil
+	}
+	if bytes.HasSuffix(rest, []byte("\n---")) {
+		frontmatter := bytes.TrimSpace(rest[:len(rest)-len("\n---")])
+		return frontmatter, nil, nil
 	}
 
-	endIdx += 4 // Adjust for the initial "---\n"
-	frontmatter := bytes.TrimSpace(content[4:endIdx])
-	markdown := bytes.TrimSpace(content[endIdx+6:])
-
-	return frontmatter, markdown, nil
+	return nil, nil, errors.New("frontmatter delimiter not found")
 }
 
 // parseFrontmatter parses YAML frontmatter into the document structure.
