@@ -30,6 +30,11 @@ func TestService_GetStats_ChatModelKeyIsStable(t *testing.T) {
 		// instead of failing.
 		t.Skipf("NewService unavailable in this environment: %v", err)
 	}
+	t.Cleanup(func() {
+		// Close so bleve's writer stops before the temp dir is
+		// removed — otherwise the cleanup can race the writer.
+		_ = svc.Close()
+	})
 
 	stats, err := svc.GetStats(context.Background())
 	require.NoError(t, err)

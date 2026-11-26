@@ -60,6 +60,7 @@ func TestNewService_EmbedderChange_InvalidatesStaleStore(t *testing.T) {
 	svc, err := NewService(cfg)
 	require.NoError(t, err, "an embedder change must not block startup")
 	require.NotNil(t, svc)
+	t.Cleanup(func() { _ = svc.Close() })
 
 	// The stale store moved aside and is still recoverable.
 	matches, err := filepath.Glob(cfg.VectorDB.PersistenceDir + ".stale-*")
@@ -97,8 +98,9 @@ func TestNewService_SameEmbedder_KeepsStore(t *testing.T) {
 	cfg := modelSwapConfig(t)
 	seedModelMarker(t, cfg.VectorDB.PersistenceDir, "embeddinggemma-2")
 
-	_, err := NewService(cfg)
+	svc, err := NewService(cfg)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = svc.Close() })
 
 	matches, globErr := filepath.Glob(cfg.VectorDB.PersistenceDir + ".stale-*")
 	require.NoError(t, globErr)
@@ -134,8 +136,9 @@ func TestNewService_LegacyMarkerWithoutPrompt_KeepsStore(t *testing.T) {
 	cfg.EmbeddingGemma.EmbeddingDocPrompt = "title: {title} | text: "
 	seedModelMarker(t, cfg.VectorDB.PersistenceDir, "embeddinggemma-2")
 
-	_, err := NewService(cfg)
+	svc, err := NewService(cfg)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = svc.Close() })
 
 	matches, globErr := filepath.Glob(cfg.VectorDB.PersistenceDir + ".stale-*")
 	require.NoError(t, globErr)
