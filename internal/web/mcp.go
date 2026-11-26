@@ -8,6 +8,7 @@ import (
 	"github.com/ragabast/internal/mcp"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/vector"
 )
 
 // mcpHTTPHandler builds the streamable-HTTP MCP handler
@@ -62,4 +63,8 @@ func (a serviceAPIToMCPSvc) ListDocumentsPaged(ctx context.Context, limit, offse
 
 func (a serviceAPIToMCPSvc) GetDocument(ctx context.Context, documentID string) (*models.Document, error) {
 	return a.svc.GetDocument(ctx, documentID)
+}
+
+func (a serviceAPIToMCPSvc) RelatedDocuments(ctx context.Context, uid string, limit int) ([]vector.RelatedDocument, error) {
+	return a.svc.RelatedDocuments(ctx, uid, limit)
 }

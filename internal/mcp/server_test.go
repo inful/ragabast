@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/ragabast/internal/models"
 	"github.com/ragabast/internal/service"
+	"github.com/ragabast/internal/vector"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,6 +29,9 @@ type fakeMCPSvc struct {
 
 	document *models.Document
 	docErr   error
+
+	related    []vector.RelatedDocument
+	relatedErr error
 
 	lastSearchFilters service.SearchFilters
 	lastSearchMode    service.SearchMode
@@ -63,20 +67,27 @@ func (f *fakeMCPSvc) GetDocument(_ context.Context, _ string) (*models.Document,
 	return f.document, nil
 }
 
-// TestRegisterTools_RegistersAllFour pins the wire-level
+func (f *fakeMCPSvc) RelatedDocuments(_ context.Context, _ string, _ int) ([]vector.RelatedDocument, error) {
+	if f.relatedErr != nil {
+		return nil, f.relatedErr
+	}
+	return f.related, nil
+}
+
+// TestRegisterTools_RegistersAllTools pins the wire-level
 // contract: when MCP clients call tools/list, they must
-// see exactly the four tools we expose. Adding a new tool
+// see exactly the tools we expose. Adding a new tool
 // without updating this test forces the maintainer to
 // decide whether the tool is part of the public surface
 // or not.
-func TestRegisterTools_RegistersAllFour(t *testing.T) {
+func TestRegisterTools_RegistersAllTools(t *testing.T) {
 	t.Parallel()
 
 	srv := NewServer(&fakeMCPSvc{})
 	names := srv.ToolNames()
 
-	require.ElementsMatch(t, []string{"search", "query", "list_documents", "get_document"}, names,
-		"all four tools must be discoverable via tools/list")
+	require.ElementsMatch(t, []string{"search", "query", "list_documents", "get_document", "related_documents"}, names,
+		"every tool must be discoverable via tools/list")
 }
 
 // TestToolSearch_RoundTrip pins the happy path for the
@@ -240,6 +251,68 @@ func TestToolGetDocument_NotFoundIsError(t *testing.T) {
 	require.NotNil(t, result)
 	require.True(t, result.IsError,
 		"missing document id must surface as an MCP error, not a silent empty result")
+}
+
+// TestToolRelatedDocuments_RoundTrip pins the happy path: a uid
+// returns the related documents with their scores.
+func TestToolRelatedDocuments_RoundTrip(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeMCPSvc{
+		related: []vector.RelatedDocument{
+			{UID: "doc-2", Title: "Second ADR", Score: 0.91},
+			{UID: "doc-3", Score: 0.72},
+		},
+	}
+	srv := NewServer(svc)
+
+	resp := srv.HandleMessage(context.Background(), buildToolsCall(t, "related_documents", map[string]any{
+		"uid":   "doc-1",
+		"limit": float64(5),
+	}))
+
+	result := extractCallToolResult(t, resp)
+	require.NotNil(t, result)
+	require.False(t, result.IsError)
+
+	text := extractText(t, result)
+	require.Contains(t, text, "doc-1", "the queried uid must be named")
+	require.Contains(t, text, "Second ADR", "the related title must be in the answer")
+	require.Contains(t, text, "doc-2", "the related uid must be in the answer")
+	require.Contains(t, text, "0.910", "the similarity score must be in the answer")
+}
+
+// TestToolRelatedDocuments_MissingUIDIsError pins the argument
+// contract: a call without a uid is an error, not a silent empty
+// answer.
+func TestToolRelatedDocuments_MissingUIDIsError(t *testing.T) {
+	t.Parallel()
+
+	srv := NewServer(&fakeMCPSvc{})
+
+	resp := srv.HandleMessage(context.Background(), buildToolsCall(t, "related_documents", map[string]any{}))
+
+	result := extractCallToolResult(t, resp)
+	require.NotNil(t, result)
+	require.True(t, result.IsError, "a missing uid must surface as an MCP error")
+}
+
+// TestToolRelatedDocuments_UnknownUIDIsError pins the not-found
+// contract: an unknown uid is an error the agent can branch on.
+func TestToolRelatedDocuments_UnknownUIDIsError(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeMCPSvc{relatedErr: vector.ErrNotFound}
+	srv := NewServer(svc)
+
+	resp := srv.HandleMessage(context.Background(), buildToolsCall(t, "related_documents", map[string]any{
+		"uid": "missing",
+	}))
+
+	result := extractCallToolResult(t, resp)
+	require.NotNil(t, result)
+	require.True(t, result.IsError,
+		"an unknown uid must surface as an MCP error, not a silent empty result")
 }
 
 // TestToolUnknownNameIsError pins the routing contract:

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/ragabast/internal/vector"
 )
 
 // listDocumentsHandler implements the `list_documents`
@@ -77,6 +78,54 @@ func (s *Server) getDocumentHandler(ctx context.Context, req mcp.CallToolRequest
 	}
 	if len(doc.URLs) > 0 {
 		fmt.Fprintf(&b, "URLs: %s\n", strings.Join(doc.URLs, ", "))
+	}
+	return mcp.NewToolResultText(b.String()), nil
+}
+
+// relatedDocumentsHandler implements the `related_documents`
+// tool. Returns the documents whose content is closest to the
+// given one, most similar first — the corpus' own "more like
+// this" map.
+//
+// The similarity comes from the stored chunk embeddings, so the
+// call costs no embedding request.
+func (s *Server) relatedDocumentsHandler(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	uid := strings.TrimSpace(req.GetString("uid", ""))
+	if uid == "" {
+		return mcp.NewToolResultError("uid is required"), nil
+	}
+	limit := int(req.GetFloat("limit", 5))
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 50 {
+		limit = 50
+	}
+
+	related, err := s.svc.RelatedDocuments(ctx, uid, limit)
+	if err != nil {
+		if errors.Is(err, vector.ErrNotFound) || strings.Contains(err.Error(), "not found") {
+			return mcp.NewToolResultError(
+				fmt.Sprintf("document %q not found", uid)), nil
+		}
+		return mcp.NewToolResultError(
+			fmt.Sprintf("find related documents failed: %v", err)), nil
+	}
+
+	if len(related) == 0 {
+		return mcp.NewToolResultText(
+			fmt.Sprintf("No related documents found for %q.\n", uid)), nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Documents related to `%s`:\n\n", uid)
+	for _, doc := range related {
+		title := doc.Title
+		if title == "" {
+			title = doc.UID
+		}
+		fmt.Fprintf(&b, "- **%s** (`%s`) — similarity %.3f\n",
+			title, doc.UID, doc.Score)
 	}
 	return mcp.NewToolResultText(b.String()), nil
 }
