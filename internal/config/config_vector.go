@@ -19,4 +19,19 @@ type VectorDBConfig struct {
 
 	// EmbeddingDimension is the expected dimension of embeddings.
 	EmbeddingDimension int `env:"VECTOR_DB_DIMENSION" yaml:"embedding_dimension"`
+
+	// FailOnModelMismatch decides what happens when the store on
+	// disk was written by a different embedding model than the
+	// one now configured.
+	//
+	// false (the default): ragabast invalidates the stale corpus
+	// by moving the store aside (see the QuarantineStore helper)
+	// and starting fresh — the vectors are unusable under a new
+	// embedder, and the source documents can be re-embedded. The
+	// stale copy stays on disk until the operator deletes it.
+	//
+	// true: the server refuses to start and names
+	// `ragabast vector reset --force` as the fix. Use this when
+	// you would rather stop and look before anything moves.
+	FailOnModelMismatch bool `env:"VECTOR_DB_FAIL_ON_MODEL_MISMATCH" yaml:"fail_on_model_mismatch"`
 }

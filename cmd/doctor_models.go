@@ -52,4 +52,16 @@ var knownModelDimensions = map[string]int{
 	// generativelanguage.googleapis.com/v1beta/openai)
 	"gemini-embedding-001": 768,
 	"gemini-embedding-2":   3072,
+
+	// Google's EmbeddingGemma family (open weights, Apache 2.0).
+	// Both generations emit 768 dims natively and support Matryoshka
+	// truncation to 512 / 256 / 128 — a configured truncation
+	// dimension overrides the value below.
+	"embeddinggemma":           768,
+	"embeddinggemma-2":         768,
+	"embedding-gemma":          768,
+	"embedding-gemma-2":        768,
+	"google/embeddinggemma":    768,
+	"google/embeddinggemma-2":  768,
+	"google/embedding-gemma-2": 768,
 }

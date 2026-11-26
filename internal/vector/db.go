@@ -146,17 +146,95 @@ func NewVectorDBWithOptions(opts Options) (*VectorDB, error) {
 	}, nil
 }
 
+// ModelMismatchError reports that the on-disk store was written by
+// a different embedding model than the one now configured. The
+// vectors live in the old model's vector space, so they cannot be
+// searched under the new one — the corpus has to be re-embedded.
+//
+// It wraps ErrModelMismatch, so `errors.Is(err, ErrModelMismatch)`
+// keeps working for callers that only care that a mismatch
+// happened; the typed fields let a caller name both models without
+// parsing the message.
+type ModelMismatchError struct {
+	// Persisted is the model name recorded in the store's marker.
+	Persisted string
+	// Configured is the model name the store is being opened with.
+	Configured string
+}
+
+func (e *ModelMismatchError) Error() string {
+	return fmt.Sprintf(
+		"persisted embedding model %q differs from configured %q; "+
+			"vectors from %q cannot be searched safely under %q",
+		e.Persisted, e.Configured, e.Persisted, e.Configured)
+}
+
+// Is makes errors.Is(err, ErrModelMismatch) true.
+func (e *ModelMismatchError) Is(target error) bool { return target == ErrModelMismatch }
+
+// QuarantineStore moves an on-disk store aside so a fresh one can be
+// created in its place, and returns where the stale copy went.
+//
+// Quarantine, not delete: the stale vectors are useless under a new
+// embedder, but an operator who mistyped a model name should still
+// be able to get their corpus back. The caller is expected to log
+// loudly and tell the operator the stale copy can be deleted.
+//
+// The keyword index normally lives inside the persistence dir
+// (<persistence_dir>/search) and moves with it. A separately
+// configured keyword index dir (the documented NFS setup) is moved
+// aside too — leaving it in place would keep chunks whose vectors
+// are gone.
+func QuarantineStore(persistenceDir, keywordIndexDir string) (string, error) {
+	if persistenceDir == "" {
+		return "", errors.New("persistence dir is empty; refusing to quarantine")
+	}
+
+	stamp := time.Now().Format("20060102-150405")
+	target := persistenceDir + ".stale-" + stamp
+
+	if err := os.Rename(persistenceDir, target); err != nil {
+		if os.IsNotExist(err) {
+			// Nothing on disk — nothing to invalidate.
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to move %s aside: %w", persistenceDir, err)
+	}
+
+	kwDir := ResolveKeywordIndexPath("", keywordIndexDir)
+	if kwDir != "" && !strings.HasPrefix(kwDir, persistenceDir+string(os.PathSeparator)) {
+		if err := os.Rename(kwDir, kwDir+".stale-"+stamp); err != nil && !os.IsNotExist(err) {
+			return target, fmt.Errorf("failed to move keyword index %s aside: %w", kwDir, err)
+		}
+	}
+
+	// Recreate the empty dir so the fresh store can open without
+	// the chromem-go "no such directory" error.
+	if err := os.MkdirAll(persistenceDir, 0o755); err != nil {
+		return target, fmt.Errorf("failed to recreate %s: %w", persistenceDir, err)
+	}
+	return target, nil
+}
+
 // checkModelMarker reads the on-disk marker file at persistDir
 // and compares its contents to configuredModel. Behavior:
 //
 //   - Marker missing: nothing to check. Return nil. The first
 //     AddChunk call will write the marker.
+//   - configuredModel empty ("unknown"): nothing to compare
+//     against. Return nil without touching the marker. An
+//     operator who never declared a model name (the /v2/embed
+//     path has no model field on the wire) must not be blocked
+//     by a marker written under a different provider's name.
 //   - Marker present, matches configured: return nil.
 //   - Marker present, differs: if failOnMismatch is true,
 //     return an error wrapping ErrModelMismatch with both
 //     names. Otherwise log a warning and return nil so the
 //     constructor succeeds.
 func checkModelMarker(persistDir, configuredModel string, failOnMismatch bool) error {
+	if configuredModel == "" {
+		return nil
+	}
 	path := filepath.Join(persistDir, modelMarkerFile)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -169,15 +247,12 @@ func checkModelMarker(persistDir, configuredModel string, failOnMismatch bool) e
 	if persisted == configuredModel {
 		return nil
 	}
-	msg := fmt.Sprintf(
-		"persisted embedding model %q differs from configured %q; "+
-			"vectors from %q cannot be searched safely under %q",
-		persisted, configuredModel, persisted, configuredModel)
+	mismatch := &ModelMismatchError{Persisted: persisted, Configured: configuredModel}
 	if failOnMismatch {
-		return fmt.Errorf("%w: %s; recover with `ragabast vector reset --force` "+
-			"then `ragabast ingest` to rebuild from source documents", ErrModelMismatch, msg)
+		return fmt.Errorf("%w; recover with `ragabast vector reset --force` "+
+			"then `ragabast ingest` to rebuild from source documents", mismatch)
 	}
-	log.Printf("⚠ %s; proceeding because FailOnModelMismatch=false", msg)
+	log.Printf("⚠ %s; proceeding because FailOnModelMismatch=false", mismatch.Error())
 	return nil
 }
 

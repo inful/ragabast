@@ -110,3 +110,102 @@ func TestVectorDB_AllowMismatchWhenOverrideSet(t *testing.T) {
 	require.NoError(t, err, "override must downgrade the failure mode")
 	require.NotNil(t, db)
 }
+
+// TestVectorDB_UnknownModelSkipsMarkerCheck pins the "unknown
+// model" case: an operator who never declared a model name (the
+// /v2/embed path has no model field on the wire) must not be
+// blocked by a marker written under another provider's name.
+// The check is skipped, not failed.
+func TestVectorDB_UnknownModelSkipsMarkerCheck(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, modelMarkerFile),
+		[]byte("nomic-embed-text:v1.5"), 0o600))
+
+	db, err := NewVectorDB("test", 4, dir, "")
+	require.NoError(t, err, "an undeclared model must not trip the marker check")
+	require.NotNil(t, db)
+}
+
+// TestVectorDB_RejectsMismatchedGemmaModel pins the model swap
+// detection on the /v2/embed path: the operator declares which
+// model the server runs (embedding_gemma.model), and swapping it
+// is caught exactly like the OpenAI-compat path.
+func TestVectorDB_RejectsMismatchedGemmaModel(t *testing.T) {
+	dir := t.TempDir()
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, modelMarkerFile),
+		[]byte("embeddinggemma"), 0o600))
+
+	_, err := NewVectorDB("test", 768, dir, "embeddinggemma-2")
+	require.Error(t, err, "a model swap must be rejected before the server serves searches")
+	assert.Contains(t, err.Error(), "embeddinggemma",
+		"error must name the persisted model")
+	assert.Contains(t, err.Error(), "embeddinggemma-2",
+		"error must name the configured model")
+	assert.Contains(t, err.Error(), "ragabast vector reset --force",
+		"error must name the recovery command")
+}
+
+// TestModelMismatchError_CarriesBothModels pins the typed error:
+// callers that want to act on a mismatch (quarantine the stale
+// store) need both model names without parsing the message, and
+// errors.Is must keep matching the ErrModelMismatch sentinel.
+func TestModelMismatchError_CarriesBothModels(t *testing.T) {
+	mismatch := &ModelMismatchError{Persisted: "embeddinggemma", Configured: "embeddinggemma-2"}
+
+	assert.Equal(t, "embeddinggemma", mismatch.Persisted)
+	assert.Equal(t, "embeddinggemma-2", mismatch.Configured)
+	require.ErrorIs(t, mismatch, ErrModelMismatch,
+		"the typed error must still satisfy errors.Is(err, ErrModelMismatch)")
+	assert.Contains(t, mismatch.Error(), "embeddinggemma")
+}
+
+// TestQuarantineStore_MovesStoreAsideAndRecreatesDir pins the
+// invalidation behavior: the stale store is MOVED, not deleted
+// (a mistyped model name must be recoverable), and the original
+// path exists again so a fresh store can open there.
+func TestQuarantineStore_MovesStoreAsideAndRecreatesDir(t *testing.T) {
+	dir := t.TempDir()
+	storeDir := filepath.Join(dir, "vectors")
+	require.NoError(t, os.MkdirAll(filepath.Join(storeDir, "search"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(storeDir, modelMarkerFile),
+		[]byte("old-model"), 0o600))
+
+	stale, err := QuarantineStore(storeDir, "")
+	require.NoError(t, err)
+	require.NotEmpty(t, stale, "the quarantine path must be reported so the operator can find it")
+	assert.DirExists(t, stale, "the stale store must still be on disk")
+	assert.FileExists(t, filepath.Join(stale, modelMarkerFile),
+		"the stale store keeps its marker — nothing is lost")
+	assert.DirExists(t, storeDir, "the original path must exist again for the fresh store")
+}
+
+// TestQuarantineStore_MovesSeparateKeywordIndex pins the split-store
+// setup: a keyword index outside the persistence dir must move too,
+// otherwise it keeps chunks whose vectors are gone.
+func TestQuarantineStore_MovesSeparateKeywordIndex(t *testing.T) {
+	dir := t.TempDir()
+	storeDir := filepath.Join(dir, "vectors")
+	kwDir := filepath.Join(dir, "keyword")
+	require.NoError(t, os.MkdirAll(storeDir, 0o755))
+	require.NoError(t, os.MkdirAll(kwDir, 0o755))
+
+	stale, err := QuarantineStore(storeDir, kwDir)
+	require.NoError(t, err)
+	require.NotEmpty(t, stale)
+	assert.NoDirExists(t, kwDir, "the keyword index must be moved aside too")
+	matches, globErr := filepath.Glob(kwDir + ".stale-*")
+	require.NoError(t, globErr)
+	assert.Len(t, matches, 1, "the keyword index must be recoverable next to its old path")
+}
+
+// TestQuarantineStore_MissingDirIsNotAnError pins the empty-store
+// case: nothing to invalidate is not a failure.
+func TestQuarantineStore_MissingDirIsNotAnError(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "does-not-exist")
+
+	stale, err := QuarantineStore(dir, "")
+	require.NoError(t, err)
+	assert.Empty(t, stale, "nothing was moved, so nothing is reported")
+}

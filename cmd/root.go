@@ -172,7 +172,7 @@ func (c *DoctorCmd) checkStoreEmbeddingDimension(cfg *config.Config) {
 		cfg.VectorDB.CollectionName,
 		cfg.VectorDB.EmbeddingDimension,
 		dir,
-		cfg.Ollama.EmbeddingModel,
+		cfg.EffectiveEmbeddingModel(),
 	)
 	if err != nil {
 		// A model-mismatch error deserves a louder, more
@@ -181,6 +181,10 @@ func (c *DoctorCmd) checkStoreEmbeddingDimension(cfg *config.Config) {
 		// both models and the recovery command.
 		if errors.Is(err, vector.ErrModelMismatch) {
 			log.Printf("⚠ %v\n", err)
+			if !cfg.VectorDB.FailOnModelMismatch {
+				log.Printf("  The next server start invalidates the stale store by itself " +
+					"(it is moved aside, not deleted) and re-embeds from source documents.\n")
+			}
 			return
 		}
 		log.Printf("⚠ could not open vector store at %s: %v\n", dir, err)
@@ -221,9 +225,21 @@ func (c *DoctorCmd) checkStoreEmbeddingDimension(cfg *config.Config) {
 // vectordb.embedding_dimension. Mismatch is a WARNING (not an
 // error) so doctor can run in CI; the warning text names the
 // recovery command.
+//
+// A configured truncation dimension wins over the model's full
+// size: when the provider is asked for N dims (Matryoshka), the
+// server returns N dims, so comparing against the full size
+// would report a mismatch that does not exist.
 func (c *DoctorCmd) checkEmbeddingDimensionMatch(cfg *config.Config) {
-	model := cfg.Ollama.EmbeddingModel
+	model := cfg.EffectiveEmbeddingModel()
 	configured := cfg.VectorDB.EmbeddingDimension
+
+	if model == "" {
+		log.Printf("⚠ no embedding model declared; cannot verify the dimension. "+
+			"If you set this manually, confirm the configured dimension (%d) matches what the server returns.\n",
+			configured)
+		return
+	}
 
 	expected, ok := knownModelDimensions[model]
 	if !ok {
@@ -232,6 +248,10 @@ func (c *DoctorCmd) checkEmbeddingDimensionMatch(cfg *config.Config) {
 			"Open a PR to cmd/doctor_models.go if you want it added.",
 			model, configured)
 		return
+	}
+
+	if n := cfg.EffectiveEmbeddingDimensions(); n > 0 {
+		expected = n
 	}
 
 	if expected == configured {

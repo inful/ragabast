@@ -88,6 +88,52 @@ func TestApplyEnvOverrides_EmbeddingGemmaConcurrency(t *testing.T) {
 		"EMBEDDING_GEMMA_CONCURRENCY must populate EmbeddingGemmaConfig.EmbeddingConcurrency")
 }
 
+// TestApplyEnvOverrides_EmbeddingGemmaModel pins the declared
+// model name: the /v2/embed wire shape carries no model field, so
+// the operator declares which model the server runs. The name is
+// what the vector store's model marker records, which is how a
+// model swap is detected.
+func TestApplyEnvOverrides_EmbeddingGemmaModel(t *testing.T) {
+	t.Setenv("EMBEDDING_GEMMA_MODEL", "embeddinggemma-2")
+	cfg := DefaultConfig()
+	cfg.ApplyEnvOverrides()
+	require.Equal(t, "embeddinggemma-2", cfg.EmbeddingGemma.Model,
+		"EMBEDDING_GEMMA_MODEL must populate EmbeddingGemmaConfig.Model")
+}
+
+// TestEffectiveEmbeddingModel_PerProvider pins which model name
+// the store marker records: the OpenAI-compat path names its model
+// on the wire, the /v2/embed path has no model field, so the
+// operator declares it.
+func TestEffectiveEmbeddingModel_PerProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ollama.EmbeddingModel = "nomic-embed-text:v1.5"
+	require.Equal(t, "nomic-embed-text:v1.5", cfg.EffectiveEmbeddingModel(),
+		"the OpenAI-compat path uses the wire model name")
+
+	cfg.EmbeddingProvider = "embedding_gemma"
+	cfg.EmbeddingGemma.Model = "embeddinggemma-2"
+	require.Equal(t, "embeddinggemma-2", cfg.EffectiveEmbeddingModel(),
+		"the /v2/embed path uses the declared model name")
+
+	cfg.EmbeddingGemma.Model = ""
+	require.Empty(t, cfg.EffectiveEmbeddingModel(),
+		"an undeclared model is unknown — the marker check is skipped")
+}
+
+// TestEffectiveEmbeddingDimensions_PerProvider pins which
+// dimension the store must be sized for. A configured truncation
+// dimension wins over the model's full size on both paths.
+func TestEffectiveEmbeddingDimensions_PerProvider(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Ollama.EmbeddingDimensions = 256
+	require.Equal(t, 256, cfg.EffectiveEmbeddingDimensions())
+
+	cfg.EmbeddingProvider = "embedding_gemma"
+	cfg.EmbeddingGemma.EmbeddingDimensions = 512
+	require.Equal(t, 512, cfg.EffectiveEmbeddingDimensions())
+}
+
 // TestValidate_EmbeddingGemmaProvider_RequiresBaseURL pins
 // the validation guard: switching to the EmbeddingGemma
 // provider without setting a base URL is a config error.

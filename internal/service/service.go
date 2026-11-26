@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -77,14 +78,9 @@ func (s *Service) buildDocbuilderURL(uid string) string {
 
 // NewService creates a new service instance.
 func NewService(cfg *config.Config) (*Service, error) {
-	db, err := vector.NewVectorDB(
-		cfg.VectorDB.CollectionName,
-		cfg.VectorDB.EmbeddingDimension,
-		cfg.VectorDB.PersistenceDir,
-		cfg.Ollama.EmbeddingModel,
-	)
+	db, err := openVectorDB(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize vector DB: %w", err)
+		return nil, err
 	}
 
 	embeddings, err := vector.NewEmbeddingClientFromOptions(vector.EmbeddingClientOptions{
@@ -155,9 +151,71 @@ func NewService(cfg *config.Config) (*Service, error) {
 			MaxTurns: cfg.Ragabast.ChatSessionMaxTurns,
 			IdleTTL:  cfg.Ragabast.ChatSessionIdleTTL,
 		}),
-		embedModel: cfg.Ollama.EmbeddingModel,
+		embedModel: cfg.EffectiveEmbeddingModel(),
 		now:        time.Now,
 	}, nil
+}
+
+// openVectorDB opens the vector store, invalidating a stale corpus
+// when the embedder changed.
+//
+// The store on disk records the embedder that wrote it (the model
+// marker). When that name differs from the configured one, the
+// stored vectors live in the old model's vector space and cannot
+// answer a search under the new one, so the corpus has to be
+// re-embedded. Rather than leaving the operator with a corpus that
+// silently returns nonsense, the stale store is invalidated here:
+// it is moved aside (not deleted — a mistyped model name stays
+// recoverable) and the server starts with an empty store.
+//
+// vectordb.fail_on_model_mismatch turns the automatic invalidation
+// off: the server then refuses to start and names
+// `ragabast vector reset --force` as the fix.
+func openVectorDB(cfg *config.Config) (*vector.VectorDB, error) {
+	db, err := vector.NewVectorDB(
+		cfg.VectorDB.CollectionName,
+		cfg.VectorDB.EmbeddingDimension,
+		cfg.VectorDB.PersistenceDir,
+		cfg.EffectiveEmbeddingModel(),
+	)
+	if err == nil {
+		return db, nil
+	}
+
+	var mismatch *vector.ModelMismatchError
+	if !errors.As(err, &mismatch) || cfg.VectorDB.FailOnModelMismatch {
+		return nil, fmt.Errorf("failed to initialize vector DB: %w", err)
+	}
+
+	stale, qErr := vector.QuarantineStore(cfg.VectorDB.PersistenceDir, cfg.VectorDB.KeywordIndexDir)
+	if qErr != nil {
+		return nil, fmt.Errorf("failed to invalidate the store written by %q: %w", mismatch.Persisted, qErr)
+	}
+	log.Printf("service: the vector store was embedded with %q but the configured embedder is %q. "+
+		"The old vectors cannot be searched under the new embedder, so they were invalidated",
+		mismatch.Persisted, mismatch.Configured)
+	logStaleStorePath(stale)
+	log.Printf("service: re-ingest your documents (ragabast ingest, or let docbuilder re-push them) to rebuild the index")
+
+	db, err = vector.NewVectorDB(
+		cfg.VectorDB.CollectionName,
+		cfg.VectorDB.EmbeddingDimension,
+		cfg.VectorDB.PersistenceDir,
+		cfg.EffectiveEmbeddingModel(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize vector DB after invalidating the stale store: %w", err)
+	}
+	return db, nil
+}
+
+// logStaleStorePath tells the operator where the invalidated store
+// went, so it can be inspected or deleted.
+func logStaleStorePath(stale string) {
+	if stale == "" {
+		return
+	}
+	log.Printf("service: the previous store was moved to %s. Delete it once the corpus has been re-ingested", stale)
 }
 
 // SetNow replaces the service's clock for tests that need a
