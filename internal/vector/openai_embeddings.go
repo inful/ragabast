@@ -403,7 +403,7 @@ func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, optio
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call embeddings API: %w", err)
+		return nil, fmt.Errorf("failed to call embeddings API at %s: %w", httpReq.URL, err)
 	}
 	defer func() {
 		if resp.Body != nil {
@@ -417,7 +417,18 @@ func (c *OpenAIEmbeddingClient) embed(ctx context.Context, texts []string, optio
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("embeddings API returned status %d: %s", resp.StatusCode, string(respBody))
+		// Name the URL: a 404 here is almost always the wrong
+		// path (the server speaks something else), and the
+		// operator cannot guess which URL was called.
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("embeddings API returned status 404 for %s: %s. "+
+				"This client speaks the OpenAI shape (POST /v1/embeddings); a 404 usually means the "+
+				"server exposes a different path — check ollama.base_url, or switch "+
+				"embedding_provider to embedding_gemma if the server speaks /v2/embed",
+				httpReq.URL, string(respBody))
+		}
+		return nil, fmt.Errorf("embeddings API returned status %d for %s: %s",
+			resp.StatusCode, httpReq.URL, string(respBody))
 	}
 
 	var parsed openAIEmbeddingResponse

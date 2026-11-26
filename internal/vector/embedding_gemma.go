@@ -318,7 +318,7 @@ func (c *EmbeddingGemmaClient) ValidateConnection(ctx context.Context) error {
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("embeddings server not accessible at %s: %w", c.baseURL, err)
+		return fmt.Errorf("embeddings server not accessible at %s: %w", httpReq.URL, err)
 	}
 	defer func() {
 		if resp.Body != nil {
@@ -331,7 +331,11 @@ func (c *EmbeddingGemmaClient) ValidateConnection(ctx context.Context) error {
 		// can see what went wrong without paging through
 		// a multi-megabyte error page.
 		preview, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("embeddings server returned status %d: %s", resp.StatusCode, string(preview))
+		// Name the URL: a 404 here is almost always the wrong
+		// path -- this client speaks /v2/embed, and a server
+		// that speaks the OpenAI shape answers 404 on it.
+		return fmt.Errorf("embeddings server returned status %d for %s: %s",
+			resp.StatusCode, httpReq.URL, string(preview))
 	}
 	return nil
 }
@@ -373,7 +377,7 @@ func (c *EmbeddingGemmaClient) embed(ctx context.Context, texts []string) ([][]f
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call embeddings API: %w", err)
+		return nil, fmt.Errorf("failed to call embeddings API at %s: %w", httpReq.URL, err)
 	}
 	defer func() {
 		if resp.Body != nil {
@@ -387,7 +391,19 @@ func (c *EmbeddingGemmaClient) embed(ctx context.Context, texts []string) ([][]f
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("embeddings API returned status %d: %s", resp.StatusCode, string(respBody))
+		// Name the URL: a 404 here is almost always the wrong
+		// path -- this client speaks /v2/embed, and a server
+		// that speaks the OpenAI shape answers 404 on it.
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("embeddings API returned status 404 for %s: %s. "+
+				"This client speaks POST /v2/embed; a 404 usually means the server exposes the "+
+				"OpenAI shape (/v1/embeddings) instead — use the default provider with "+
+				"ollama.base_url and ollama.embedding_model, or point embedding_gemma.base_url "+
+				"at a server that speaks /v2/embed",
+				httpReq.URL, string(respBody))
+		}
+		return nil, fmt.Errorf("embeddings API returned status %d for %s: %s",
+			resp.StatusCode, httpReq.URL, string(respBody))
 	}
 
 	out, err := decodeEmbeddingGemmaResponse(respBody, len(texts))
