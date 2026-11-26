@@ -752,6 +752,23 @@ func (c *Config) ApplyEnvOverrides() {
 	}
 }
 
+// isEmbeddingsEndpointURL reports whether a base URL points at an
+// embeddings ENDPOINT rather than at a server root.
+//
+// The clients append their own path ("/v1/embeddings" or
+// "/v2/embed"), so a base URL that already ends in an embeddings
+// endpoint produces a doubled path — the server answers 404 and the
+// operator sees one failed document at a time instead of a config
+// error.
+func isEmbeddingsEndpointURL(raw string) bool {
+	trimmed := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	return strings.HasSuffix(lower, "/embeddings") || strings.HasSuffix(lower, "/embed")
+}
+
 // Validate checks if the configuration is valid.
 func (c *Config) Validate() error {
 	var errs []string
@@ -772,6 +789,33 @@ func (c *Config) Validate() error {
 	// duplicate that here.
 	if c.EmbeddingProvider == "embedding_gemma" && c.EmbeddingGemma.BaseURL == "" {
 		errs = append(errs, "embedding_gemma.base_url is required when embedding_provider is \"embedding_gemma\"")
+	}
+	// Catch the two base-URL mistakes that otherwise surface as a
+	// 404 at ingest time, one document at a time:
+	//
+	//   - an OpenAI-compatible endpoint pasted into
+	//     embedding_gemma.base_url (the client appends /v2/embed,
+	//     so the server is asked for .../v1/embeddings/v2/embed)
+	//   - the embeddings endpoint itself pasted into
+	//     ollama.base_url (the client appends /v1/embeddings, so
+	//     the server is asked for .../embeddings/v1/embeddings)
+	//
+	// Both are the same operator mistake: pointing a base URL at
+	// a full endpoint instead of the server root.
+	if c.EmbeddingProvider == "embedding_gemma" && isEmbeddingsEndpointURL(c.EmbeddingGemma.BaseURL) {
+		errs = append(errs, fmt.Sprintf(
+			"embedding_gemma.base_url %q points at an OpenAI-compatible embeddings endpoint, but this "+
+				"provider speaks POST /v2/embed — point it at the server root, or use the default "+
+				"provider (ollama.base_url + ollama.embedding_model) for an OpenAI-compatible server",
+			c.EmbeddingGemma.BaseURL,
+		))
+	}
+	if c.EmbeddingProvider != "embedding_gemma" && isEmbeddingsEndpointURL(c.Ollama.BaseURL) {
+		errs = append(errs, fmt.Sprintf(
+			"ollama.base_url %q points at the embeddings endpoint itself, but the client appends "+
+				"/v1/embeddings — point it at the server root instead",
+			c.Ollama.BaseURL,
+		))
 	}
 	if c.EmbeddingGemma.Timeout < 0 {
 		errs = append(errs, "embedding_gemma.timeout must be >= 0")
