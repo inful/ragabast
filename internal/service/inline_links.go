@@ -132,6 +132,13 @@ func SourceLinkURL(s models.SearchResult) string {
 			return s.DocbuilderURL
 		}
 		return ""
+	case models.SourceWeb:
+		// A mirrored page: the citation points at the original
+		// page, not at the mirror in the corpus.
+		if len(s.DocumentURLs) > 0 {
+			return s.DocumentURLs[0]
+		}
+		return ""
 	case models.SourceDocbuilder, models.SourceUnknown:
 		// Historical behavior: prefer DocbuilderURL → DocumentURLs[0].
 		// SourceUnknown (zero value) lands here so pre-SourceKind

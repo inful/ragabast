@@ -157,6 +157,13 @@ func (s *Service) IngestDocument(ctx context.Context, content string) (*models.D
 	if err := chunkAndIngest(ctx, s.chunker, s.vectorOps, doc); err != nil {
 		return nil, err
 	}
+
+	// Mirror the external pages this document requests. The
+	// request is the author's decision; the operator's allowlist
+	// decides what may actually be fetched. Failures here never
+	// fail the document's ingest — the mirror is a convenience,
+	// not part of the document.
+	s.mirrorWebSources(ctx, doc)
 	// Invalidate the query cache (issue #13): any new
 	// chunk could shift result rankings. Conservative
 	// whole-cache clear — operators see a brief hit-rate

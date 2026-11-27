@@ -45,6 +45,11 @@ type fakeHumaService struct {
 	related    []vector.RelatedDocument
 	relatedUID string
 	relatedErr error
+
+	// webMirrors / allowedWebHosts back the web-mirrors endpoint
+	// tests.
+	webMirrors      []service.WebMirror
+	allowedWebHosts []string
 }
 
 func (f *fakeHumaService) CheckHealth(_ context.Context) (bool, error) {
@@ -287,6 +292,22 @@ func (f *fakeHumaService) StopChatSessionsGC() {}
 // Close satisfies serviceAPI. The real Service closes the bleve
 // keyword index; test fakes hold no such resource.
 func (f *fakeHumaService) Close() error { return nil }
+
+// WebMirrors satisfies serviceAPI. The real Service returns the
+// mirrored pages from its registry; the fake returns a canned list.
+func (f *fakeHumaService) WebMirrors() []service.WebMirror {
+	return f.webMirrors
+}
+
+// AllowedWebHosts satisfies serviceAPI; the fake reports no
+// allowlist.
+func (f *fakeHumaService) AllowedWebHosts() []string {
+	return f.allowedWebHosts
+}
+
+// StartWebMirrorRefresher satisfies serviceAPI; the fake has no
+// mirrors to refresh.
+func (f *fakeHumaService) StartWebMirrorRefresher(context.Context) {}
 
 // RelatedDocuments satisfies serviceAPI. The real Service asks the
 // vector store for the documents closest to a UID; the fake returns
@@ -605,6 +626,16 @@ func (f *fakeService) Close() error { return nil }
 func (f *fakeService) RelatedDocuments(_ context.Context, _ string, _ int) ([]vector.RelatedDocument, error) {
 	return nil, vector.ErrNotFound
 }
+
+// WebMirrors satisfies serviceAPI; the fake has no mirrors.
+func (f *fakeService) WebMirrors() []service.WebMirror { return nil }
+
+// AllowedWebHosts satisfies serviceAPI; the fake allows no hosts.
+func (f *fakeService) AllowedWebHosts() []string { return nil }
+
+// StartWebMirrorRefresher satisfies serviceAPI; the fake has no
+// mirrors to refresh.
+func (f *fakeService) StartWebMirrorRefresher(context.Context) {}
 
 // QueryCacheStats satisfies serviceAPI; reports zero values
 // (cache disabled) so existing tests don't have to wire

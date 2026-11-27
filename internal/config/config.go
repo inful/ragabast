@@ -49,6 +49,13 @@ type Config struct {
 	// field is BaseURL.
 	EmbeddingGemma EmbeddingGemmaConfig `yaml:"embedding_gemma,omitempty"`
 
+	// WebIngest holds the operator's policy for mirroring
+	// external web pages into the corpus. The requests come from
+	// documents (`web_sources:` frontmatter); the allowlist here
+	// decides which hosts ragabast may reach. Empty = the feature
+	// is off.
+	WebIngest WebIngestConfig `yaml:"web_ingest,omitempty"`
+
 	// Vector database configuration.
 	VectorDB VectorDBConfig `yaml:"vectordb"`
 
@@ -420,6 +427,42 @@ func (c *Config) ApplyEnvOverrides() {
 	}
 	if v := os.Getenv("EMBEDDING_GEMMA_MODEL"); v != "" {
 		c.EmbeddingGemma.Model = v
+	}
+
+	// Web-mirror policy: the hosts ragabast may fetch from, plus
+	// the fetch bounds. An empty allowlist leaves the feature off.
+	if v, ok := os.LookupEnv("WEB_INGEST_ALLOWED_HOSTS"); ok {
+		// Comma-separated host list; empty entries are dropped
+		// and whitespace around entries is trimmed (same
+		// convention as the CORS origin list).
+		parts := strings.Split(v, ",")
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+		c.WebIngest.AllowedHosts = out
+	}
+	if v, ok := os.LookupEnv("WEB_INGEST_REFRESH_INTERVAL"); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.WebIngest.RefreshInterval = d
+		}
+	}
+	if v, ok := os.LookupEnv("WEB_INGEST_TIMEOUT"); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			c.WebIngest.Timeout = d
+		}
+	}
+	if v, ok := os.LookupEnv("WEB_INGEST_MAX_BYTES"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.WebIngest.MaxBytes = n
+		}
+	}
+	if v, ok := os.LookupEnv("WEB_INGEST_MAX_MIRRORS"); ok {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			c.WebIngest.MaxMirrors = n
+		}
 	}
 	if v := os.Getenv("EMBEDDING_GEMMA_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -825,6 +868,9 @@ func (c *Config) Validate() error {
 	}
 	if c.EmbeddingGemma.EmbeddingConcurrency < 0 {
 		errs = append(errs, "embedding_gemma.embedding_concurrency must be >= 0")
+	}
+	if webErr := c.WebIngest.Validate(); webErr != nil {
+		errs = append(errs, webErr.Error())
 	}
 
 	// Validate Ollama config.

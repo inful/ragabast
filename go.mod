@@ -22,7 +22,10 @@ require (
 )
 
 require (
+	github.com/JohannesKaufmann/html-to-markdown v1.6.0 // indirect
+	github.com/PuerkitoBio/goquery v1.9.2 // indirect
 	github.com/RoaringBitmap/roaring/v2 v2.14.5 // indirect
+	github.com/andybalholm/cascadia v1.3.2 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.2 // indirect
 	github.com/blevesearch/bleve_index_api v1.4.1 // indirect

@@ -32,6 +32,18 @@ type serviceAPI interface {
 	ClearChatSession(sessionID string)
 	GetDocument(ctx context.Context, documentID string) (*models.Document, error)
 	RelatedDocuments(ctx context.Context, uid string, limit int) ([]vector.RelatedDocument, error)
+
+	// WebMirrors returns the mirrored web pages and their state —
+	// the effective list of what was requested, allowed, and
+	// fetched.
+	WebMirrors() []service.WebMirror
+
+	// AllowedWebHosts returns the hosts ragabast may fetch from.
+	AllowedWebHosts() []string
+
+	// StartWebMirrorRefresher starts the background refresher that
+	// re-fetches the mirrored web pages whose interval elapsed.
+	StartWebMirrorRefresher(ctx context.Context)
 	GetDocumentFingerprint(ctx context.Context, uid string) (service.DocumentFingerprintInfo, bool, error)
 	GetNormalizedTags(ctx context.Context) ([]string, error)
 	GetNormalizedCategories(ctx context.Context) ([]string, error)

@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ragabast/internal/chunker"
@@ -13,6 +15,7 @@ import (
 	"github.com/ragabast/internal/parser"
 	"github.com/ragabast/internal/service/querycache"
 	"github.com/ragabast/internal/vector"
+	"github.com/ragabast/internal/webfetch"
 )
 
 // Service orchestrates the RAG system operations. Its methods are
@@ -46,6 +49,17 @@ type Service struct {
 	// the same reason as embedModel: it changes how the query is
 	// embedded, so it belongs in the cache key.
 	embedQueryPrompt string
+
+	// webMirrors is the registry of mirrored web pages (see
+	// web_mirror.go). webMirrorsOnce guards its lazy load.
+	webMirrors     *webMirrorState
+	webMirrorsOnce sync.Once
+
+	// fetchWebPage fetches a page for the web-mirror path. It is
+	// a field so tests can inject a fake: the real fetch refuses
+	// loopback addresses, which is where test servers live. A nil
+	// value means the real webfetch.Fetch.
+	fetchWebPage func(ctx context.Context, rawURL string, policy webfetch.Policy) (*webfetch.Result, error)
 
 	// now is the reference clock for Hugo "don't publish"
 	// preflight checks (issue #97). Defaults to time.Now in
