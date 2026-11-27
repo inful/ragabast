@@ -888,6 +888,13 @@ func (s *Server) startAndWait(ctx context.Context) error {
 		}
 	}()
 
+	// Refresh the mirrored web pages whose interval has elapsed.
+	// The context is the server's lifetime, so the refresher stops
+	// with the server.
+	if s.service != nil {
+		s.service.StartWebMirrorRefresher(ctx)
+	}
+
 	<-ctx.Done()
 
 	fmt.Println("🛑 Shutting down server...")

@@ -330,3 +330,31 @@ func TestParseDocument_NoMetadataWhenFrontmatterIsOnlyTyped(t *testing.T) {
 	require.Nil(t, parsed.Metadata,
 		"docs with no untyped frontmatter keys must have nil Metadata so omitempty drops the BSON/JSON field")
 }
+
+// TestParseDocument_ExtractsWebSources pins the request side of
+// the web-mirror feature: a document names the external pages it
+// wants mirrored through its `web_sources:` frontmatter.
+//
+// The request is the author's decision; whether ragabast may fetch
+// it is the operator's (the allowed-hosts policy). This test only
+// pins that the request survives the parse.
+func TestParseDocument_ExtractsWebSources(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\nuid: sample\nweb_sources:\n  - https://example.com/spec\n  - https://example.com/other\n---\n\n# Title\nHello\n")
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Equal(t, []string{"https://example.com/spec", "https://example.com/other"}, doc.WebSources)
+}
+
+// TestParseDocument_NoWebSourcesIsEmpty pins that a document that
+// requests nothing has no requests — the mirroring path must not
+// treat an absent field as an empty request.
+func TestParseDocument_NoWebSourcesIsEmpty(t *testing.T) {
+	p := NewDocbuilderParser()
+
+	raw := []byte("---\nuid: sample\n---\n\n# Title\nHello\n")
+	doc, err := p.ParseDocument(raw, "test.md")
+	require.NoError(t, err)
+	require.Empty(t, doc.WebSources)
+}

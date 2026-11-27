@@ -36,6 +36,7 @@ func registerHumaOperations(router http.Handler, api huma.API, svc serviceAPI, l
 	// per-document size cap. Issue #98: "Ingest GitLab issues".
 	registerIngestGitLabIssueOperation(api, svc, limiter, maxIngestDocumentBytes)
 	registerDocumentsOperations(api, svc)
+	registerWebMirrorOperations(api, svc)
 	registerLinkSuggestionsOperation(api, svc)
 	registerFrontmatterOperation(api, svc)
 	registerIngestJobsOperations(api, router, ingestQueue, maxIngestDocumentBytes)

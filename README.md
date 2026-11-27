@@ -69,6 +69,16 @@ YAML to find the knob they need.
 | `VECTOR_DB_DIMENSION` | `embedding_dimension` | `768` | Embedding vector size. Must match the truncated dimension if `OLLAMA_EMBEDDING_DIMENSIONS > 0`. |
 | `VECTOR_DB_FAIL_ON_MODEL_MISMATCH` | `fail_on_model_mismatch` | `false` | When the store was embedded with a different model: `false` invalidates the stale corpus automatically (moved aside), `true` refuses to start. |
 
+#### `web_ingest` — mirroring external web pages
+
+| Env var | YAML key | Default | Description |
+|---|---|---|---|
+| `WEB_INGEST_ALLOWED_HOSTS` | `allowed_hosts` | `""` (off) | Comma-separated hosts ragabast may fetch from. A document's `web_sources:` request is honoured only for these hosts. Empty = ragabast never fetches anything. |
+| `WEB_INGEST_REFRESH_INTERVAL` | `refresh_interval` | `0` (never) | How often a mirrored page is re-fetched to see whether it changed. |
+| `WEB_INGEST_TIMEOUT` | `timeout` | `15s` | Per-fetch timeout. |
+| `WEB_INGEST_MAX_BYTES` | `max_bytes` | `4194304` (4 MiB) | Cap on a fetched page. |
+| `WEB_INGEST_MAX_MIRRORS` | `max_mirrors` | `200` | Cap on how many mirrored pages the corpus may hold. |
+
 #### `server` — HTTP layer
 
 | Env var | YAML key | Default | Description |
@@ -932,6 +942,60 @@ The default page size (25) and the upper clamp (1000) are
 hard-coded in the handler — they're not currently config knobs.
 Requests for `limit=0` get the default; requests for `limit > 1000`
 are silently clamped to 1000 (the spec was "clamp, don't reject").
+
+### Mirroring external web pages
+
+Some documentation is mostly a pointer to an external specification.
+A document can ask ragabast to mirror such a page into the corpus,
+so the RAG answers from the spec instead of from the pointer.
+
+**The request** is the author's, in the document's frontmatter:
+
+```markdown
+---
+uid: "semver"
+title: "Semantic Versioning"
+web_sources:
+  - https://semver.org/spec/v2.0.0.html
+---
+```
+
+**The allowance** is the operator's, in the ragabast config:
+
+```yaml
+web_ingest:
+  allowed_hosts:
+    - semver.org
+```
+
+The effective list is the intersection — requested ∩ allowed. A
+document can only ever cause a fetch of a host the operator listed,
+so no document can make ragabast download whatever it names; a
+request for an unlisted host is skipped with a warning and the
+document still ingests. An empty allowlist leaves the feature off
+entirely.
+
+Each mirrored page becomes a document of its own:
+
+- **UID** — derived from the URL (`web:semver.org-spec-v2.0.0.html`),
+  so the same page always maps to the same document and re-posting
+  updates it instead of duplicating it.
+- **Source kind** — `web`, so mirrors are distinguishable from your
+  native documents in the chat citations and the search filters.
+- **Citation** — the original page URL, so an answer built from the
+  mirror links back to semver.org, not to your mirror.
+- **Garbage collection** — when the last document that requested a
+  page stops requesting it, the mirror is removed from the corpus.
+
+`GET /api/web-mirrors` returns the effective list: the allowed
+hosts, and every mirror with the documents that requested it and
+the outcome of the last fetch.
+
+The fetcher is guarded: http/https only, public addresses only
+(the host is resolved and checked before the connection, and the
+connection is made to the checked address), a response size cap, a
+timeout, a redirect cap, and no link-following — the links inside a
+fetched page are converted to markdown, never fetched.
 
 ### Related documents ("more like this")
 

@@ -37,6 +37,12 @@ const (
 	// internal/web/huma_ingest_gitlab.go, and the UID prefix is
 	// `gitlab:{path}:{iid}`.
 	SourceGitLab SourceKind = "gitlab"
+
+	// SourceWeb marks a document/chunk that is a mirror of an
+	// external web page, fetched because a document requested it
+	// via its `web_sources:` frontmatter. The UID prefix is
+	// `web:`.
+	SourceWeb SourceKind = "web"
 )
 
 // IsValid reports whether s is one of the known SourceKind values.
@@ -49,7 +55,7 @@ const (
 // SourceUnknown doc comment.
 func (s SourceKind) IsValid() bool {
 	switch s {
-	case SourceUnknown, SourceDocbuilder, SourceGitLab:
+	case SourceUnknown, SourceDocbuilder, SourceGitLab, SourceWeb:
 		return true
 	}
 	return false
@@ -81,6 +87,8 @@ func (s SourceKind) SourceIcon() template.HTML {
 	switch s {
 	case SourceGitLab:
 		return template.HTML(`<span class="source-icon source-icon-gitlab" title="GitLab issue">gitlab</span>`)
+	case SourceWeb:
+		return template.HTML(`<span class="source-icon source-icon-web" title="Mirrored web page">web</span>`)
 	case SourceDocbuilder:
 		return template.HTML(`<span class="source-icon source-icon-docbuilder" title="Document">doc</span>`)
 	case SourceUnknown:
@@ -107,6 +115,8 @@ func (s SourceKind) DisplayName() string {
 	switch s {
 	case SourceGitLab:
 		return "GitLab"
+	case SourceWeb:
+		return "Web"
 	case SourceDocbuilder:
 		return "Docbuilder"
 	case SourceUnknown:
@@ -135,6 +145,8 @@ func (s SourceKind) InlineSourceIcon() string {
 	switch s {
 	case SourceGitLab:
 		return "🦊"
+	case SourceWeb:
+		return "🌐"
 	case SourceDocbuilder:
 		return "📄"
 	case SourceUnknown:

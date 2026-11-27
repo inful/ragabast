@@ -87,6 +87,20 @@ type Document struct {
 	// Nil by default so omitempty drops the field for documents
 	// without source-specific metadata.
 	Metadata map[string]string `bson:"metadata,omitempty" json:"metadata,omitempty"`
+
+	// WebSources lists the external pages this document wants
+	// mirrored into the corpus.
+	//
+	// The request is the author's decision (the document names
+	// the pages it references); whether ragabast may fetch them is
+	// the operator's (web_ingest.allowed_hosts). Only the
+	// intersection is ever fetched, so a document can never make
+	// the server reach a host the operator did not allow.
+	//
+	// The mirrored pages become documents of their own (source
+	// kind "web"), so they are chunked, embedded, and cited like
+	// any other document.
+	WebSources []string `bson:"web_sources,omitempty" json:"web_sources,omitempty"`
 }
 
 // NewDocument creates a new document with default values.

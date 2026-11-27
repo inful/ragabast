@@ -190,6 +190,20 @@ func (p *DocbuilderParser) parseFrontmatter(data []byte, doc *models.Document) e
 		}
 	}
 
+	// Extract the external pages this document wants mirrored into
+	// the corpus. The request is the author's decision; whether
+	// ragabast may fetch it is the operator's (the allowed-hosts
+	// policy). Only the intersection is ever fetched.
+	if sources, ok := frontmatter["web_sources"].([]any); ok {
+		for _, src := range sources {
+			if srcStr, ok := src.(string); ok {
+				if trimmed := strings.TrimSpace(srcStr); trimmed != "" {
+					doc.WebSources = append(doc.WebSources, trimmed)
+				}
+			}
+		}
+	}
+
 	// Extract title. Strict precedence: the frontmatter `title:`
 	// field is THE title. There is no H1 fallback — a document
 	// without a frontmatter `title:` has an empty doc.Title,
@@ -247,6 +261,7 @@ var typedFrontmatterKeys = map[string]struct{}{
 	"created_at":  {},
 	"updated_at":  {},
 	"source_kind": {},
+	"web_sources": {},
 	// hugoFields (draft, date, publishdate, expirydate, etc.) are
 	// matched case-insensitively and would also be excluded, but
 	// we don't need them in the metadata bag anyway.

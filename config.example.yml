@@ -138,9 +138,45 @@ ollama:
 #   embedding_concurrency: 1
 #   timeout: 30s
 
+# Mirroring external web pages into the corpus.
+#
+# Two halves, two owners:
+#
+#   - The REQUEST comes from a document: its `web_sources:`
+#     frontmatter names the pages the author wants mirrored. The
+#     requests are scattered across the corpus by design —
+#     docbuilder aggregates many projects, so there is no single
+#     list to keep.
+#   - The ALLOWANCE is here: the hosts ragabast may reach. A
+#     document can only ever cause a fetch of a host on this list,
+#     so no document can make ragabast download whatever it names.
+#
+# The effective list is the intersection: requested ∩ allowed.
+# A request for a host that is not allowed is skipped with a
+# warning — the document still ingests, the mirror does not exist.
+#
+# An empty allowlist leaves the feature off: ragabast never
+# fetches anything.
+# Env: WEB_INGEST_ALLOWED_HOSTS (comma-separated),
+#      WEB_INGEST_REFRESH_INTERVAL, WEB_INGEST_TIMEOUT,
+#      WEB_INGEST_MAX_BYTES, WEB_INGEST_MAX_MIRRORS.
+web_ingest:
+  allowed_hosts:
+    - semver.org
+  # How often a mirrored page is re-fetched to see whether it
+  # changed. 0 = fetch once (right for a specification, wrong for a
+  # changelog).
+  refresh_interval: 0h
+  # Per-fetch bounds. The fetcher also refuses private and
+  # reserved addresses, follows at most 3 redirects, and never
+  # follows the links inside a fetched page.
+  timeout: 15s
+  max_bytes: 4194304
+  # Cap on how many mirrored pages the corpus may hold.
+  max_mirrors: 200
+
 vectordb:
-  persistence_dir: data/vectors
-  # Optional: override the bleve keyword index path. Leave empty
+  persistence_dir: data/vectors  # Optional: override the bleve keyword index path. Leave empty
   # (the default) to keep the index at <persistence_dir>/search.
   # Set this when the persistence_dir is on a remote filesystem
   # (NFS, shared mount) — bleve uses mmap for reads and does not
